@@ -44,6 +44,7 @@ import { useDragAndDrop } from './hooks/useDragAndDrop';
 import { useComponentPalette } from './hooks/useComponentPalette';
 import { useReactFlowNodes } from './hooks/useReactFlowNodes';
 import { useAutoSkillEdges } from './hooks/useAutoSkillEdges';
+import { useWorkflowOpsListener } from './hooks/useWorkflowOpsListener';
 import { useCopyPaste } from './hooks/useCopyPaste';
 import { useWebSocket } from './contexts/WebSocketContext';
 import { useNodeStatusStore } from './stores/nodeStatusStore';
@@ -220,6 +221,9 @@ const DashboardContent: React.FC = () => {
     setNodes,
     setEdges,
   });
+  // Apply runtime canvas mutations pushed from the backend (e.g.,
+  // Agent Builder tools called by the LLM mid-execution).
+  useWorkflowOpsListener({ nodes, edges, setNodes, setEdges });
   const { copySelectedNodes, pasteNodes } = useCopyPaste({ nodes, edges, setNodes, setEdges, saveNodeParameters });
 
   // Override all agent nodes to use the global model. Agent membership is

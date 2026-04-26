@@ -322,6 +322,12 @@ interface WebSocketContextValue {
   // Generic request method
   sendRequest: <T = any>(type: string, data?: Record<string, any>) => Promise<T>;
 
+  // Generic broadcast subscription. Returns an unsubscribe fn.
+  // Use for ad-hoc backend-pushed events like `workflow_ops_apply`
+  // (see server/services/status_broadcaster.send_custom_event) so a
+  // new listener doesn't require a new switch case + state slice.
+  addEventListener: (type: string, handler: (data: any) => void) => () => void;
+
   // Node Parameters
   getNodeParameters: (nodeId: string) => Promise<NodeParameters | null>;
   getAllNodeParameters: (nodeIds: string[]) => Promise<Record<string, NodeParameters>>;
@@ -512,6 +518,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const wsRef = useRef<ReconnectingWebSocket | null>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
+  // Generic broadcast subscribers ({type -> Set<handler>}) for events
+  // surfaced via send_custom_event on the backend. Lets new features
+  // listen for ad-hoc broadcasts without growing the switch statement
+  // or the context state shape.
+  const eventListenersRef = useRef<Map<string, Set<(data: any) => void>>>(new Map());
   // Pending-send queue for backpressure + replay across reconnects.
   // Drained inside `ws.onopen` after the init burst. Source of truth
   // for currentWorkflowId is `useAppStore.getState().currentWorkflow?.id`
@@ -1167,8 +1178,21 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           console.error('[WebSocket] Server error:', message.code, message.message);
           break;
 
-        default:
+        default: {
+          // Generic broadcast dispatch -- any listener registered via
+          // addEventListener(type, handler) gets the message data. Lets
+          // backend-only features (e.g. workflow_ops_apply) ship without
+          // adding a switch case + state slice every time.
+          const listeners = eventListenersRef.current.get(type);
+          if (listeners && listeners.size > 0) {
+            for (const handler of listeners) {
+              try { handler(data); } catch (err) {
+                console.error(`[WebSocket] Listener for '${type}' threw:`, err);
+              }
+            }
+          }
           break;
+        }
       }
     } catch (error) {
       console.error('[WebSocket] Failed to parse message:', error);
@@ -2668,6 +2692,23 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // Generic request method
     sendRequest,
+
+    // Generic broadcast subscription
+    addEventListener: (type: string, handler: (data: any) => void) => {
+      let set = eventListenersRef.current.get(type);
+      if (!set) {
+        set = new Set();
+        eventListenersRef.current.set(type, set);
+      }
+      set.add(handler);
+      return () => {
+        const current = eventListenersRef.current.get(type);
+        if (current) {
+          current.delete(handler);
+          if (current.size === 0) eventListenersRef.current.delete(type);
+        }
+      };
+    },
 
     // Node Parameters
     getNodeParameters: getNodeParametersAsync,
