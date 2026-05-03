@@ -119,17 +119,42 @@ failures (toast, log, retry, etc.).
 
 ## Current consumers
 
-| Service | WS handler | Module |
+| Service | Trigger | Module |
 |---|---|---|
-| Auto-add Skill on tool connect | `evaluate_auto_skill` | `server/services/auto_skill.py` |
+| Auto-add Skill on tool connect | WS request `evaluate_auto_skill` (frontend on edge connect/disconnect) | `server/services/auto_skill.py` |
+| Agent Builder runtime tools | WS broadcast `workflow_ops_apply` (backend, mid-execution) | `server/nodes/tool/agent_builder.py` |
+
+## Two delivery modes
+
+The protocol carries the same `{operations: [...]}` payload in both
+directions:
+
+* **Request/response** (auto-skill pattern). Frontend sends a WS
+  request, the backend handler returns ops in the response, the
+  frontend applies them. Used when the user takes an action on the
+  canvas and the backend decides what should happen.
+
+* **Push broadcast** (Agent Builder pattern). Backend code (often
+  inside an LLM tool execution) calls
+  `services.status_broadcaster.send_custom_event('workflow_ops_apply',
+  {workflow_id, caller_node_id, operations})`. The frontend's
+  `useWorkflowOpsListener` hook (mounted in `Dashboard`) subscribes
+  via `WebSocketContext.addEventListener('workflow_ops_apply', ...)`,
+  filters by current `workflow_id`, and pipes ops through
+  `applyOperations`. Events targeting other workflows surface as a
+  sonner toast with a "Switch" action.
 
 ## Adding a new consumer
 
-1. Write a backend service that returns `{operations: [...]}` using
-   the builder helpers in `services/workflow_ops`.
-2. Add a thin `@ws_handler` that calls into the service.
-3. On the frontend, send the WS request and pass the returned
-   `operations` into `applyOperations`. No new applier code.
-4. If you need a new op type, follow the steps in the docstring of
+1. Write a backend module that builds a workflow-ops batch using
+   the helpers in `services/workflow_ops`.
+2. Choose a delivery mode:
+   * Request/response: add a thin `@ws_handler` that returns
+     `{success: True, operations: [...]}`. On the frontend send the
+     WS request and pipe the result into `applyOperations`.
+   * Push broadcast: call `send_custom_event('workflow_ops_apply',
+     {workflow_id, caller_node_id, operations})`. No frontend code
+     -- the existing listener handles it.
+3. If you need a new op type, follow the steps in the docstring of
    `server/services/workflow_ops.py` (mirror the TypedDict in TS,
    add an apply branch, document here).
