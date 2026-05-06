@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from core.database import Database
     from core.cache import CacheService
     from services.ai import AIService
-    from services.maps import MapsService
+    from nodes.location._service import MapsService
     from services.text import TextService
     from nodes.android._dispatcher import AndroidService
     from services.temporal import TemporalExecutor

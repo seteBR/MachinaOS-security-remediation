@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from core.config import Settings
     from core.database import Database
     from services.ai import AIService
-    from services.maps import MapsService
+    from nodes.location._service import MapsService
     from services.text import TextService
     from nodes.android._dispatcher import AndroidService
 

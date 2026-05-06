@@ -20,7 +20,7 @@ from core.credentials_database import CredentialsDatabase
 _clog("core imports done")
 from services.ai import AIService
 _clog("AIService imported")
-from services.maps import MapsService
+from nodes.location._service import MapsService
 from services.workflow import WorkflowService
 _clog("WorkflowService imported")
 from services.auth import AuthService

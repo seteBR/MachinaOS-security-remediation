@@ -40,7 +40,7 @@ from core.config import Settings
 from core.logging import configure_logging, get_logger, setup_websocket_logging, shutdown_websocket_logging
 from core.tracing import init_tracing
 _startup_log("Importing routers...")
-from routers import workflow, database, maps, nodejs_compat, websocket, webhook, auth, credentials, schemas
+from routers import workflow, database, nodejs_compat, websocket, webhook, auth, credentials, schemas
 _startup_log("All imports complete")
 
 # Initialize settings, logging, and tracing.
@@ -83,7 +83,6 @@ async def lifespan(app: FastAPI):
     container.wire(modules=[
         "routers.workflow",
         "routers.database",
-        "routers.maps",
         "routers.nodejs_compat",
         "routers.websocket",
         "routers.webhook",
@@ -471,10 +470,10 @@ app.include_router(schemas.router)  # Per-node output schema endpoint (GET /api/
 # moves to the self-contained pattern (nodes/<plugin>/_router.py +
 # register_router from __init__.py), the corresponding line below is
 # removed. Tracked in the plugin-extraction plan.
-app.include_router(maps.router)
 app.include_router(webhook.router)
-# Twitter, Google, and Android routers moved to nodes/<plugin>/_router.py
-# and are mounted via the plugin-registered loop below.
+# Twitter, Google, Android, and Maps routers moved (Maps deleted in
+# Wave 11.I milestone N -- all four endpoints were dead, the validate-key
+# path now flows through CREDENTIAL_REGISTRY's GoogleMapsCredential._probe).
 
 # Plugin-registered routers — populated by `nodes/<plugin>/__init__.py`
 # at import time via `register_router(...)`. Plugins are imported during

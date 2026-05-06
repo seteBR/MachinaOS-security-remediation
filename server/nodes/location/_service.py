@@ -1,4 +1,19 @@
-"""Google Maps service for location operations."""
+"""Google Maps service for location operations.
+
+Wave 11.I, milestone N: relocated from ``services/maps.py`` into the
+location plugin folder. Three nodes consume it through the DI container
+(``container.maps_service()``): ``gmaps_create``, ``gmaps_locations``,
+``gmaps_nearby_places``. The container provider in ``core/container.py``
+imports ``MapsService`` from this module.
+
+API-key validation lives in :mod:`._credentials`'s
+:class:`GoogleMapsCredential._probe` (Wave 11.I scaffold) -- the legacy
+REST endpoint at ``/python/maps/validate-key`` was retired with this
+move. Workflow nodes still call ``MapsService.create_map`` /
+``geocode_location`` / ``find_nearby_places`` directly via the DI
+container; the dead ``/python/<name>/execute`` REST endpoints (also
+retired) duplicated the same paths.
+"""
 
 import time
 import googlemaps
