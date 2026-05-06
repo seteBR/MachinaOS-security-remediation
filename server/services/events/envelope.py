@@ -9,7 +9,7 @@ ride as CloudEvents extension attributes — fully compliant with the spec.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Mapping, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -46,6 +46,156 @@ class WorkflowEvent(BaseModel):
             source=f"legacy://{event_type}",
             type=event_type,
             data=payload,
+        )
+
+    # ---- Typed factory classmethods (Wave 11.I, milestone Q) -----------
+    #
+    # Mirrors the official `cloudevents` Python SDK's `from_http` /
+    # `to_http` convenience pattern. Each factory enforces the same
+    # source/type/subject conventions across the codebase so callers
+    # don't hand-construct envelopes with drifting URI shapes.
+
+    @classmethod
+    def credential(
+        cls,
+        provider: str,
+        action: Literal[
+            "api_key.saved",
+            "api_key.deleted",
+            "api_key.validated",
+            "oauth.connected",
+            "oauth.disconnected",
+            "oauth.validated",
+        ],
+        **extra: Any,
+    ) -> "WorkflowEvent":
+        """Credential mutation event (matches the existing
+        ``broadcast_credential_event`` contract locked by
+        ``test_credential_broadcasts.py``)."""
+        return cls(
+            source="machinaos://services/credentials",
+            type=f"credential.{action}",
+            subject=provider,
+            data={"provider": provider, **extra} if extra else {"provider": provider},
+        )
+
+    @classmethod
+    def connection_status(
+        cls,
+        plugin: str,
+        *,
+        connected: bool,
+        subject: Optional[str] = None,
+        data: Optional[Mapping[str, Any]] = None,
+    ) -> "WorkflowEvent":
+        """Plugin connection-state event (whatsapp / telegram / android-relay
+        / twitter / google connect-disconnect)."""
+        return cls(
+            source=f"machinaos://nodes/{plugin}",
+            type=f"{plugin}.connection.{'opened' if connected else 'closed'}",
+            subject=subject,
+            data=dict(data) if data else {},
+        )
+
+    @classmethod
+    def oauth_completed(
+        cls,
+        provider: str,
+        *,
+        identifier: str,
+        data: Optional[Mapping[str, Any]] = None,
+    ) -> "WorkflowEvent":
+        """OAuth callback completion. ``identifier`` is the user-facing
+        handle (email / username) used as ``subject``."""
+        return cls(
+            source=f"machinaos://nodes/{provider}",
+            type=f"{provider}.oauth.completed",
+            subject=identifier,
+            data=dict(data) if data else {"identifier": identifier},
+        )
+
+    @classmethod
+    def message(
+        cls,
+        plugin: str,
+        direction: Literal["sent", "received"],
+        data: Mapping[str, Any],
+    ) -> "WorkflowEvent":
+        """Plugin-emitted message event (whatsapp / telegram / email
+        send + receive). ``subject`` defaults to the chat / sender id
+        in the payload (cast to str — Telegram uses numeric chat ids),
+        falling back to None."""
+        payload = dict(data)
+        raw_subject = (
+            payload.get("chat_id") or payload.get("from_id") or payload.get("sender")
+        )
+        return cls(
+            source=f"machinaos://nodes/{plugin}",
+            type=f"{plugin}.message.{direction}",
+            subject=str(raw_subject) if raw_subject is not None else None,
+            data=payload,
+        )
+
+    @classmethod
+    def team_event(
+        cls,
+        team_id: str,
+        kind: str,
+        data: Mapping[str, Any],
+    ) -> "WorkflowEvent":
+        """Agent-team lifecycle / task event (created / dissolved /
+        task.added / task.claimed / task.completed / task.failed /
+        message.sent)."""
+        return cls(
+            source="machinaos://services/agent_team",
+            type=f"team.{kind}",
+            subject=team_id,
+            data=dict(data),
+        )
+
+    @classmethod
+    def workflow_lifecycle(
+        cls,
+        stage: Literal[
+            "deployment.started",
+            "deployment.stopped",
+            "lock.acquired",
+            "lock.released",
+            "execution.started",
+            "execution.stopped",
+        ],
+        *,
+        workflow_id: str,
+        data: Optional[Mapping[str, Any]] = None,
+    ) -> "WorkflowEvent":
+        """Workflow lifecycle event. Carries ``workflow_id`` both as
+        ``subject`` (CloudEvents convention) and as the
+        ``workflow_id`` extension attribute (existing reader
+        contract)."""
+        return cls(
+            source="machinaos://services/workflow",
+            type=f"workflow.{stage}",
+            subject=workflow_id,
+            workflow_id=workflow_id,
+            data=dict(data) if data else {},
+        )
+
+    @classmethod
+    def task_completed(
+        cls,
+        task_id: str,
+        *,
+        status: Literal["completed", "error"],
+        agent: str,
+        data: Optional[Mapping[str, Any]] = None,
+    ) -> "WorkflowEvent":
+        """Delegated child-agent completion. Type discriminates on
+        succeeded vs failed; ``taskTrigger`` filters by both."""
+        return cls(
+            source="machinaos://services/agent",
+            type=f"agent.task.{'succeeded' if status == 'completed' else 'failed'}",
+            subject=task_id,
+            data=dict(data) if data else {"task_id": task_id, "agent": agent, "status": status},
         )
 
     def matches_type(self, pattern: str) -> bool:

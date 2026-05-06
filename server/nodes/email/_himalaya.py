@@ -14,23 +14,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.logging import get_logger
+from services.plugin.singleton import ServiceSingleton
 
 logger = get_logger(__name__)
 
 
-class HimalayaService:
-    """Manages Himalaya CLI configuration and execution."""
+class HimalayaService(ServiceSingleton):
+    """Manages Himalaya CLI configuration and execution.
 
-    _instance: Optional["HimalayaService"] = None
+    Inherits ``instance`` / ``reset_instance`` from
+    :class:`ServiceSingleton`."""
 
     def __init__(self):
         self._binary_path: Optional[str] = None
-
-    @classmethod
-    def get_instance(cls) -> "HimalayaService":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
 
     async def ensure_binary(self) -> str:
         """Detect himalaya binary in PATH. Returns path or raises."""
@@ -265,4 +261,4 @@ class HimalayaService:
 
 def get_himalaya_service() -> HimalayaService:
     """Get singleton instance."""
-    return HimalayaService.get_instance()
+    return HimalayaService.instance()

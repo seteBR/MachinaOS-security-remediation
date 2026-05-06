@@ -49,6 +49,8 @@ from telegram.error import BadRequest, NetworkError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.helpers import escape_markdown
 
+from services.plugin.singleton import ServiceSingleton
+
 from ._credentials import TelegramCredential
 
 logger = logging.getLogger(__name__)
@@ -99,10 +101,14 @@ def _split_text(text: str, limit: int) -> list[str]:
     return chunks
 
 
-class TelegramService:
-    """Singleton service for Telegram bot operations."""
+class TelegramService(ServiceSingleton):
+    """Singleton service for Telegram bot operations.
 
-    _instance: Optional["TelegramService"] = None
+    Inherits :meth:`ServiceSingleton.instance` for the lazy accessor.
+    Overrides :meth:`reset_instance` because telegram has a side effect
+    on reset — it must drain the bot's polling task before clearing.
+    """
+
     _lock = asyncio.Lock()
 
     def __init__(self):
@@ -115,15 +121,10 @@ class TelegramService:
         self._owner_chat_id: Optional[int] = None
 
     @classmethod
-    def get_instance(cls) -> "TelegramService":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    @classmethod
-    async def reset_instance(cls):
-        if cls._instance:
-            await cls._instance.disconnect()
+    async def reset_instance(cls):  # type: ignore[override]
+        existing = cls.__dict__.get("_instance")
+        if existing is not None:
+            await existing.disconnect()
             cls._instance = None
 
     @property
@@ -727,4 +728,4 @@ class TelegramService:
 
 def get_telegram_service() -> TelegramService:
     """Get TelegramService singleton instance."""
-    return TelegramService.get_instance()
+    return TelegramService.instance()

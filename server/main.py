@@ -309,6 +309,20 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("[CLI MCP] lifespan init failed: %s", exc)
 
+    # One-time status-broadcaster refresh: populates the cache and runs
+    # the load-bearing auto-reconnects (Telegram bot via stored token,
+    # Android relay via stored pairing). Per-WS-client refresh used to
+    # do this on every connect, which produced an M-by-N storm under
+    # PartySocket's auto-reconnect on every page nav / network blip --
+    # the refresh now runs ONCE at startup, and state changes after
+    # that flow through the originating code path's event-driven
+    # broadcasts (whatsapp `_handle_event`, telegram `_broadcast_status`,
+    # OAuth callbacks, android relay broadcaster).
+    #
+    # Spawned as a background task so a slow upstream (Telegram getMe,
+    # Twitter token validation) doesn't block lifespan startup.
+    asyncio.create_task(get_status_broadcaster()._refresh_all_services())
+
     _startup_log("All services initialized")
     print("Application startup complete", flush=True)
     yield

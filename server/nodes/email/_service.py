@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 from core.logging import get_logger
+from services.plugin.singleton import ServiceSingleton
 
 logger = get_logger(__name__)
 
@@ -23,14 +24,9 @@ def _load_config() -> Dict:
     return _CONFIG
 
 
-class EmailService:
-    _instance: Optional["EmailService"] = None
-
-    @classmethod
-    def get_instance(cls) -> "EmailService":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+class EmailService(ServiceSingleton):
+    """Plugin-owned email orchestrator. Inherits ``instance`` /
+    ``reset_instance`` from :class:`ServiceSingleton`."""
 
     @property
     def config(self) -> Dict:
@@ -184,4 +180,4 @@ class EmailService:
 
 
 def get_email_service() -> EmailService:
-    return EmailService.get_instance()
+    return EmailService.instance()

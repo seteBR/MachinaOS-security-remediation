@@ -825,43 +825,83 @@ def _cleanup_waiter(waiter_id: str) -> None:
 # EVENT DISPATCH
 # =============================================================================
 
-async def dispatch_async(event_type: str, data: Dict) -> int:
+def _unpack_event(
+    event: "Any",
+    data: Optional[Dict] = None,
+) -> tuple[str, Dict]:
+    """Normalise either ``(WorkflowEvent,)`` or ``(event_type, data)`` to
+    the underlying ``(event_type, data)`` pair the dispatcher uses.
+
+    Wave 11.I, milestone Q: ``dispatch`` and ``dispatch_async`` accept a
+    ``WorkflowEvent`` directly so the ``WorkflowEvent(**event)`` rewrap
+    in ``events/triggers.py`` becomes a no-op. The legacy
+    ``(event_type, data)`` shape stays supported via
+    :meth:`WorkflowEvent.from_legacy` upstream of the dispatcher (the
+    public API just forwards either form).
+    """
+    # Lazy import: services.events imports event_waiter for trigger
+    # adaptation, so a top-level import would be circular.
+    from services.events.envelope import WorkflowEvent
+
+    if isinstance(event, WorkflowEvent):
+        return event.type, event.data if isinstance(event.data, dict) else {"data": event.data}
+    if isinstance(event, str):
+        return event, data or {}
+    raise TypeError(
+        f"dispatch expects a WorkflowEvent or (event_type: str, data: Dict); "
+        f"got {type(event).__name__}"
+    )
+
+
+async def dispatch_async(
+    event: "Any",
+    data: Optional[Dict] = None,
+) -> int:
     """Dispatch event asynchronously (for Redis mode).
 
     Args:
-        event_type: Type of event (e.g., 'whatsapp_message_received')
-        data: Event data
+        event: Either a :class:`WorkflowEvent` (preferred, Wave 11.I) or
+            an event-type string. The legacy ``(event_type, data)`` form
+            stays supported.
+        data: Event payload (when ``event`` is a string).
 
     Returns:
         1 if event was added to stream, 0 otherwise
     """
+    event_type, payload = _unpack_event(event, data)
     logger.debug(f"[EventWaiter] dispatch_async: event_type='{event_type}'")
 
     if is_redis_mode():
         cache = get_cache_service()
         stream_name = _get_stream_name(event_type)
-        msg_id = await cache.stream_add(stream_name, data)
+        msg_id = await cache.stream_add(stream_name, payload)
         if msg_id:
             logger.debug(f"[EventWaiter] Added event to stream {stream_name}: {msg_id}")
             return 1
         return 0
     else:
         # Fall back to sync dispatch for memory mode
-        return dispatch(event_type, data)
+        return dispatch(event_type, payload)
 
 
-def dispatch(event_type: str, data: Dict) -> int:
+def dispatch(
+    event: "Any",
+    data: Optional[Dict] = None,
+) -> int:
     """Dispatch event to matching waiters (synchronous, memory mode).
 
     Thread-safe: Can be called from APScheduler threads or async context.
 
     Args:
-        event_type: Type of event (e.g., 'whatsapp_message_received')
-        data: Event data
+        event: Either a :class:`WorkflowEvent` (preferred, Wave 11.I) or
+            an event-type string. The legacy ``(event_type, data)`` form
+            stays supported.
+        data: Event payload (when ``event`` is a string).
 
     Returns:
         Number of waiters resolved
     """
+    event_type, data = _unpack_event(event, data)
     if is_redis_mode():
         # In Redis mode, use async dispatch
         # Handle both async context and thread context (e.g., APScheduler callbacks)

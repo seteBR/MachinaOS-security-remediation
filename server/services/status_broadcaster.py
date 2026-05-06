@@ -96,15 +96,22 @@ class StatusBroadcaster:
     async def connect(self, websocket: WebSocket):
         """Accept a new WebSocket connection.
 
-        Sends cached status immediately so the client is unblocked,
-        then refreshes service statuses in a background task.
+        Sends the cached status snapshot immediately. Status changes
+        flow in via the originating code path (WhatsApp Go-service
+        events, Telegram bot connect/disconnect, OAuth callbacks,
+        Android relay events) -- the cache is kept fresh by those
+        event-driven broadcasts, so the connecting client doesn't need
+        a per-connect refresh-all storm.
+
+        Initial cache population (and load-bearing auto-reconnects for
+        Telegram + Android relay) happens in a one-time lifespan-startup
+        invocation of :meth:`_refresh_all_services` from ``main.py``.
         """
         await websocket.accept()
         async with self._lock:
             self._connections.add(websocket)
         logger.info(f"[StatusBroadcaster] Client connected. Total: {len(self._connections)}")
 
-        # Send cached status immediately -- don't block on service refreshes
         try:
             await websocket.send_json({
                 "type": "initial_status",
@@ -112,9 +119,6 @@ class StatusBroadcaster:
             })
         except Exception as e:
             logger.error(f"[StatusBroadcaster] Failed to send initial status: {e}")
-
-        # Refresh service statuses in background -- updates broadcast when ready
-        asyncio.create_task(self._refresh_all_services())
 
     async def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection."""
