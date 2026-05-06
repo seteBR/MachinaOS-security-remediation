@@ -1,179 +1,77 @@
-"""Twitter / X WebSocket handlers — plugin-owned dispatch table.
+"""Twitter / X WebSocket handlers — factory-built (Wave 11.I, S).
 
-OAuth 2.0 PKCE login + status + logout flows. Self-registered into
-the central WS dispatcher via ``register_ws_handlers(WS_HANDLERS)``
-from this package's ``__init__.py``. ``routers/websocket.py`` knows
-nothing about Twitter; the message-type strings are wired here so
-renames / additions stay local to the plugin.
+The 3 handlers (``twitter_oauth_login`` / ``twitter_oauth_status`` /
+``twitter_logout``) come from
+:func:`services.events.oauth_lifecycle.make_oauth_lifecycle_handlers`.
+The factory takes care of credential loading, redirect-URI derivation,
+silent token refresh on status, revoke + remove + broadcast on
+logout. Plugin-specific bits supplied via kwargs:
 
-Companion: ``_router.py`` owns the OAuth callback endpoint
-(``/api/twitter/callback``) — same redirect URI the WS login flow
-asks the user to visit. Both share the same ``TwitterOAuth`` client
-in ``_oauth.py``.
+* ``oauth_factory`` -- async builder that constructs
+  :class:`TwitterOAuth` per call, pulling stored client_id /
+  client_secret from ``auth_service``.
+* ``user_info_to_subject`` -- ``f"@{username}"`` (X has no email).
+* ``extra_logout`` -- drops legacy API-key entries left behind by the
+  pre-OAuth layout.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import WebSocket
-
-from core.logging import get_logger
-from services.oauth_utils import get_redirect_uri
-from services.status_broadcaster import get_status_broadcaster
+from services.events.oauth_lifecycle import make_oauth_lifecycle_handlers
 
 from ._oauth import TwitterOAuth
 
-logger = get_logger(__name__)
 
-
-async def handle_twitter_oauth_login(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Initiate Twitter OAuth 2.0 with PKCE flow.
-
-    Opens the browser to Twitter's authorization page. After the user
-    authorises, Twitter redirects to ``/api/twitter/callback`` (owned
-    by ``_router.py``) which stores tokens via ``auth_service``.
-    """
-    # Lazy ``container`` import — same idiom the original handler used
-    # in ``routers/websocket.py``. Keeps test monkeypatching simple
-    # (the singleton lookup happens at call time, post-patch).
+async def _twitter_oauth_factory(
+    *, redirect_uri: Optional[str] = None, **_kwargs,
+) -> TwitterOAuth:
+    """Build a :class:`TwitterOAuth` from stored client credentials."""
     from core.container import container
 
     auth_service = container.auth_service()
-
-    # Stored client credentials (configured via Credentials Modal).
-    client_id = await auth_service.get_api_key("twitter_client_id")
-    client_secret = await auth_service.get_api_key("twitter_client_secret")
-
-    if not client_id:
-        return {
-            "success": False,
-            "error": "Twitter Client ID not configured. Add your Twitter API credentials first.",
-        }
-
-    redirect_uri = get_redirect_uri(websocket, "twitter")
-    oauth = TwitterOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri)
-    auth_data = oauth.generate_authorization_url()
-
-    return {
-        "success": True,
-        "message": "Opening Twitter authorization in browser...",
-        "url": auth_data["url"],
-        "state": auth_data["state"],
-    }
-
-
-async def handle_twitter_oauth_status(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Check Twitter OAuth connection status.
-
-    Returns connection status + user info if connected. Tokens live in
-    the OAuth system (``EncryptedOAuthToken`` table); never read via
-    ``get_api_key("twitter_access_token")`` — that's the wrong table.
-    Refreshes silently if the access token is rejected and a refresh
-    token exists.
-    """
-    from core.container import container
-
-    auth_service = container.auth_service()
-
-    tokens = await auth_service.get_oauth_tokens("twitter", customer_id="owner")
-    if not tokens or not tokens.get("access_token"):
-        return {"connected": False, "username": None, "user_id": None}
-
-    access_token = tokens["access_token"]
-    refresh_token = tokens.get("refresh_token", "")
     client_id = await auth_service.get_api_key("twitter_client_id") or ""
     client_secret = await auth_service.get_api_key("twitter_client_secret")
-    redirect_uri = get_redirect_uri(websocket, "twitter")
-
-    oauth = TwitterOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri)
-    user_info = await oauth.get_user_info(access_token)
-
-    if not user_info.get("success") and refresh_token:
-        refresh_result = await oauth.refresh_access_token(refresh_token)
-        if refresh_result.get("success"):
-            await auth_service.store_oauth_tokens(
-                provider="twitter",
-                access_token=refresh_result["access_token"],
-                refresh_token=refresh_result.get("refresh_token") or refresh_token,
-                email=tokens.get("email", ""),
-                name=tokens.get("name", ""),
-                scopes=tokens.get("scopes", ""),
-                customer_id="owner",
-            )
-            user_info = await oauth.get_user_info(refresh_result["access_token"])
-
-    if not user_info.get("success"):
-        return {
-            "connected": False,
-            "username": None,
-            "user_id": None,
-            "error": user_info.get("error"),
-        }
-
-    return {
-        "connected": True,
-        "username": user_info.get("username"),
-        "user_id": user_info.get("id"),
-        "name": user_info.get("name"),
-        "profile_image_url": user_info.get("profile_image_url"),
-        "verified": user_info.get("verified"),
-    }
-
-
-async def handle_twitter_logout(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Disconnect Twitter: revoke tokens + clear stored credentials.
-
-    Per RFC 9700 the refresh-token is read directly from the DB
-    (``get_oauth_refresh_token``) instead of from the in-memory cache.
-    Symmetric ``credential.oauth.disconnected`` broadcast fires the
-    catalogue refetch on every connected client.
-    """
-    from core.container import container
-
-    auth_service = container.auth_service()
-
-    tokens = await auth_service.get_oauth_tokens("twitter", customer_id="owner")
-    access_token = tokens.get("access_token") if tokens else None
-    refresh_token = (
-        await auth_service.get_oauth_refresh_token("twitter", customer_id="owner")
-        if tokens
-        else None
+    return TwitterOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri or "",
     )
 
-    client_id = await auth_service.get_api_key("twitter_client_id") or ""
-    client_secret = await auth_service.get_api_key("twitter_client_secret")
 
-    if access_token or refresh_token:
-        redirect_uri = get_redirect_uri(websocket, "twitter")
-        oauth = TwitterOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri)
-        if access_token:
-            await oauth.revoke_token(access_token, "access_token")
-        if refresh_token:
-            await oauth.revoke_token(refresh_token, "refresh_token")
+def _user_info_to_handle(info: Dict[str, Any]) -> str:
+    return f"@{info.get('username', 'unknown')}"
 
-    await auth_service.remove_oauth_tokens("twitter", customer_id="owner")
 
-    # Clean up any stale API-key entries from the old (broken) layout
-    # where access tokens were mistakenly stored as API keys.
+async def _drop_legacy_api_key_entries() -> None:
+    """Remove stale API-key entries from the pre-OAuth layout.
+
+    Pre-Wave-11.I some flows mistakenly stored access / refresh tokens
+    as API keys. The OAuth tokens table is the canonical home now;
+    these orphans are cleaned on every logout for safety.
+    """
+    from core.container import container
+
+    auth_service = container.auth_service()
     for key in ("twitter_access_token", "twitter_refresh_token", "twitter_user_info"):
         try:
             await auth_service.remove_api_key(key)
         except Exception:
             pass
 
-    broadcaster = get_status_broadcaster()
-    await broadcaster.broadcast_credential_event(
-        "credential.oauth.disconnected",
-        provider="twitter",
-        customer_id="owner",
-    )
 
-    return {"success": True, "message": "Twitter disconnected"}
+WS_HANDLERS = make_oauth_lifecycle_handlers(
+    provider="twitter",
+    oauth_factory=_twitter_oauth_factory,
+    user_info_to_subject=_user_info_to_handle,
+    extra_logout=_drop_legacy_api_key_entries,
+)
 
-
-WS_HANDLERS = {
-    "twitter_oauth_login": handle_twitter_oauth_login,
-    "twitter_oauth_status": handle_twitter_oauth_status,
-    "twitter_logout": handle_twitter_logout,
-}
+# Module-level aliases so the contract tests in
+# ``tests/credentials/test_websocket_handlers.py`` can import the
+# handlers by name. The dispatch table itself is what
+# ``register_ws_handlers`` consumes.
+handle_twitter_oauth_login = WS_HANDLERS["twitter_oauth_login"]
+handle_twitter_oauth_status = WS_HANDLERS["twitter_oauth_status"]
+handle_twitter_logout = WS_HANDLERS["twitter_logout"]
