@@ -158,7 +158,16 @@
 :root[data-theme="surveillance"] .palette { border-left: 1px solid var(--border-strong); }
 :root[data-theme="surveillance"] .chat    { border-top: 1px solid var(--border-strong); }
 
-/* CANVAS — CCTV grid + crosshair */
+/* CANVAS — CCTV grid + crosshair.
+ *
+ * NOTE: the corner-bracket / centre-reticle / REC-text SVG is declared at a
+ * fixed 1920x1080 viewport (matches the upstream handoff). On viewports
+ * larger than 1920x1080 it tiles; on smaller viewports it's clipped to
+ * canvas bounds. The CCTV-monitor framing reads as intentional at typical
+ * desktop sizes. Replacing it with a `preserveAspectRatio="xMidYMid slice"`
+ * SVG that scales would lose the pixel-pitch authenticity the design calls
+ * for, so this is a known limitation, not a bug. The 40px crosshair grid
+ * (third layer) is correctly tiled across the full canvas at any size. */
 :root[data-theme="surveillance"] .canvas {
   background:
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'><g stroke='%23e82626' stroke-width='1' fill='none' opacity='0.18'><path d='M40 40 H120 M40 40 V120 M1880 40 H1800 M1880 40 V120 M40 1040 H120 M40 1040 V960 M1880 1040 H1800 M1880 1040 V960'/><circle cx='960' cy='540' r='40' opacity='0.2'/><path d='M960 480 V600 M900 540 H1020' opacity='0.25'/></g><text x='80' y='80' fill='%23e82626' font-family='monospace' font-size='14' opacity='0.5'>● REC</text><text x='80' y='1020' fill='%23e82626' font-family='monospace' font-size='12' opacity='0.4'>CAM-04 / 19:42:08</text></svg>"),

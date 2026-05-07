@@ -144,9 +144,9 @@ export function useSoundSync(): void {
     window.addEventListener('keydown', handler, opts);
     window.addEventListener('touchstart', handler, opts);
     return () => {
-      window.removeEventListener('pointerdown', handler, true);
-      window.removeEventListener('keydown', handler, true);
-      window.removeEventListener('touchstart', handler, true);
+      window.removeEventListener('pointerdown', handler, opts);
+      window.removeEventListener('keydown', handler, opts);
+      window.removeEventListener('touchstart', handler, opts);
     };
   }, []);
 }

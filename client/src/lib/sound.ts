@@ -100,35 +100,43 @@ function play(cfg: OscConfig | undefined): void {
   if (!cfg || !enabled) return;
   const ac = ensureCtx();
   if (!ac) return;
-  // WebAudio context starts suspended on most browsers until a user
-  // gesture; resume() is a no-op once running.
-  if (ac.state === 'suspended') void ac.resume();
-  try {
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.type = cfg.type;
-    osc.frequency.value = cfg.freq;
-    let target: AudioNode = osc;
-    if (cfg.lp) {
-      const lp = ac.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.value = cfg.lp;
-      target.connect(lp);
-      target = lp;
+  // If suspended, defer oscillator scheduling until resume() settles.
+  // Synchronously scheduled oscillators on a suspended context are
+  // silently dropped per the WebAudio autoplay policy
+  // (https://developer.chrome.com/blog/autoplay/#webaudio).
+  const schedule = () => {
+    try {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = cfg.type;
+      osc.frequency.value = cfg.freq;
+      let target: AudioNode = osc;
+      if (cfg.lp) {
+        const lp = ac.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = cfg.lp;
+        target.connect(lp);
+        target = lp;
+      }
+      target.connect(gain);
+      gain.connect(ac.destination);
+      const now = ac.currentTime;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(cfg.vol, now + cfg.attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + cfg.attack + cfg.decay);
+      if (cfg.sweep) {
+        osc.frequency.exponentialRampToValueAtTime(cfg.freq * cfg.sweep, now + cfg.dur);
+      }
+      osc.start(now);
+      osc.stop(now + cfg.dur + 0.02);
+    } catch {
+      // WebAudio errors are non-fatal — silently drop.
     }
-    target.connect(gain);
-    gain.connect(ac.destination);
-    const now = ac.currentTime;
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(cfg.vol, now + cfg.attack);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + cfg.attack + cfg.decay);
-    if (cfg.sweep) {
-      osc.frequency.exponentialRampToValueAtTime(cfg.freq * cfg.sweep, now + cfg.dur);
-    }
-    osc.start(now);
-    osc.stop(now + cfg.dur + 0.02);
-  } catch {
-    // WebAudio errors are non-fatal — silently drop.
+  };
+  if (ac.state === 'running') {
+    schedule();
+  } else {
+    void Promise.resolve(ac.resume()).then(schedule).catch(() => {/* noop */});
   }
 }
 
@@ -316,4 +324,70 @@ export const Sounds = {
     }
     play(activePack[event]);
   },
+  /**
+   * Snapshot the engine state for DevTools self-diagnosis. Returns an
+   * object the user can inspect from the browser console:
+   *   `> Sounds.diagnose()` →
+   *     { enabled, pack, eventsForPack, audioContextState, browserSupport }
+   * Common silent-audio modes:
+   *   - `enabled: false` → user hasn't toggled Settings → Audio.
+   *   - `pack: 'none'` → :root[data-theme="..."] declares chime/typo
+   *     and the validator falls through to none.
+   *   - `audioContextState: 'suspended'` after a click → a browser
+   *     extension or autoplay-block policy is denying resume().
+   */
+  diagnose(): {
+    enabled: boolean;
+    pack: SoundPackName;
+    eventsForPack: string[];
+    cssSoundPack: string;
+    cssDataTheme: string | null;
+    audioContextState: string | 'no-ac' | 'no-audio-api';
+    browserSupport: boolean;
+  } {
+    const Ctx = typeof window !== 'undefined'
+      ? window.AudioContext || (window as any).webkitAudioContext
+      : undefined;
+    const cssSoundPack = typeof document !== 'undefined'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--sound-pack').trim().replace(/['"]/g, '')
+      : '';
+    const cssDataTheme = typeof document !== 'undefined'
+      ? document.documentElement.getAttribute('data-theme')
+      : null;
+    return {
+      enabled,
+      pack: activePackName,
+      eventsForPack: Object.keys(activePack),
+      cssSoundPack,
+      cssDataTheme,
+      audioContextState: !Ctx ? 'no-audio-api' : audioCtx ? audioCtx.state : 'no-ac',
+      browserSupport: !!Ctx,
+    };
+  },
+  /**
+   * Force a sound to play for testing — bypasses the `enabled` gate.
+   * Call from DevTools: `Sounds.test('click')` after the AC has unlocked.
+   * Returns whether the play scheduled successfully.
+   */
+  test(event: SoundEvent = 'click'): boolean {
+    const cfg = activePack[event];
+    if (!cfg) return false;
+    const ac = ensureCtx();
+    if (!ac) return false;
+    const wasEnabled = enabled;
+    enabled = true;
+    try {
+      play(cfg);
+      return true;
+    } finally {
+      enabled = wasEnabled;
+    }
+  },
 };
+
+// Expose on `window` in dev mode so users can self-diagnose silent audio
+// from DevTools (`> Sounds.diagnose()`, `> Sounds.test()`). No-op in
+// production builds — Vite tree-shakes the `import.meta.env.DEV` branch.
+if (typeof window !== 'undefined' && import.meta.env.DEV) {
+  (window as any).Sounds = Sounds;
+}

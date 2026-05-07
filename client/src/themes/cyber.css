@@ -254,7 +254,9 @@
   position: relative;
 }
 
-/* Perspective grid floor */
+/* Perspective grid floor — sits below React Flow nodes (which carry their
+ * own z-index from React Flow internals). pointer-events:none so the
+ * decoration never captures clicks meant for nodes/edges underneath. */
 :root[data-theme="cyber"] .canvas::before {
   content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 50%;
   background:
@@ -264,9 +266,11 @@
   transform-origin: bottom;
   pointer-events: none;
   opacity: 0.4;
+  z-index: 0;
 }
 
-/* Floating "SIGNAL LOST" status text */
+/* Floating "SIGNAL LOST" status text — sits above the perspective floor
+ * but pointer-events:none keeps it from intercepting interaction. */
 :root[data-theme="cyber"] .canvas::after {
   content: '◆ SIGNAL ◆ NIGHT_MARKET.7 ◆ 03:47:22';
   position: absolute; top: 12px; right: 16px;
@@ -277,6 +281,7 @@
   text-shadow: 0 0 4px var(--neon-cyan);
   pointer-events: none;
   animation: cyber-blink 1.6s steps(2) infinite;
+  z-index: 1;
 }
 
 /* ─── BUTTONS — neon outline ─── */
