@@ -39,6 +39,7 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { useApiKeys, type ProviderDefaults, type ModelConstraints } from '../../../hooks/useApiKeys';
+import { useWebSocket } from '../../../contexts/WebSocketContext';
 
 const formSchema = z.object({
   default_model: z.string().optional().default(''),
@@ -58,6 +59,14 @@ interface Props {
 
 const ProviderDefaultsSection: React.FC<Props> = ({ providerId }) => {
   const { getProviderDefaults, saveProviderDefaults, getStoredModels, getModelConstraints, isConnected } = useApiKeys();
+  // Subscribe to apiKeyStatuses[providerId]: WebSocketContext updates
+  // this reactively after a successful validate (handler at line 2175-
+  // 2180) AND on the backend's api_key_status broadcast (line 686-696
+  // -- fired after the validator stores fresh models). Adding it as a
+  // dep to the fetch effect below makes the model dropdown refresh
+  // immediately after Fetch instead of requiring a page reload.
+  const { apiKeyStatuses } = useWebSocket();
+  const apiKeyStatus = apiKeyStatuses[providerId];
 
   const [models, setModels] = useState<string[]>([]);
   const [constraints, setConstraints] = useState<ModelConstraints | null>(null);
@@ -103,7 +112,7 @@ const ProviderDefaultsSection: React.FC<Props> = ({ providerId }) => {
       }
     })();
     return () => { cancelled = true; };
-  }, [providerId, isConnected]);
+  }, [providerId, isConnected, apiKeyStatus]);
 
   // Refetch constraints when selected model changes.
   useEffect(() => {
