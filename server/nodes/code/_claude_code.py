@@ -27,11 +27,12 @@ from core.logging import get_logger
 
 from services.cli_agent import ClaudeTaskSpec
 from services.cli_agent.service import get_ai_cli_service
+from services.plugin.singleton import ServiceSingleton
 
 logger = get_logger(__name__)
 
 
-class ClaudeCodeService:
+class ClaudeCodeService(ServiceSingleton):
     """Thin shim that adapts to the new AICliService."""
 
     def __init__(self) -> None:
@@ -127,11 +128,7 @@ class ClaudeCodeService:
         return None
 
 
-_instance: Optional[ClaudeCodeService] = None
-
-
 def get_claude_code_service() -> ClaudeCodeService:
-    global _instance
-    if _instance is None:
-        _instance = ClaudeCodeService()
-    return _instance
+    """Module-level accessor preserved for legacy callers; delegates to
+    the :class:`ServiceSingleton` mixin's ``instance()`` classmethod."""
+    return ClaudeCodeService.instance()
