@@ -161,10 +161,10 @@ def make_oauth_lifecycle_handlers(
         tokens = await auth_service.get_oauth_tokens(provider, customer_id="owner")
         if not tokens or not tokens.get("access_token"):
             # Match pre-S handler shape -- frontends key on these
-            # exact field names. Extra ``user_id``/``username``/...
-            # fields are absent on success too when the provider
-            # didn't return them, so callers must defensive-read.
-            payload = {"connected": False, "username": None, "user_id": None}
+            # exact field names. Both Twitter (username/user_id) and
+            # Google (email/name) field sets included so a single
+            # disconnected payload satisfies every provider.
+            payload = _disconnected_payload()
             await _maybe_legacy_broadcast(legacy_status_broadcast, payload)
             return payload
 
@@ -195,9 +195,7 @@ def make_oauth_lifecycle_handlers(
 
         if not user_info.get("success"):
             payload = {
-                "connected": False,
-                "username": None,
-                "user_id": None,
+                **_disconnected_payload(),
                 "error": user_info.get("error"),
             }
             await _maybe_legacy_broadcast(legacy_status_broadcast, payload)
@@ -263,6 +261,19 @@ async def _maybe_legacy_broadcast(
         return
     from services.status_broadcaster import get_status_broadcaster
     await get_status_broadcaster().broadcast({"type": broadcast_type, "data": payload})
+
+
+def _disconnected_payload() -> Dict[str, Any]:
+    """Disconnected status payload with the union of Twitter / Google
+    field names. Frontends read what they need; unknown None values
+    are ignored. Easier than parameterising the field list per plugin."""
+    return {
+        "connected": False,
+        "username": None,
+        "user_id": None,
+        "email": None,
+        "name": None,
+    }
 
 
 # ============================================================================

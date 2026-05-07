@@ -1,25 +1,30 @@
+"""Google Workspace OAuth 2.0 (composition pattern -- Wave 11.I, S.2).
+
+Composes around ``google_auth_oauthlib.flow.Flow`` rather than
+subclassing :class:`services.plugin.oauth.OAuth2PKCEClient`. The Flow
+library handles the PKCE flow, scope handling, and offline-access
+mechanics that Google's token endpoint expects -- hand-rolling those
+would lose the ``OAUTHLIB_RELAX_TOKEN_SCOPE=1`` workaround for
+oauthlib upstream issue #562.
+
+What we DO share with the Twitter (subclass) path:
+
+* :class:`OAuthStateStore` from :mod:`services.plugin.oauth` --
+  identical TTL + cleanup contract, deduplicates the state dict +
+  ``cleanup_expired_states`` helper that pre-S lived here too.
+* The async method shape (``async exchange_code``,
+  ``async fetch_user_info``, ``async refresh_access_token``,
+  ``async revoke_token``) consumed by
+  :func:`services.events.oauth_lifecycle.make_oauth_lifecycle_handlers`
+  and :func:`make_oauth_callback_router`. Sync calls into Flow /
+  Credentials wrap through ``asyncio.to_thread``.
 """
-Google Workspace OAuth 2.0 using google-auth-oauthlib library.
 
-Unified OAuth for all Google services:
-- Gmail (send, search, read emails)
-- Google Calendar (create, list, update, delete events)
-- Google Drive (upload, download, list, share files)
-- Google Sheets (read, write, append data)
-- Google Tasks (create, list, complete tasks)
-- Google Contacts (create, list, search contacts)
+from __future__ import annotations
 
-Two access modes:
-1. Owner Mode - Your own Google account (Credentials Modal)
-2. Customer Mode - Customer's Google account (database storage)
-
-API endpoints loaded from config/google_apis.json
-Docs: https://developers.google.com/identity/protocols/oauth2
-"""
-
+import asyncio
 import json
 import os
-import time
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,22 +49,27 @@ os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 # errors, deprecation notices) keeps surfacing.
 warnings.filterwarnings("ignore", message=r"Scope has changed.*")
 
+import httpx
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from core.logging import get_logger
+from services.plugin.oauth import OAuthStateStore
 
 logger = get_logger(__name__)
 
-# Load Google API config from JSON.
+
+# ============================================================================
+# Config loaders (consumed by _auth_helper, oauth_utils, _credentials, tests)
+# ============================================================================
+
 # Walk up two parents from server/nodes/google/_oauth.py -> server/, then
-# into config/google_apis.json. (Pre-D commit this file lived at
-# services/google_oauth.py and used .parent.parent; the migration into
-# nodes/google/ shifts the directory depth, so we use parents[2].)
+# into config/google_apis.json.
 _config_path = Path(__file__).resolve().parents[2] / "config" / "google_apis.json"
 _google_config: Dict[str, Any] = {}
+
 
 def _load_config() -> Dict[str, Any]:
     """Load Google API config from JSON file."""
@@ -74,33 +84,53 @@ def _load_config() -> Dict[str, Any]:
             _google_config = _get_default_config()
     return _google_config
 
+
 def _get_default_config() -> Dict[str, Any]:
-    """Return default config if JSON fails to load."""
+    """Default config if JSON load fails."""
     return {
         "oauth": {
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "revoke_uri": "https://oauth2.googleapis.com/revoke",
-            "userinfo_uri": "https://www.googleapis.com/oauth2/v2/userinfo"
+            "userinfo_uri": "https://www.googleapis.com/oauth2/v2/userinfo",
         },
         "scopes": {
-            "userinfo": ["openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"],
-            "gmail": ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.modify"],
-            "calendar": ["https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/calendar.events"],
-            "drive": ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive.file"],
+            "userinfo": [
+                "openid",
+                "https://www.googleapis.com/auth/userinfo.email",
+                "https://www.googleapis.com/auth/userinfo.profile",
+            ],
+            "gmail": [
+                "https://www.googleapis.com/auth/gmail.send",
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.modify",
+            ],
+            "calendar": [
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.events",
+            ],
+            "drive": [
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/drive.file",
+            ],
             "sheets": ["https://www.googleapis.com/auth/spreadsheets"],
             "tasks": ["https://www.googleapis.com/auth/tasks"],
-            "contacts": ["https://www.googleapis.com/auth/contacts", "https://www.googleapis.com/auth/contacts.readonly"]
-        }
+            "contacts": [
+                "https://www.googleapis.com/auth/contacts",
+                "https://www.googleapis.com/auth/contacts.readonly",
+            ],
+        },
     }
 
+
 def get_oauth_endpoints() -> Dict[str, str]:
-    """Get OAuth endpoint URLs from config."""
+    """OAuth endpoint URLs from config."""
     config = _load_config()
     return config.get("oauth", _get_default_config()["oauth"])
 
+
 def get_callback_paths() -> Dict[str, str]:
-    """Get OAuth callback paths from config."""
+    """OAuth callback paths from config."""
     config = _load_config()
     oauth = config.get("oauth", {})
     return {
@@ -110,46 +140,56 @@ def get_callback_paths() -> Dict[str, str]:
 
 
 def get_service_config(service: str) -> Dict[str, Any]:
-    """Get service-specific config (base_url, version, etc.)."""
+    """Service-specific config (base_url, version, etc.)."""
     config = _load_config()
     return config.get("services", {}).get(service, {})
 
+
 def get_all_scopes() -> List[str]:
-    """Get combined scopes for all Google Workspace services."""
+    """Combined scopes for all Google Workspace services."""
     config = _load_config()
     scopes_config = config.get("scopes", _get_default_config()["scopes"])
     all_scopes = []
     for scope_list in scopes_config.values():
         all_scopes.extend(scope_list)
-    return list(dict.fromkeys(all_scopes))  # Remove duplicates, preserve order
+    return list(dict.fromkeys(all_scopes))  # dedupe, preserve order
+
 
 def get_scopes_for_services(services: List[str]) -> List[str]:
-    """Get scopes for specific services only."""
+    """Scopes for specific services only."""
     config = _load_config()
     scopes_config = config.get("scopes", _get_default_config()["scopes"])
-    scopes = []
-    # Always include userinfo
-    scopes.extend(scopes_config.get("userinfo", []))
+    scopes = list(scopes_config.get("userinfo", []))
     for service in services:
         scopes.extend(scopes_config.get(service, []))
     return list(dict.fromkeys(scopes))
 
-# Combined scopes for all services (loaded from config)
+
 GOOGLE_WORKSPACE_SCOPES = get_all_scopes()
+DEFAULT_SCOPES = GOOGLE_WORKSPACE_SCOPES  # legacy alias
 
-# Legacy alias for backward compatibility
-DEFAULT_SCOPES = GOOGLE_WORKSPACE_SCOPES
 
-# In-memory state store (use Redis in production)
-_oauth_states: Dict[str, Dict[str, Any]] = {}
+# ============================================================================
+# GoogleOAuth (composition wrapper)
+# ============================================================================
 
 
 class GoogleOAuth:
-    """Google Workspace OAuth 2.0 using google-auth-oauthlib Flow.
+    """Google Workspace OAuth 2.0 client (composition wrapper).
 
-    Provides unified OAuth for all Google Workspace services.
-    API endpoints loaded from config/google_apis.json for easy updates.
+    Conforms to the duck-typed protocol consumed by
+    :func:`services.events.oauth_lifecycle.make_oauth_lifecycle_handlers`
+    and :func:`make_oauth_callback_router`: shared :class:`OAuthStateStore`,
+    async ``exchange_code`` / ``fetch_user_info`` /
+    ``refresh_access_token`` / ``revoke_token``.
+
+    Internally, ``Flow.from_client_config`` does the PKCE dance and
+    Flow.fetch_token does the token exchange under the
+    ``OAUTHLIB_RELAX_TOKEN_SCOPE=1`` env var.
     """
+
+    # Plugin-scoped state store -- isolated from Twitter's instance.
+    state_store = OAuthStateStore()
 
     def __init__(
         self,
@@ -157,16 +197,13 @@ class GoogleOAuth:
         client_secret: str,
         redirect_uri: str,
         scopes: Optional[List[str]] = None,
-    ):
+    ) -> None:
         self.client_id = client_id
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
         self.scopes = scopes or GOOGLE_WORKSPACE_SCOPES
 
-        # Get OAuth endpoints from config
         oauth_endpoints = get_oauth_endpoints()
-
-        # Build client config in Google's format
         self.client_config = {
             "web": {
                 "client_id": client_id,
@@ -177,91 +214,50 @@ class GoogleOAuth:
             }
         }
         self.token_uri = oauth_endpoints["token_uri"]
-
-    def generate_authorization_url(
-        self,
-        state_data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, str]:
-        """
-        Generate OAuth authorization URL.
-
-        Args:
-            state_data: Optional data (customer_id, mode, redirect_after)
-
-        Returns:
-            Dict with url and state
-        """
-        # Create Flow from client config
-        flow = Flow.from_client_config(
-            self.client_config,
-            scopes=self.scopes,
-            redirect_uri=self.redirect_uri,
+        self.revoke_uri = oauth_endpoints.get(
+            "revoke_uri", "https://oauth2.googleapis.com/revoke",
         )
 
-        # Generate authorization URL with offline access for refresh tokens
+    def generate_authorization_url(
+        self, *, state_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, str]:
+        """Build the Google authorization URL + register state."""
+        flow = Flow.from_client_config(
+            self.client_config, scopes=self.scopes, redirect_uri=self.redirect_uri,
+        )
         authorization_url, state = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
-            prompt="consent",  # Force consent to get refresh token
+            prompt="consent",  # force consent to get refresh token
         )
-
-        # Store state data for callback verification
-        # PKCE: google-auth-oauthlib auto-generates code_verifier; save it
-        # so exchange_code() can restore it on the new Flow instance.
-        _oauth_states[state] = {
-            "created_at": time.time(),
+        self.state_store.put(state, {
             "data": state_data or {"mode": "owner"},
             "redirect_uri": self.redirect_uri,
             "code_verifier": getattr(flow, "code_verifier", None),
-        }
+        })
+        return {"url": authorization_url, "state": state}
 
-        logger.info("Generated Google OAuth URL", state=state[:8])
-
-        return {
-            "url": authorization_url,
-            "state": state,
-        }
-
-    def exchange_code(self, code: str, state: str) -> Dict[str, Any]:
-        """
-        Exchange authorization code for credentials.
-
-        Args:
-            code: Authorization code from callback
-            state: State for verification
-
-        Returns:
-            Dict with tokens and user info
-        """
-        # Verify state
-        oauth_state = _oauth_states.pop(state, None)
-        if not oauth_state:
+    async def exchange_code(self, code: str, state: str) -> Dict[str, Any]:
+        """Exchange an auth code for credentials (async wrapper)."""
+        record = self.state_store.take(state)
+        if not record:
             return {"success": False, "error": "Invalid or expired state"}
 
-        state_data = oauth_state.get("data", {})
+        state_data = record.get("data", {})
+        code_verifier = record.get("code_verifier")
 
-        try:
-            # Create Flow and fetch token
+        def _exchange_sync() -> Dict[str, Any]:
             flow = Flow.from_client_config(
                 self.client_config,
                 scopes=self.scopes,
                 redirect_uri=self.redirect_uri,
                 state=state,
             )
-            # PKCE: restore code_verifier so token exchange includes it
-            code_verifier = oauth_state.get("code_verifier")
             if code_verifier:
                 flow.code_verifier = code_verifier
             flow.fetch_token(code=code)
-
-            # Get credentials from flow
             creds = flow.credentials
-
-            # Get user info
-            user_info = self._get_user_info(creds)
-
-            logger.info("Google OAuth successful", email=user_info.get("email", "")[:20])
-
+            user_info = self._get_user_info_sync(creds)
             return {
                 "success": True,
                 "access_token": creds.token,
@@ -271,29 +267,84 @@ class GoogleOAuth:
                 "client_id": creds.client_id,
                 "client_secret": creds.client_secret,
                 "scopes": list(creds.scopes) if creds.scopes else self.scopes,
+                "scope": " ".join(creds.scopes) if creds.scopes else "",
                 "state_data": state_data,
                 "email": user_info.get("email"),
                 "name": user_info.get("name"),
                 "picture": user_info.get("picture"),
             }
 
-        except Exception as e:
-            logger.error("Token exchange failed", error=str(e))
-            return {"success": False, "error": str(e)}
+        try:
+            return await asyncio.to_thread(_exchange_sync)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[google] Token exchange failed: {exc}")
+            return {"success": False, "error": str(exc)}
 
-    def _get_user_info(self, creds: Credentials) -> Dict[str, Any]:
-        """Get user info using credentials."""
+    async def fetch_user_info(self, access_token: str) -> Dict[str, Any]:
+        """Build credentials from an access token + fetch user info."""
+        creds = self.build_credentials(
+            access_token=access_token,
+            refresh_token="",  # not needed for a single read
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            token_uri=self.token_uri,
+            scopes=self.scopes,
+        )
+        try:
+            info = await asyncio.to_thread(self._get_user_info_sync, creds)
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": str(exc)}
+        if not info:
+            return {"success": False, "error": "Failed to read user info"}
+        return {"success": True, **info}
+
+    async def refresh_access_token(self, refresh_token: str) -> Dict[str, Any]:
+        """Async wrapper around :meth:`refresh_credentials`."""
+        return await asyncio.to_thread(
+            self.refresh_credentials,
+            refresh_token, self.client_id, self.client_secret, self.token_uri,
+        )
+
+    async def revoke_token(
+        self, token: str, token_type: str = "access_token",
+    ) -> Dict[str, Any]:
+        """Best-effort token revocation via Google's revoke endpoint."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    self.revoke_uri,
+                    data={"token": token},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+        except httpx.HTTPError as exc:
+            logger.warning(f"[google] revoke_token network error: {exc}")
+            return {"success": False, "error": str(exc)}
+        if response.status_code == 200:
+            return {"success": True}
+        return {
+            "success": False,
+            "error": (response.json() if response.text else {}).get(
+                "error_description", "Revocation failed",
+            ),
+        }
+
+    # ---- internal helpers ----------------------------------------------
+
+    def _get_user_info_sync(self, creds: Credentials) -> Dict[str, Any]:
+        """Sync user-info read; called inside ``asyncio.to_thread``."""
         try:
             service = build("oauth2", "v2", credentials=creds)
-            user_info = service.userinfo().get().execute()
+            info = service.userinfo().get().execute()
             return {
-                "email": user_info.get("email"),
-                "name": user_info.get("name"),
-                "picture": user_info.get("picture"),
+                "email": info.get("email"),
+                "name": info.get("name"),
+                "picture": info.get("picture"),
             }
-        except Exception as e:
-            logger.error("Failed to get user info", error=str(e))
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[google] Failed to get user info: {exc}")
             return {}
+
+    # ---- statics: kept for _auth_helper.py + other consumers ----------
 
     @staticmethod
     def refresh_credentials(
@@ -302,21 +353,9 @@ class GoogleOAuth:
         client_secret: str,
         token_uri: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Refresh expired credentials.
-
-        Args:
-            refresh_token: The refresh token
-            client_id: OAuth client ID
-            client_secret: OAuth client secret
-            token_uri: Token endpoint (loaded from config if not provided)
-
-        Returns:
-            Dict with new access_token
-        """
+        """Refresh expired credentials. Returns ``{success, access_token, ...}``."""
         if not token_uri:
             token_uri = get_oauth_endpoints()["token_uri"]
-
         try:
             creds = Credentials(
                 token=None,
@@ -326,15 +365,14 @@ class GoogleOAuth:
                 client_secret=client_secret,
             )
             creds.refresh(Request())
-
             return {
                 "success": True,
                 "access_token": creds.token,
                 "expires_in": 3600,
             }
-        except Exception as e:
-            logger.error("Token refresh failed", error=str(e))
-            return {"success": False, "error": str(e), "needs_reauth": True}
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[google] Token refresh failed: {exc}")
+            return {"success": False, "error": str(exc), "needs_reauth": True}
 
     @staticmethod
     def build_credentials(
@@ -345,14 +383,9 @@ class GoogleOAuth:
         token_uri: Optional[str] = None,
         scopes: Optional[List[str]] = None,
     ) -> Credentials:
-        """
-        Build Credentials object from stored tokens.
-
-        Use this to create credentials for Google API calls.
-        """
+        """Build Credentials object from stored tokens (used by _auth_helper)."""
         if not token_uri:
             token_uri = get_oauth_endpoints()["token_uri"]
-
         return Credentials(
             token=access_token,
             refresh_token=refresh_token,
@@ -362,53 +395,49 @@ class GoogleOAuth:
             scopes=scopes or GOOGLE_WORKSPACE_SCOPES,
         )
 
-    # Service builders for each Google API
     @staticmethod
     def build_gmail_service(creds: Credentials):
-        """Build Gmail API service from credentials."""
         return build("gmail", "v1", credentials=creds)
 
     @staticmethod
     def build_calendar_service(creds: Credentials):
-        """Build Calendar API service from credentials."""
         return build("calendar", "v3", credentials=creds)
 
     @staticmethod
     def build_drive_service(creds: Credentials):
-        """Build Drive API service from credentials."""
         return build("drive", "v3", credentials=creds)
 
     @staticmethod
     def build_sheets_service(creds: Credentials):
-        """Build Sheets API service from credentials."""
         return build("sheets", "v4", credentials=creds)
 
     @staticmethod
     def build_tasks_service(creds: Credentials):
-        """Build Tasks API service from credentials."""
         return build("tasks", "v1", credentials=creds)
 
     @staticmethod
     def build_people_service(creds: Credentials):
-        """Build People API service (Contacts) from credentials."""
         return build("people", "v1", credentials=creds)
 
 
-# Backward compatibility alias
+# Legacy alias.
 GmailOAuth = GoogleOAuth
 
 
-def cleanup_expired_states(max_age_seconds: int = 600):
-    """Remove expired OAuth states."""
-    current_time = time.time()
-    expired = [
-        state for state, data in _oauth_states.items()
-        if current_time - data["created_at"] > max_age_seconds
-    ]
-    for state in expired:
-        _oauth_states.pop(state, None)
+# Module-level alias to the state store's backing dict so the contract
+# tests in tests/credentials/test_google_oauth.py can ``_oauth_states.clear()``.
+# Same trick the Twitter migration uses.
+_oauth_states = GoogleOAuth.state_store._states
 
 
-def get_pending_state(state: str) -> Optional[Dict[str, Any]]:
-    """Get pending state without removing it."""
-    return _oauth_states.get(state)
+__all__ = [
+    "GoogleOAuth",
+    "GmailOAuth",
+    "GOOGLE_WORKSPACE_SCOPES",
+    "DEFAULT_SCOPES",
+    "get_oauth_endpoints",
+    "get_callback_paths",
+    "get_service_config",
+    "get_all_scopes",
+    "get_scopes_for_services",
+]

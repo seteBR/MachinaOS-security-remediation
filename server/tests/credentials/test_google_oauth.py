@@ -88,18 +88,18 @@ class TestAuthorizationUrl:
 
 
 class TestExchangeCode:
-    def test_unknown_state_fails(self, oauth):
+    async def test_unknown_state_fails(self, oauth):
         # Don't even register a state -- exchange must fail without hitting Google.
-        result = oauth.exchange_code("code", "never-generated-state")
+        result = await oauth.exchange_code("code", "never-generated-state")
         assert result["success"] is False
         assert "state" in result["error"].lower()
 
-    def test_state_consumed_on_failure(self, oauth):
+    async def test_state_consumed_on_failure(self, oauth):
         """Even if the token exchange fails, the state must be popped (single use)."""
         auth = oauth.generate_authorization_url()
         state = auth["state"]
         # Exchange will fail because we haven't mocked Google -- network error
-        oauth.exchange_code("invalid-code", state)
+        await oauth.exchange_code("invalid-code", state)
         # State must be gone regardless of success
         assert state not in google_oauth._oauth_states
 
