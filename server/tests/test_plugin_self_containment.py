@@ -101,10 +101,13 @@ _FORBIDDEN_IMPORT_FRAGMENTS = (
     "services.email_service",
     "services.himalaya_service",
     "services.claude_code_service",
+    "services.maps",            # Wave 11.I, N: -> nodes/location/_service
+    "services.node_option_loaders",  # Wave 11.I, M: -> nodes/<plugin>/_option_loaders
     "routers.twitter",
     "routers.google",
     "routers.android",
     "routers.whatsapp",
+    "routers.maps",            # Wave 11.I, N: deleted
 )
 
 
@@ -272,9 +275,12 @@ _STALE_SERVICE_PATHS = (
     "services/himalaya_service.py",
     "services/claude_code_service.py",
     "services/websocket_client.py",      # dead re-export shim, deleted in E
+    "services/maps.py",                  # Wave 11.I, N: -> nodes/location/_service.py
+    "services/node_option_loaders",      # Wave 11.I, M: -> nodes/<plugin>/_option_loaders.py
     "routers/twitter.py",
     "routers/google.py",
     "routers/android.py",
+    "routers/maps.py",                   # Wave 11.I, N: deleted (all 4 endpoints dead)
 )
 
 
@@ -422,6 +428,34 @@ class TestPluginFolderHasNodeFile:
             "BaseNode subclass; underscore-prefixed siblings "
             "(_service.py, _handlers.py, _credentials.py, ...) are "
             "package-private and skipped by the node-discovery walker."
+        )
+
+
+class TestPluginsUseTypedEventFactories:
+    """Wave 11.I, milestone Q (locked in U).
+
+    Plugins must construct :class:`WorkflowEvent` directly via the
+    typed factory classmethods (``WorkflowEvent.credential(...)``,
+    ``WorkflowEvent.message(...)``, etc.) -- not via the
+    ``WorkflowEvent.from_legacy(event_type, data)`` shim. The shim
+    exists so :func:`event_waiter.dispatch` can still accept the legacy
+    ``(str, dict)`` form at the framework boundary; lifting it inside
+    plugin code defeats the purpose.
+    """
+
+    @pytest.mark.parametrize("plugin", _MIGRATED_PLUGINS)
+    def test_plugin_does_not_call_from_legacy(self, plugin: str):
+        plugin_dir = _SERVER_ROOT / "nodes" / plugin
+        offenders: list[str] = []
+        for py in plugin_dir.rglob("*.py"):
+            if "from_legacy" in py.read_text(encoding="utf-8"):
+                offenders.append(str(py.relative_to(_SERVER_ROOT)))
+        assert not offenders, (
+            f"Plugin {plugin!r} uses WorkflowEvent.from_legacy in: "
+            f"{offenders}. Use the typed factory classmethods "
+            "(WorkflowEvent.credential / .message / .oauth_completed / "
+            "etc.) for new dispatches; from_legacy is the framework-edge "
+            "shim only."
         )
 
 
