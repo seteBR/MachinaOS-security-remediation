@@ -37,6 +37,7 @@ import ErrorBoundary from './components/ui/ErrorBoundary';
 import ConsolePanel from './components/ui/ConsolePanel';
 import StatusBar from './components/ui/StatusBar';
 import CommandPaletteHost from './components/ui/CommandPaletteHost';
+import { useSoundSync } from './hooks/useSound';
 import { useAppTheme } from './hooks/useAppTheme';
 import { useWorkflowManagement } from './hooks/useWorkflowManagement';
 import { useWorkflowsQuery, WORKFLOWS_QUERY_KEY } from './hooks/useWorkflowsQuery';
@@ -284,6 +285,12 @@ const DashboardContent: React.FC = () => {
   // Console panel visibility from store (database-backed)
   const consolePanelVisible = useAppStore((state) => state.consolePanelVisible);
   const toggleConsolePanelVisible = useAppStore((state) => state.toggleConsolePanelVisible);
+
+  // Sound effects: mirror the soundEnabled slice into the WebAudio
+  // engine and re-read --sound-pack from :root on every theme change.
+  // Mounting once here keeps every event handler that calls useSound()
+  // in lockstep with the active theme + user preference.
+  useSoundSync();
 
   // Context menu state for node right-click
   const [contextMenu, setContextMenu] = React.useState<{
@@ -1097,7 +1104,13 @@ const DashboardContent: React.FC = () => {
   return (
     <>
       <style>{buildCanvasStyles(theme.colors)}</style>
-      <div style={{
+      {/* `app-frame` is the decorative-layer hook from the design handoff —
+          per-theme CSS files target this class for outer ornaments
+          (gilded corners under Renaissance, scanline overlay + corner
+          brackets under Cyber, riveted ridged frame under Steampunk,
+          REC dot under Surveillance, etc.). Decorations declare
+          pointer-events: none so they don't intercept clicks. */}
+      <div className="app-frame" style={{
         width: '100%',
         height: '100vh',
         display: 'flex',
@@ -1165,10 +1178,18 @@ const DashboardContent: React.FC = () => {
             display: 'flex',
             position: 'relative',
           }}>
-            <div style={{
-              flex: 1,
-              backgroundColor: theme.colors.backgroundAlt,
-            }}>
+            {/* `canvas-host` activates per-theme canvas decorations
+                (cyber grid backplane, atomic starburst, rot candlelight
+                pools, surveillance crosshair brackets). Decorative
+                pseudo-elements declare pointer-events: none. */}
+            <div
+              className="canvas-host"
+              style={{
+                flex: 1,
+                backgroundColor: theme.colors.backgroundAlt,
+                position: 'relative',
+              }}
+            >
               <ErrorBoundary>
                 <ReactFlow
                   nodes={styledNodes}

@@ -1,0 +1,132 @@
+/* ============================================================================
+ * themes/wasteland.css — irradiated dust, rust, hand-painted warnings on
+ * scrap metal. Reads like a Mad Max settlement.
+ * Ported from design_handoff_machinaos_themes/themes/wasteland.css.
+ * ============================================================================ */
+
+:root[data-theme="wasteland"] {
+  --bg-app: #2a2018;
+  --bg-panel: #3a2c1c;
+  --bg-canvas: #1a1410;
+  --bg-elevated: #4a3826;
+  --bg-input: #1a1410;
+  --bg-hover: rgba(232, 140, 40, 0.10);
+  --bg-active: rgba(232, 140, 40, 0.22);
+  --bg-overlay: rgba(20, 12, 6, 0.78);
+
+  --border-default: #6a4a28;
+  --border-strong: #8a3a18;
+  --border-focus: #e88a28;
+  --ornament-frame: none;
+
+  --fg-default: #e8d8a8;
+  --fg-muted: #b89868;
+  --fg-faint: #786040;
+  --fg-on-accent: #1a1410;
+  --fg-on-success: #1a1410;
+  --fg-on-danger: #e8d8a8;
+  --fg-on-warning: #1a1410;
+
+  --rust: #8a3a18;
+  --bone: #d8c8a0;
+  --rad: #c8d038;
+  --ochre: #e88a28;
+
+  --font-display: 'Special Elite', 'Black Ops One', monospace;
+  --font-body: 'Special Elite', 'Courier Prime', monospace;
+  --font-mono: 'VT323', 'Courier New', monospace;
+  --type-scale-base: 14px;
+  --type-tracking-display: 0.10em;
+  --type-uppercase: uppercase;
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-pill: 0px;
+
+  --dur-fast: 60ms;
+  --dur-default: 180ms;
+  --dur-slow: 320ms;
+  --ease-default: cubic-bezier(0.6, 0, 0.4, 1);
+  --ease-emphasis: cubic-bezier(0.6, 0, 0.4, 1);
+  --motion-style: jittery;
+  --sound-pack: scrap;
+
+  --cursor-default: auto;
+  --cursor-pointer: pointer;
+  --scrollbar-track: #2a2018;
+  --scrollbar-thumb: #8a3a18;
+
+  /* Shadcn HSL bridge */
+  --background: 30 28% 13%;
+  --foreground: 41 53% 78%;
+  --card: 28 32% 22%;
+  --card-foreground: 41 53% 78%;
+  --popover: 28 32% 22%;
+  --popover-foreground: 41 53% 78%;
+
+  --primary: 28 80% 53%;           /* ochre */
+  --primary-foreground: 24 28% 8%;
+  --secondary: 28 36% 17%;
+  --secondary-foreground: 41 53% 78%;
+  --muted: 28 36% 17%;
+  --muted-foreground: 35 36% 56%;
+  --accent: 64 56% 51%;            /* radioactive */
+  --accent-foreground: 24 28% 8%;
+
+  --destructive: 6 75% 41%;
+  --destructive-foreground: 41 53% 78%;
+  --success: 64 56% 41%;
+  --warning: 64 56% 51%;
+  --info: 28 80% 53%;
+
+  --border: 32 47% 28%;
+  --input: 32 47% 28%;
+  --ring: 28 80% 53%;
+
+  /* Action role bridge */
+  --action-run: 64 56% 41%;
+  --action-run-soft: 64 56% 41% / 0.20;
+  --action-run-hover: 64 56% 41% / 0.34;
+  --action-run-border: 64 56% 41% / 0.7;
+
+  --action-stop: 6 75% 41%;
+  --action-stop-soft: 6 75% 41% / 0.22;
+  --action-stop-hover: 6 75% 41% / 0.36;
+  --action-stop-border: 6 75% 41% / 0.7;
+
+  --action-save: 28 80% 53%;
+  --action-save-soft: 28 80% 53% / 0.20;
+  --action-save-hover: 28 80% 53% / 0.34;
+  --action-save-border: 28 80% 53% / 0.7;
+
+  --action-config: 64 56% 51%;
+  --action-config-soft: 64 56% 51% / 0.18;
+  --action-config-hover: 64 56% 51% / 0.32;
+  --action-config-border: 64 56% 51% / 0.6;
+
+  --action-secret: 28 80% 53%;
+  --action-secret-soft: 28 80% 53% / 0.16;
+  --action-secret-hover: 28 80% 53% / 0.30;
+  --action-secret-border: 28 80% 53% / 0.6;
+
+  --action-tools: 64 56% 51%;
+  --action-tools-soft: 64 56% 51% / 0.18;
+  --action-tools-hover: 64 56% 51% / 0.32;
+  --action-tools-border: 64 56% 51% / 0.6;
+
+  --tint-soft: 18%;
+  --tint-border: 45%;
+}
+
+/* Body — dust + grit texture */
+:root[data-theme="wasteland"] body {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='d'><feTurbulence baseFrequency='0.9' numOctaves='3'/><feColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.40 0 0 0 0 0.18 0 0 0 0.16 0'/></filter><rect width='300' height='300' filter='url(%23d)'/></svg>"),
+    var(--bg-app);
+}
+
+:root[data-theme="wasteland"] ::selection {
+  background: rgba(232, 138, 40, 0.5);
+  color: #1a1410;
+}

@@ -1,0 +1,133 @@
+/* ============================================================================
+ * themes/steampunk.css — brass, copper, oiled leather, riveted plates.
+ *
+ * Reads like the inside of a Verne submarine.
+ * Ported from design_handoff_machinaos_themes/themes/steampunk.css.
+ * ============================================================================ */
+
+:root[data-theme="steampunk"] {
+  --bg-app: #2a1f12;
+  --bg-panel: #3a2a18;
+  --bg-canvas: #1a1208;
+  --bg-elevated: #4a3620;
+  --bg-input: #1a1208;
+  --bg-hover: rgba(200, 140, 40, 0.10);
+  --bg-active: rgba(200, 140, 40, 0.20);
+  --bg-overlay: rgba(20, 12, 6, 0.7);
+
+  --border-default: #6a4a20;
+  --border-strong: #b88838;
+  --border-focus: #d8a848;
+  --ornament-frame: none;
+
+  --fg-default: #e8d8b0;
+  --fg-muted: #b8a070;
+  --fg-faint: #786040;
+  --fg-on-accent: #2a1f12;
+  --fg-on-success: #2a1f12;
+  --fg-on-danger: #e8d8b0;
+  --fg-on-warning: #2a1f12;
+
+  --copper: #b8602a;
+  --rust: #8a3a1a;
+  --leather: #4a2818;
+  --brass: #d8a848;
+
+  --font-display: 'IM Fell English SC', 'Cinzel', serif;
+  --font-body: 'IM Fell English', 'EB Garamond', serif;
+  --font-mono: 'Special Elite', 'Courier Prime', monospace;
+  --type-scale-base: 14px;
+  --type-tracking-display: 0.10em;
+  --type-uppercase: uppercase;
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  --dur-fast: 110ms;
+  --dur-default: 240ms;
+  --dur-slow: 480ms;
+  --ease-default: cubic-bezier(0.5, 0, 0.4, 1.1);
+  --ease-emphasis: cubic-bezier(0.7, -0.1, 0.3, 1.2);
+  --motion-style: mechanical;
+  --sound-pack: clockwork;
+
+  --cursor-default: auto;
+  --cursor-pointer: pointer;
+  --scrollbar-track: #2a1f12;
+  --scrollbar-thumb: #b88838;
+
+  /* Shadcn HSL bridge */
+  --background: 28 41% 12%;
+  --foreground: 40 53% 80%;
+  --card: 31 38% 21%;
+  --card-foreground: 40 53% 80%;
+  --popover: 31 38% 21%;
+  --popover-foreground: 40 53% 80%;
+
+  --primary: 40 64% 56%;           /* brass */
+  --primary-foreground: 28 41% 12%;
+  --secondary: 30 39% 16%;
+  --secondary-foreground: 40 53% 80%;
+  --muted: 30 39% 16%;
+  --muted-foreground: 40 35% 58%;
+  --accent: 18 63% 44%;            /* copper */
+  --accent-foreground: 28 41% 12%;
+
+  --destructive: 14 68% 32%;       /* rust */
+  --destructive-foreground: 40 53% 80%;
+  --success: 79 41% 38%;
+  --warning: 40 64% 56%;
+  --info: 200 39% 47%;
+
+  --border: 33 53% 27%;
+  --input: 33 53% 27%;
+  --ring: 40 64% 56%;
+
+  /* Action role bridge */
+  --action-run: 79 41% 38%;
+  --action-run-soft: 79 41% 38% / 0.20;
+  --action-run-hover: 79 41% 38% / 0.34;
+  --action-run-border: 79 41% 38% / 0.7;
+
+  --action-stop: 14 68% 32%;
+  --action-stop-soft: 14 68% 32% / 0.20;
+  --action-stop-hover: 14 68% 32% / 0.34;
+  --action-stop-border: 14 68% 32% / 0.7;
+
+  --action-save: 40 64% 56%;
+  --action-save-soft: 40 64% 56% / 0.22;
+  --action-save-hover: 40 64% 56% / 0.36;
+  --action-save-border: 40 64% 56% / 0.7;
+
+  --action-config: 40 64% 56%;
+  --action-config-soft: 40 64% 56% / 0.18;
+  --action-config-hover: 40 64% 56% / 0.30;
+  --action-config-border: 40 64% 56% / 0.6;
+
+  --action-secret: 200 39% 47%;
+  --action-secret-soft: 200 39% 47% / 0.18;
+  --action-secret-hover: 200 39% 47% / 0.30;
+  --action-secret-border: 200 39% 47% / 0.6;
+
+  --action-tools: 18 63% 44%;
+  --action-tools-soft: 18 63% 44% / 0.20;
+  --action-tools-hover: 18 63% 44% / 0.34;
+  --action-tools-border: 18 63% 44% / 0.6;
+
+  --tint-soft: 16%;
+  --tint-border: 40%;
+}
+
+/* Body — riveted leather grain */
+:root[data-theme="steampunk"] body {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='l'><feTurbulence baseFrequency='0.8' numOctaves='2'/><feColorMatrix values='0 0 0 0 0.16 0 0 0 0 0.10 0 0 0 0 0.04 0 0 0 0.4 0'/></filter><rect width='200' height='200' filter='url(%23l)'/></svg>"),
+    var(--bg-app);
+}
+
+:root[data-theme="steampunk"] ::selection {
+  background: rgba(216, 168, 72, 0.5);
+  color: #2a1f12;
+}

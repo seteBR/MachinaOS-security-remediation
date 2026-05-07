@@ -9,7 +9,7 @@
  * if you need a new prop.
  */
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X, Settings } from 'lucide-react';
 import {
   Dialog,
@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { cn } from '@/lib/utils';
+import { Sounds } from '@/lib/sound';
 
 interface ModalProps {
   isOpen: boolean;
@@ -62,6 +63,18 @@ const Modal: React.FC<ModalProps> = ({
 }) => {
   const showHeader = Boolean(title || headerActions);
 
+  // Fire per-theme open/close sounds on isOpen transitions only — not
+  // on first mount (use a previous-value ref to detect the actual
+  // edge). Sounds.play is a no-op when the engine is disabled.
+  const prevOpenRef = useRef(isOpen);
+  useEffect(() => {
+    const prev = prevOpenRef.current;
+    if (prev !== isOpen) {
+      Sounds.play(isOpen ? 'modalOpen' : 'modalClose');
+      prevOpenRef.current = isOpen;
+    }
+  }, [isOpen]);
+
   return (
     <Dialog open={isOpen} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogPortal>
@@ -76,6 +89,12 @@ const Modal: React.FC<ModalProps> = ({
             // tokens directly so modals inherit the surface hierarchy
             // defined by the active theme (parchment under Renaissance,
             // void under Cyber).
+            //
+            // `modal-frame` is the decorative-layer hook — per-theme
+            // CSS targets this class for nailed-up borders (Plague),
+            // gilded corners (Renaissance), neon scanlines (Cyber),
+            // double-rule frames (Greek), etc.
+            'modal-frame',
             'fixed top-1/2 left-1/2 z-50 flex -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border-default bg-bg-app shadow-2xl outline-none',
             'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 duration-100',
             className

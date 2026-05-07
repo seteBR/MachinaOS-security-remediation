@@ -1,0 +1,130 @@
+/* ============================================================================
+ * themes/atomic.css — 1962 Eames optimism. Cream, atomic orange, turquoise,
+ * slate. Boomerangs and starbursts. Reads like a vintage NASA brochure.
+ * Ported from design_handoff_machinaos_themes/themes/atomic.css.
+ * ============================================================================ */
+
+:root[data-theme="atomic"] {
+  --bg-app: #f0e6d2;
+  --bg-panel: #faf2dc;
+  --bg-canvas: #e8dcc0;
+  --bg-elevated: #ffffff;
+  --bg-input: #ffffff;
+  --bg-hover: rgba(232, 90, 38, 0.08);
+  --bg-active: rgba(232, 90, 38, 0.18);
+  --bg-overlay: rgba(40, 30, 20, 0.5);
+
+  --border-default: #c8b890;
+  --border-strong: #2a3a4a;
+  --border-focus: #e85a26;
+  --ornament-frame: none;
+
+  --fg-default: #2a3a4a;
+  --fg-muted: #5a6a7a;
+  --fg-faint: #8a9aaa;
+  --fg-on-accent: #faf2dc;
+  --fg-on-success: #faf2dc;
+  --fg-on-danger: #faf2dc;
+  --fg-on-warning: #2a3a4a;
+
+  --turquoise: #3a9aa0;
+  --mustard: #d8a838;
+  --slate: #2a3a4a;
+  --atomic-orange: #e85a26;
+
+  --font-display: 'Bevan', 'Alfa Slab One', serif;
+  --font-body: 'Lato', 'Helvetica Neue', sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', monospace;
+  --type-scale-base: 14px;
+  --type-tracking-display: 0.06em;
+  --type-uppercase: uppercase;
+
+  --radius-sm: 0px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+  --radius-pill: 999px;
+
+  --dur-fast: 100ms;
+  --dur-default: 200ms;
+  --dur-slow: 380ms;
+  --ease-default: cubic-bezier(0.34, 1.6, 0.5, 1);
+  --ease-emphasis: cubic-bezier(0.34, 1.6, 0.5, 1);
+  --motion-style: bouncy;
+  --sound-pack: vibraphone;
+
+  --cursor-default: auto;
+  --cursor-pointer: pointer;
+  --scrollbar-track: #f0e6d2;
+  --scrollbar-thumb: #2a3a4a;
+
+  /* Shadcn HSL bridge */
+  --background: 41 47% 88%;
+  --foreground: 213 27% 23%;
+  --card: 0 0% 100%;
+  --card-foreground: 213 27% 23%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 213 27% 23%;
+
+  --primary: 14 81% 53%;           /* atomic orange */
+  --primary-foreground: 41 80% 92%;
+  --secondary: 44 83% 92%;
+  --secondary-foreground: 213 27% 23%;
+  --muted: 44 83% 92%;
+  --muted-foreground: 211 14% 42%;
+  --accent: 184 46% 43%;           /* turquoise */
+  --accent-foreground: 213 27% 23%;
+
+  --destructive: 14 81% 53%;
+  --destructive-foreground: 41 80% 92%;
+  --success: 120 21% 45%;
+  --warning: 41 67% 53%;
+  --info: 184 46% 43%;
+
+  --border: 213 27% 23%;
+  --input: 40 33% 67%;
+  --ring: 14 81% 53%;
+
+  /* Action role bridge */
+  --action-run: 120 21% 45%;
+  --action-run-soft: 120 21% 45% / 0.16;
+  --action-run-hover: 120 21% 45% / 0.30;
+  --action-run-border: 120 21% 45% / 0.7;
+
+  --action-stop: 14 81% 53%;
+  --action-stop-soft: 14 81% 53% / 0.16;
+  --action-stop-hover: 14 81% 53% / 0.30;
+  --action-stop-border: 14 81% 53% / 0.7;
+
+  --action-save: 14 81% 53%;
+  --action-save-soft: 14 81% 53% / 0.18;
+  --action-save-hover: 14 81% 53% / 0.32;
+  --action-save-border: 14 81% 53% / 0.7;
+
+  --action-config: 41 67% 53%;
+  --action-config-soft: 41 67% 53% / 0.18;
+  --action-config-hover: 41 67% 53% / 0.32;
+  --action-config-border: 41 67% 53% / 0.7;
+
+  --action-secret: 184 46% 43%;
+  --action-secret-soft: 184 46% 43% / 0.16;
+  --action-secret-hover: 184 46% 43% / 0.30;
+  --action-secret-border: 184 46% 43% / 0.7;
+
+  --action-tools: 184 46% 43%;
+  --action-tools-soft: 184 46% 43% / 0.16;
+  --action-tools-hover: 184 46% 43% / 0.30;
+  --action-tools-border: 184 46% 43% / 0.6;
+
+  --tint-soft: 14%;
+  --tint-border: 35%;
+}
+
+/* Body — clean cardstock; starburst lives on canvas in W2 wrapper */
+:root[data-theme="atomic"] body {
+  background: var(--bg-app);
+}
+
+:root[data-theme="atomic"] ::selection {
+  background: rgba(232, 90, 38, 0.4);
+  color: #2a3a4a;
+}

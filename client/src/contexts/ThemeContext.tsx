@@ -15,15 +15,27 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-export type ThemeName = 'light' | 'dark' | 'renaissance' | 'cyber';
+export type ThemeName =
+  | 'light' | 'dark'
+  | 'renaissance' | 'greek' | 'edo' | 'steampunk' | 'atomic'
+  | 'cyber' | 'wasteland' | 'rot' | 'plague' | 'surveillance';
 
-export const AVAILABLE_THEMES: readonly ThemeName[] = ['light', 'dark', 'renaissance', 'cyber'];
+/** Order matters — drives the ThemeSwitcher menu and keyboard rotation.
+ *  Utopian set first (light + dark + 5 utopian), dystopian set after. */
+export const AVAILABLE_THEMES: readonly ThemeName[] = [
+  'light', 'dark',
+  'renaissance', 'greek', 'edo', 'steampunk', 'atomic',
+  'cyber', 'wasteland', 'rot', 'plague', 'surveillance',
+];
 
 const THEME_STORAGE_KEY = 'machinaos-theme';
 const LEGACY_DARK_MODE_KEY = 'darkMode';
 
-/** Themes that should also flip the legacy `.dark` Tailwind variant on. */
-const DARK_FAMILY: ReadonlySet<ThemeName> = new Set(['dark', 'cyber']);
+/** Themes whose backgrounds are dark — also flip the legacy `.dark`
+ *  Tailwind variant so existing `dark:` utilities resolve correctly. */
+const DARK_FAMILY: ReadonlySet<ThemeName> = new Set([
+  'dark', 'cyber', 'wasteland', 'rot', 'surveillance', 'steampunk',
+]);
 
 interface ThemeContextType {
   theme: ThemeName;

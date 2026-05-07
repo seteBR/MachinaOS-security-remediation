@@ -51,7 +51,7 @@ const AIResultModal: React.FC<AIResultModalProps> = ({ isOpen, onClose, result }
         <div className="border-b border-border bg-muted p-4">
           <div className="mb-2 flex items-start justify-between">
             <div>
-              <h3 className="m-0 text-base font-semibold text-foreground">
+              <h3 className="m-0 font-display text-base font-semibold tracking-[var(--type-tracking-display)] text-fg-default [text-transform:var(--type-uppercase)]">
                 {result.nodeName} Result
               </h3>
               <p className="mt-1 mb-0 text-sm text-muted-foreground">

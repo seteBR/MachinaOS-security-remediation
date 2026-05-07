@@ -17,6 +17,7 @@
 import * as React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
+import { Sounds } from '@/lib/sound';
 
 export const actionButtonVariants = cva(
   // Base: 32px tall pill with icon-text gap, semibold, focus ring, smooth hover.
@@ -51,13 +52,31 @@ export interface ActionButtonProps
     VariantProps<typeof actionButtonVariants> {}
 
 export const ActionButton = React.forwardRef<HTMLButtonElement, ActionButtonProps>(
-  ({ className, intent, ...props }, ref) => (
-    <button
-      ref={ref}
-      type={props.type ?? 'button'}
-      className={cn(actionButtonVariants({ intent }), className)}
-      {...props}
-    />
-  ),
+  ({ className, intent, onClick, ...props }, ref) => {
+    // Fire the per-theme `click` sound BEFORE the user-supplied
+    // handler so the audio cue doesn't depend on the action
+    // succeeding (e.g., even a disabled-late workflow run still
+    // gives feedback). Sounds.play() is a no-op when the engine is
+    // disabled or the active pack is `none`, so this costs nothing
+    // in the default state.
+    const handleClick = onClick
+      ? (event: React.MouseEvent<HTMLButtonElement>) => {
+          Sounds.play('click');
+          onClick(event);
+        }
+      : (_event: React.MouseEvent<HTMLButtonElement>) => {
+          Sounds.play('click');
+        };
+
+    return (
+      <button
+        ref={ref}
+        type={props.type ?? 'button'}
+        className={cn(actionButtonVariants({ intent }), className)}
+        onClick={handleClick}
+        {...props}
+      />
+    );
+  },
 );
 ActionButton.displayName = 'ActionButton';

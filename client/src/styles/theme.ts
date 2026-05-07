@@ -1,23 +1,33 @@
-// Unified theme system - consolidated design tokens and component styles
+// Theme constants — exported for the canvas + maps surface and the
+// useAppTheme overlay map.
 //
-// PHASE-OUT NOTICE (Phase 3 of docs-internal/ui_migration_plan.md):
-// The single source of truth for color tokens is the :root / .dark
-// blocks in client/src/index.css. New components SHOULD prefer Tailwind
-// utility classes (e.g. `bg-dracula-green`, `text-foreground`,
-// `bg-dracula-orange/15`) over reading these TS exports.
+// SCOPE (post-Wave-14):
+//   - `lightColors` / `darkColors` are the two BASE PACKS. The 10-way
+//     `THEME_OVERRIDES` map in `client/src/hooks/useAppTheme.ts` merges
+//     a per-theme overlay (primary, focus, action palette, edge stroke
+//     palette) on top of whichever base pack matches the active theme's
+//     dark / light family — see `theme_system.md` for the contract.
+//   - `dracula` / `solarized` raw palette constants stay for cases a
+//     Tailwind class can't express: SVG `fill=`, React Flow JS edge
+//     styles, prismjs token CSS strings, MapSelector / GoogleMaps SDK
+//     JS-side colors.
+//   - `spacing` / `fontSize` / `fontWeight` / `nodeSize` / `iconSize` /
+//     `buttonSize` / `layout` / `transitions` / `constants` stay too —
+//     these are not color tokens; they back the canvas-animation engine
+//     and a few non-color UI primitives.
 //
-// Migration cheatsheet:
-//   theme.dracula.green                 -> className="text-dracula-green"
+// AUTHORITATIVE SOURCE for color tokens: the `:root[data-theme="..."]`
+// blocks in `client/src/themes/<name>.css` (10 themes) plus the shadcn
+// HSL-triplet bridge in `client/src/index.css`. New components consume
+// those via Tailwind utilities (`bg-bg-app`, `text-fg-default`,
+// `bg-action-run-soft`, `bg-node-agent-soft`) — never `theme.colors.X`
+// directly except inside `useAppTheme` consumers (canvas + maps).
+//
+// Migration cheatsheet for any remaining sites that read this file:
+//   theme.dracula.green                  -> className="text-dracula-green"
 //   { backgroundColor: theme.dracula.X } -> className="bg-dracula-X"
-//   { color: theme.colors.text }         -> className="text-foreground"
-//   { backgroundColor: theme.colors.X }  -> className="bg-{token}"
-//   theme.dracula.X + '25'               -> className="bg-dracula-X/15"
-//
-// The `dracula` and `solarized` constants stay for cases a Tailwind
-// class can't express (SVG `fill=`, react-flow JS edge styles, prismjs
-// token CSS strings). Spacing / fontSize / fontWeight / nodeSize /
-// iconSize / buttonSize / layout / transitions / constants stay too —
-// they are not color tokens.
+//   { color: theme.colors.text }         -> className="text-foreground" or "text-fg-default"
+//   { backgroundColor: theme.colors.X }  -> className="bg-{token}" or "bg-bg-app"
 
 // ============================================================================
 // DRACULA COLOR PALETTE (vibrant action colors + dark theme backgrounds)

@@ -156,7 +156,7 @@ const OutputDisplayPanel: React.FC<OutputDisplayPanelProps> = ({ results, onClea
       <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3">
         <div className="flex items-center gap-2">
           <Play className="h-4 w-4 text-success" />
-          <span className="text-sm font-semibold text-foreground">Execution Results</span>
+          <span className="font-display text-sm font-semibold tracking-[var(--type-tracking-display)] text-fg-default [text-transform:var(--type-uppercase)]">Execution Results</span>
           <Badge variant="secondary" className="text-xs">{results.length}</Badge>
         </div>
         {onClear && (

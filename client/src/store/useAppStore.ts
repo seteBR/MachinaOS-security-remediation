@@ -49,6 +49,10 @@ interface AppStore {
   componentPaletteVisible: boolean;
   consolePanelVisible: boolean;
   proMode: boolean;  // false = noob mode (only AI categories), true = pro mode (all categories)
+  /** WebAudio sound effects toggle (per-theme pack picked from
+   *  --sound-pack CSS token by `useSoundSync()`). Persisted to
+   *  localStorage as `machinaos-sound`; default off (opt-in). */
+  soundEnabled: boolean;
   renamingNodeId: string | null;
 
   // Workflow actions
@@ -65,6 +69,8 @@ interface AppStore {
   toggleSidebar: () => void;
   toggleComponentPalette: () => void;
   toggleProMode: () => void;
+  setSoundEnabled: (enabled: boolean) => void;
+  toggleSoundEnabled: () => void;
   setRenamingNodeId: (nodeId: string | null) => void;
 
   // UI defaults from database
@@ -130,6 +136,10 @@ const STORAGE_KEYS = {
   componentPaletteVisible: 'ui_component_palette_visible',
   consolePanelVisible: 'ui_console_panel_visible',
   proMode: 'ui_pro_mode',
+  /** Sound enabled key — matches the design handoff's
+   *  `localStorage['machinaos-sound']` convention so a returning user's
+   *  prior choice rehydrates regardless of which session set it. */
+  soundEnabled: 'machinaos-sound',
 };
 
 // Helper to load boolean from localStorage
@@ -163,6 +173,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   componentPaletteVisible: loadBooleanFromStorage(STORAGE_KEYS.componentPaletteVisible, true),
   consolePanelVisible: loadBooleanFromStorage(STORAGE_KEYS.consolePanelVisible, false),
   proMode: loadBooleanFromStorage(STORAGE_KEYS.proMode, false),  // Default to noob mode
+  soundEnabled: loadBooleanFromStorage(STORAGE_KEYS.soundEnabled, false),  // Opt-in default
   renamingNodeId: null,
 
   // Workflow management
@@ -328,6 +339,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const newValue = !state.proMode;
       saveBooleanToStorage(STORAGE_KEYS.proMode, newValue);
       return { proMode: newValue };
+    });
+  },
+
+  setSoundEnabled: (enabled) => {
+    saveBooleanToStorage(STORAGE_KEYS.soundEnabled, enabled);
+    set({ soundEnabled: enabled });
+  },
+  toggleSoundEnabled: () => {
+    set((state) => {
+      const newValue = !state.soundEnabled;
+      saveBooleanToStorage(STORAGE_KEYS.soundEnabled, newValue);
+      return { soundEnabled: newValue };
     });
   },
 

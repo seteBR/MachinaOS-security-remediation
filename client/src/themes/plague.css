@@ -1,0 +1,134 @@
+/* ============================================================================
+ * themes/plague.css — quarantine notices nailed to bleached doors.
+ *
+ * Sickly green-yellow on cold blue, biohazard red, official red wax seals.
+ * Reads like the WHO in 1349. Ported from
+ * design_handoff_machinaos_themes/themes/plague.css.
+ * ============================================================================ */
+
+:root[data-theme="plague"] {
+  --bg-app: #d8d4c0;
+  --bg-panel: #e4dfc8;
+  --bg-canvas: #c8c4b0;
+  --bg-elevated: #efeacf;
+  --bg-input: #efeacf;
+  --bg-hover: rgba(120, 60, 40, 0.10);
+  --bg-active: rgba(120, 60, 40, 0.20);
+  --bg-overlay: rgba(40, 30, 24, 0.6);
+
+  --border-default: #a89478;
+  --border-strong: #2a1c14;
+  --border-focus: #783c28;
+  --ornament-frame: none;
+
+  --fg-default: #2a1c14;
+  --fg-muted: #6a5440;
+  --fg-faint: #98886a;
+  --fg-on-accent: #efeacf;
+  --fg-on-success: #efeacf;
+  --fg-on-danger: #efeacf;
+  --fg-on-warning: #2a1c14;
+
+  --bile: #98a838;
+  --crow: #1a1410;
+  --linen: #efeacf;
+  --dried-blood: #783c28;
+
+  --font-display: 'UnifrakturCook', 'UnifrakturMaguntia', serif;
+  --font-body: 'EB Garamond', 'Cormorant Garamond', serif;
+  --font-mono: 'Special Elite', monospace;
+  --type-scale-base: 14px;
+  --type-tracking-display: 0.06em;
+  --type-uppercase: uppercase;
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-pill: 0px;
+
+  --dur-fast: 100ms;
+  --dur-default: 220ms;
+  --dur-slow: 460ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.6, 1);
+  --ease-emphasis: cubic-bezier(0.4, 0, 0.6, 1);
+  --motion-style: stiff;
+  --sound-pack: bell;
+
+  --cursor-default: auto;
+  --cursor-pointer: pointer;
+  --scrollbar-track: #d8d4c0;
+  --scrollbar-thumb: #2a1c14;
+
+  /* Shadcn HSL bridge */
+  --background: 49 25% 80%;
+  --foreground: 24 35% 12%;
+  --card: 47 53% 88%;
+  --card-foreground: 24 35% 12%;
+  --popover: 47 53% 88%;
+  --popover-foreground: 24 35% 12%;
+
+  --primary: 14 50% 31%;           /* dried blood */
+  --primary-foreground: 47 53% 88%;
+  --secondary: 49 35% 84%;
+  --secondary-foreground: 24 35% 12%;
+  --muted: 49 35% 84%;
+  --muted-foreground: 28 26% 33%;
+  --accent: 65 49% 44%;            /* bile */
+  --accent-foreground: 24 35% 12%;
+
+  --destructive: 14 50% 31%;
+  --destructive-foreground: 47 53% 88%;
+  --success: 75 47% 30%;
+  --warning: 65 49% 44%;
+  --info: 213 17% 35%;
+
+  --border: 24 35% 12%;
+  --input: 33 30% 56%;
+  --ring: 14 50% 31%;
+
+  /* Action role bridge */
+  --action-run: 75 47% 30%;
+  --action-run-soft: 75 47% 30% / 0.20;
+  --action-run-hover: 75 47% 30% / 0.34;
+  --action-run-border: 75 47% 30% / 0.7;
+
+  --action-stop: 14 50% 31%;
+  --action-stop-soft: 14 50% 31% / 0.20;
+  --action-stop-hover: 14 50% 31% / 0.34;
+  --action-stop-border: 14 50% 31% / 0.7;
+
+  --action-save: 14 50% 31%;
+  --action-save-soft: 14 50% 31% / 0.18;
+  --action-save-hover: 14 50% 31% / 0.32;
+  --action-save-border: 14 50% 31% / 0.7;
+
+  --action-config: 65 49% 44%;
+  --action-config-soft: 65 49% 44% / 0.20;
+  --action-config-hover: 65 49% 44% / 0.34;
+  --action-config-border: 65 49% 44% / 0.6;
+
+  --action-secret: 213 17% 35%;
+  --action-secret-soft: 213 17% 35% / 0.16;
+  --action-secret-hover: 213 17% 35% / 0.30;
+  --action-secret-border: 213 17% 35% / 0.7;
+
+  --action-tools: 14 50% 31%;
+  --action-tools-soft: 14 50% 31% / 0.16;
+  --action-tools-hover: 14 50% 31% / 0.30;
+  --action-tools-border: 14 50% 31% / 0.6;
+
+  --tint-soft: 16%;
+  --tint-border: 40%;
+}
+
+/* Body — weathered parchment */
+:root[data-theme="plague"] body {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='p'><feTurbulence baseFrequency='0.4' numOctaves='2'/><feColorMatrix values='0 0 0 0 0.50 0 0 0 0 0.40 0 0 0 0 0.25 0 0 0 0.18 0'/></filter><rect width='300' height='300' filter='url(%23p)'/></svg>"),
+    var(--bg-app);
+}
+
+:root[data-theme="plague"] ::selection {
+  background: rgba(120, 60, 40, 0.45);
+  color: #efeacf;
+}

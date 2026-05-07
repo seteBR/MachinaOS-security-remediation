@@ -9,7 +9,9 @@ import {
   HelpCircle,
   RotateCcw,
   X,
+  Volume2,
 } from 'lucide-react';
+import { useAppStore } from '../../store/useAppStore';
 
 import { Button } from '@/components/ui/button';
 import { ActionButton } from '@/components/ui/action-button';
@@ -44,12 +46,13 @@ interface SettingsPanelProps {
 // Reusable row + section primitives
 // ---------------------------------------------------------------------------
 
-type SectionTone = 'agent' | 'model' | 'workflow';
+type SectionTone = 'agent' | 'model' | 'workflow' | 'tool';
 
 const TONE_CLASSES: Record<SectionTone, string> = {
   agent:    'bg-node-agent-soft text-node-agent',
   model:    'bg-node-model-soft text-node-model',
   workflow: 'bg-node-workflow-soft text-node-workflow',
+  tool:     'bg-node-tool-soft text-node-tool',
 };
 
 interface SectionProps {
@@ -107,6 +110,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const saveMutation = useSaveUserSettingsMutation();
   const isLoading = settingsQuery.isLoading;
   const isSaving = saveMutation.isPending;
+
+  // Sound preference lives in the global UI store (not the per-user
+  // server settings row) because it's gated by browser autoplay policy
+  // and persists locally only.
+  const soundEnabled = useAppStore((s) => s.soundEnabled);
+  const setSoundEnabled = useAppStore((s) => s.setSoundEnabled);
 
   // Hydrate Dashboard's controlled state from the cached settings row
   // exactly once per open. The query is shared with useOnboarding so
@@ -346,6 +355,21 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 onChange={(e) => handleChange('maxProcesses', Number(e.target.value) || 10)}
                 disabled={isSaving}
                 className="w-20"
+              />
+            </Row>
+          </Section>
+
+          {/* Audio — per-theme WebAudio sound packs. Off by default;
+              honours browser autoplay policy (engine resumes on first
+              user gesture). */}
+          <Section title="Audio" Icon={Volume2} tone="tool">
+            <Row
+              label="Sound Effects"
+              description="Play per-theme click / hover / save / error sounds. Each theme ships a different pack (parchment, terminal, marble, ink, clockwork, ...). Disabled by default."
+            >
+              <Switch
+                checked={soundEnabled}
+                onCheckedChange={setSoundEnabled}
               />
             </Row>
           </Section>

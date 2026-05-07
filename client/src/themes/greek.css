@@ -1,0 +1,167 @@
+/* ============================================================================
+ * themes/greek.css — sun-bleached marble agora.
+ *
+ * Lapis blue + oxblood + gold meander on cracked Aegean marble.
+ * Ported from design_handoff_machinaos_themes/themes/greek.css.
+ *
+ * Decorative class-targeted rules (.toolbar, .sidebar, .canvas, .modal,
+ * .cmdk, etc.) activate once Wave 2 adds those structural classes to
+ * the React tree. Token block alone retints existing chrome via the
+ * shadcn HSL bridge.
+ * ============================================================================ */
+
+:root[data-theme="greek"] {
+  /* ── New contract ─────────────────────────────────────────────────── */
+
+  --bg-app: #ede5d0;
+  --bg-panel: #f5efde;
+  --bg-canvas: #e6dcc2;
+  --bg-elevated: #faf6e9;
+  --bg-input: #faf6e9;
+  --bg-hover: rgba(40, 75, 130, 0.08);
+  --bg-active: rgba(40, 75, 130, 0.16);
+  --bg-overlay: rgba(60, 50, 30, 0.55);
+
+  --border-default: #b8a878;
+  --border-strong: #4a3818;
+  --border-focus: #284b82;
+  --ornament-frame: none;
+
+  --fg-default: #2a2415;
+  --fg-muted: #6a5d3c;
+  --fg-faint: #998c64;
+  --fg-on-accent: #faf6e9;
+  --fg-on-success: #faf6e9;
+  --fg-on-danger: #faf6e9;
+  --fg-on-warning: #2a2415;
+
+  --accent: #284b82;
+  --accent-hover: #3a5fa0;
+  --marble-vein: #d8c89a;
+  --oxblood: #7a1a18;
+  --olive: #6a7a32;
+  --gold: #c8a040;
+
+  --font-display: 'Cinzel', 'Trajan Pro', serif;
+  --font-body: 'Cormorant Garamond', 'Times New Roman', serif;
+  --font-mono: 'Courier Prime', 'Courier New', monospace;
+  --type-scale-base: 14px;
+  --type-tracking-display: 0.18em;
+  --type-uppercase: uppercase;
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 2px;
+  --radius-pill: 0px;
+
+  --dur-fast: 120ms;
+  --dur-default: 240ms;
+  --dur-slow: 460ms;
+  --ease-default: cubic-bezier(0.3, 0.7, 0.4, 1);
+  --ease-emphasis: cubic-bezier(0.6, -0.05, 0.3, 1.4);
+  --motion-style: smooth;
+  --sound-pack: marble;
+
+  --cursor-default: auto;
+  --cursor-pointer: pointer;
+  --scrollbar-track: #ede5d0;
+  --scrollbar-thumb: #b8a878;
+
+  /* ── Shadcn HSL bridge ────────────────────────────────────────────── */
+
+  --background: 42 38% 87%;
+  --foreground: 38 33% 12%;
+  --card: 46 71% 95%;
+  --card-foreground: 38 33% 12%;
+  --popover: 46 71% 95%;
+  --popover-foreground: 38 33% 12%;
+
+  --primary: 217 53% 33%;          /* lapis */
+  --primary-foreground: 46 71% 95%;
+  --secondary: 44 60% 91%;
+  --secondary-foreground: 38 33% 12%;
+  --muted: 44 60% 91%;
+  --muted-foreground: 40 28% 33%;
+  --accent: 41 56% 52%;            /* gold for shadcn accent (overrides new-contract --accent string above for HSL only — Tailwind utilities) */
+  --accent-foreground: 38 33% 12%;
+
+  --destructive: 1 66% 29%;        /* oxblood */
+  --destructive-foreground: 46 71% 95%;
+  --success: 71 41% 33%;           /* olive */
+  --warning: 41 56% 52%;           /* gold */
+  --info: 217 53% 33%;             /* lapis */
+
+  --border: 33 51% 19%;            /* border-strong drives the visible borders */
+  --input: 40 33% 60%;
+  --ring: 217 53% 33%;
+
+  /* ── Action role bridge ───────────────────────────────────────────── */
+
+  --action-run: 71 41% 33%;
+  --action-run-soft: 71 41% 33% / 0.18;
+  --action-run-hover: 71 41% 33% / 0.30;
+  --action-run-border: 71 41% 33% / 0.7;
+
+  --action-stop: 1 66% 29%;
+  --action-stop-soft: 1 66% 29% / 0.16;
+  --action-stop-hover: 1 66% 29% / 0.28;
+  --action-stop-border: 1 66% 29% / 0.7;
+
+  --action-save: 41 56% 52%;
+  --action-save-soft: 41 56% 52% / 0.20;
+  --action-save-hover: 41 56% 52% / 0.35;
+  --action-save-border: 41 56% 52% / 0.7;
+
+  --action-config: 41 56% 52%;
+  --action-config-soft: 41 56% 52% / 0.18;
+  --action-config-hover: 41 56% 52% / 0.30;
+  --action-config-border: 41 56% 52% / 0.6;
+
+  --action-secret: 217 53% 33%;
+  --action-secret-soft: 217 53% 33% / 0.14;
+  --action-secret-hover: 217 53% 33% / 0.26;
+  --action-secret-border: 217 53% 33% / 0.7;
+
+  --action-tools: 217 53% 33%;
+  --action-tools-soft: 217 53% 33% / 0.14;
+  --action-tools-hover: 217 53% 33% / 0.26;
+  --action-tools-border: 217 53% 33% / 0.7;
+
+  --tint-soft: 14%;
+  --tint-border: 35%;
+}
+
+/* ── Body marble texture ──────────────────────────────────────────────── */
+
+:root[data-theme="greek"] body {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><filter id='m'><feTurbulence baseFrequency='0.012 0.04' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.85 0 0 0 0 0.78 0 0 0 0 0.61 0 0 0 0.18 0'/></filter><rect width='400' height='400' filter='url(%23m)'/></svg>"),
+    var(--bg-app);
+}
+
+/* ── Decorative rules (activate after Wave 2 wrappers land) ──────────── */
+
+:root[data-theme="greek"] .toolbar,
+:root[data-theme="greek"] .sidebar,
+:root[data-theme="greek"] .palette,
+:root[data-theme="greek"] .chat {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><filter id='m'><feTurbulence baseFrequency='0.014 0.05' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 0.85 0 0 0 0 0.78 0 0 0 0 0.61 0 0 0 0.14 0'/></filter><rect width='400' height='400' filter='url(%23m)'/></svg>"),
+    var(--bg-panel);
+}
+
+:root[data-theme="greek"] .canvas-host {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'><g fill='none' stroke='%234a3818' stroke-width='0.4' opacity='0.18'><path d='M0 40 H10 V20 H30 V60 H50 V20 H70 V40 H80'/></g></svg>"),
+    var(--bg-canvas);
+}
+
+:root[data-theme="greek"] .modal-frame {
+  border: 4px double var(--border-strong) !important;
+}
+
+::selection {}
+:root[data-theme="greek"] ::selection {
+  background: rgba(40, 75, 130, 0.4);
+  color: #2a2415;
+}

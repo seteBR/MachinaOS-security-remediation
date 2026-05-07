@@ -518,7 +518,7 @@ const InputSection: React.FC<InputSectionProps> = ({ nodeId, visible = true }) =
       {/* Header */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-background px-4 py-3">
         <Database className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-semibold text-foreground">Input Data &amp; Variables</span>
+        <span className="font-display text-sm font-semibold tracking-[var(--type-tracking-display)] text-fg-default [text-transform:var(--type-uppercase)]">Input Data &amp; Variables</span>
         <Badge variant="info">{connectedNodes.length}</Badge>
       </div>
 
@@ -541,7 +541,7 @@ const InputSection: React.FC<InputSectionProps> = ({ nodeId, visible = true }) =
               >
                 <div className="flex items-center gap-2">
                   <NodeIcon icon={node.icon} className="h-5 w-5 text-lg" />
-                  <span className="text-sm font-semibold text-foreground">{node.name}</span>
+                  <span className="font-display text-sm font-semibold text-fg-default">{node.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant={node.hasExecutionData ? 'success' : 'warning'}>

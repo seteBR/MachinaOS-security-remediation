@@ -136,7 +136,7 @@ const ParameterPanel: React.FC = () => {
   // Header actions with node name and buttons in middle area
   const headerActions = (
     <div className="flex items-center gap-4">
-      <div className="flex items-center gap-2 text-[15px] font-semibold text-foreground">
+      <div className="flex items-center gap-2 font-display text-[15px] font-semibold tracking-[var(--type-tracking-display)] text-fg-default [text-transform:var(--type-uppercase)]">
         <NodeIcon
           icon={nodeDefinition.icon}
           className="h-5 w-5 text-xl"

@@ -1,0 +1,134 @@
+/* ============================================================================
+ * themes/edo.css — washi paper, sumi-e ink, vermillion hanko seal.
+ *
+ * Quiet, asymmetric, lots of negative space. Reads like an ink-painting on
+ * rice paper. Ported from design_handoff_machinaos_themes/themes/edo.css.
+ * ============================================================================ */
+
+:root[data-theme="edo"] {
+  --bg-app: #f4ecd8;
+  --bg-panel: #faf3e0;
+  --bg-canvas: #ede4ca;
+  --bg-elevated: #fdf8ea;
+  --bg-input: #fdf8ea;
+  --bg-hover: rgba(180, 30, 30, 0.06);
+  --bg-active: rgba(180, 30, 30, 0.14);
+  --bg-overlay: rgba(40, 30, 20, 0.55);
+
+  --border-default: #c8b890;
+  --border-strong: #1a1410;
+  --border-focus: #b41e1e;
+  --ornament-frame: none;
+
+  --fg-default: #1a1410;
+  --fg-muted: #6a5e48;
+  --fg-faint: #a89a78;
+  --fg-on-accent: #fdf8ea;
+  --fg-on-success: #fdf8ea;
+  --fg-on-danger: #fdf8ea;
+  --fg-on-warning: #1a1410;
+
+  --sumi: #1a1410;
+  --sakura: #e89aa8;
+  --bamboo: #4a6a3a;
+  --tea: #8a6a3a;
+  --vermillion: #b41e1e;
+
+  --font-display: 'Shippori Mincho', 'Sawarabi Mincho', 'Noto Serif JP', serif;
+  --font-body: 'Shippori Mincho', 'Sawarabi Mincho', 'Noto Serif JP', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --type-scale-base: 14px;
+  --type-tracking-display: 0.06em;
+  --type-uppercase: none;
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-pill: 0px;
+
+  --dur-fast: 90ms;
+  --dur-default: 220ms;
+  --dur-slow: 520ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasis: cubic-bezier(0.7, -0.1, 0.3, 1.2);
+  --motion-style: organic;
+  --sound-pack: ink;
+
+  --cursor-default: auto;
+  --cursor-pointer: pointer;
+  --scrollbar-track: #f4ecd8;
+  --scrollbar-thumb: #c8b890;
+
+  /* Shadcn HSL bridge */
+  --background: 41 56% 90%;
+  --foreground: 24 25% 8%;
+  --card: 44 80% 96%;
+  --card-foreground: 24 25% 8%;
+  --popover: 44 80% 96%;
+  --popover-foreground: 24 25% 8%;
+
+  --primary: 0 71% 41%;            /* vermillion */
+  --primary-foreground: 44 80% 96%;
+  --secondary: 44 71% 93%;
+  --secondary-foreground: 24 25% 8%;
+  --muted: 44 71% 93%;
+  --muted-foreground: 36 19% 35%;
+  --accent: 0 71% 41%;
+  --accent-foreground: 44 80% 96%;
+
+  --destructive: 0 71% 41%;
+  --destructive-foreground: 44 80% 96%;
+  --success: 100 29% 32%;          /* bamboo */
+  --warning: 41 60% 49%;
+  --info: 24 25% 8%;               /* sumi black for info */
+
+  --border: 24 25% 8%;
+  --input: 40 35% 67%;
+  --ring: 0 71% 41%;
+
+  /* Action role bridge */
+  --action-run: 100 29% 32%;
+  --action-run-soft: 100 29% 32% / 0.14;
+  --action-run-hover: 100 29% 32% / 0.26;
+  --action-run-border: 100 29% 32% / 0.7;
+
+  --action-stop: 0 71% 41%;
+  --action-stop-soft: 0 71% 41% / 0.14;
+  --action-stop-hover: 0 71% 41% / 0.28;
+  --action-stop-border: 0 71% 41% / 0.7;
+
+  --action-save: 0 71% 41%;
+  --action-save-soft: 0 71% 41% / 0.16;
+  --action-save-hover: 0 71% 41% / 0.30;
+  --action-save-border: 0 71% 41% / 0.7;
+
+  --action-config: 41 60% 49%;
+  --action-config-soft: 41 60% 49% / 0.16;
+  --action-config-hover: 41 60% 49% / 0.28;
+  --action-config-border: 41 60% 49% / 0.6;
+
+  --action-secret: 24 25% 8%;
+  --action-secret-soft: 24 25% 8% / 0.10;
+  --action-secret-hover: 24 25% 8% / 0.20;
+  --action-secret-border: 24 25% 8% / 0.5;
+
+  --action-tools: 100 29% 32%;
+  --action-tools-soft: 100 29% 32% / 0.14;
+  --action-tools-hover: 100 29% 32% / 0.26;
+  --action-tools-border: 100 29% 32% / 0.6;
+
+  --tint-soft: 10%;
+  --tint-border: 30%;
+}
+
+/* Body washi texture */
+:root[data-theme="edo"] body {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='w'><feTurbulence baseFrequency='0.85' numOctaves='1'/><feColorMatrix values='0 0 0 0 0.65 0 0 0 0 0.55 0 0 0 0 0.35 0 0 0 0.06 0'/></filter><rect width='300' height='300' filter='url(%23w)'/></svg>"),
+    var(--bg-app);
+}
+
+:root[data-theme="edo"] ::selection {
+  background: rgba(180, 30, 30, 0.30);
+  color: #1a1410;
+}

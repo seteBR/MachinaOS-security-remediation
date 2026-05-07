@@ -1,31 +1,51 @@
-# Theme System — design-handoff token contract + 4-way themes
+# Theme System — design-handoff token contract + 10 themes
 
-The MachinaOs frontend supports four visual themes — **light**, **dark**, **renaissance**, **cyber** — selected at runtime via `<html data-theme="...">`. The system is purely CSS-variable-driven: components render against semantic token names, and the active `[data-theme="..."]` block in `client/src/themes/` rebinds those tokens to the theme's surface, foreground, accent, typography, geometry, and motion values.
+The MachinaOs frontend supports **ten visual themes**, organised as a utopian / dystopian taxonomy from the design handoff:
 
-This document is the playbook for working in the design system: token taxonomy, migration recipe, anti-patterns, and where each piece lives.
+**Utopian:** `light` · `dark` · `renaissance` · `greek` · `edo` · `steampunk` · `atomic`
+**Dystopian:** `cyber` · `wasteland` · `rot` · `plague` · `surveillance`
+
+Selected at runtime via `<html data-theme="...">`. The system is purely CSS-variable-driven: components render against semantic token names, and the active `[data-theme="..."]` block in `client/src/themes/` rebinds those tokens to the theme's surface, foreground, accent, typography, geometry, motion, and sound-pack values.
+
+This document is the playbook for working in the design system: token taxonomy, decorative-layer wrappers, per-theme sound + canvas packs, migration recipe, anti-patterns, and where each piece lives.
 
 ## Architecture at a glance
 
 ```
 client/src/themes/
-├── base.css         neutral defaults (space, motion easings, sound pack hint)
-├── light.css        :root + :root[data-theme="light"] — new contract values
-├── dark.css         .dark + :root[data-theme="dark"]   — new contract values
-├── renaissance.css  :root[data-theme="renaissance"]    — full palette + bridge
-└── cyber.css        :root[data-theme="cyber"]          — full palette + bridge
+├── base.css         neutral defaults (space, radii, motion easings, sound pack hint)
+├── light.css        :root + :root[data-theme="light"]    — new contract values
+├── dark.css         .dark + :root[data-theme="dark"]     — new contract values
+├── renaissance.css  :root[data-theme="renaissance"]      — full palette + shadcn bridge
+├── greek.css        :root[data-theme="greek"]            — lapis + oxblood on marble
+├── edo.css          :root[data-theme="edo"]              — washi + sumi + vermillion
+├── steampunk.css    :root[data-theme="steampunk"]        — brass + copper on leather
+├── atomic.css       :root[data-theme="atomic"]           — atomic orange on cardstock
+├── cyber.css        :root[data-theme="cyber"]            — neon over void
+├── wasteland.css    :root[data-theme="wasteland"]        — ochre + radioactive scrap
+├── rot.css          :root[data-theme="rot"]              — moss bloom in crypt
+├── plague.css       :root[data-theme="plague"]           — woodcut quarantine
+└── surveillance.css :root[data-theme="surveillance"]     — REC red + phosphor
 
 client/src/index.css
-├── @layer base :root  — shadcn HSL-triplet tokens (light defaults)
+├── @layer base :root  — shadcn HSL-triplet tokens (light defaults) + dracula raw
 ├── @layer base .dark  — shadcn HSL-triplet tokens (dark overrides)
 └── @theme inline { … } — Tailwind v4 utility bindings for both contracts
+                          (--color-bg-app, --color-fg-default, --color-border-default,
+                           --font-display, --font-body, etc.)
 
 client/src/contexts/ThemeContext.tsx
-├── theme: 'light' | 'dark' | 'renaissance' | 'cyber'
+├── ThemeName = 'light' | 'dark' | 'renaissance' | 'greek' | 'edo' | 'steampunk'
+│             | 'atomic' | 'cyber' | 'wasteland' | 'rot' | 'plague' | 'surveillance'
+├── DARK_FAMILY = {dark, cyber, wasteland, rot, surveillance, steampunk}
 ├── persists to localStorage['machinaos-theme']
-├── migrates legacy 'darkMode' boolean
-└── sets <html data-theme="..."> + (.dark class for legacy `dark:` Tailwind variants)
+├── migrates legacy 'darkMode' boolean on first load
+└── sets <html data-theme="..."> + .dark class (only for DARK_FAMILY themes)
 
-client/src/components/ui/ThemeSwitcher.tsx — DropdownMenu in TopToolbar
+client/src/hooks/useAppTheme.ts        — 10-way Colors overlay (canvas + maps)
+client/src/lib/sound.ts                — WebAudio engine, 10 packs × 9 events
+client/src/hooks/useSound.ts           — useSoundSync() + useSound()
+client/src/components/ui/ThemeSwitcher.tsx — grouped DropdownMenu (System/Utopian/Dystopian)
 client/src/components/ui/StatusBar.tsx     — fixed-bottom system console
 client/src/components/ui/CommandPalette.tsx + CommandPaletteHost.tsx — ⌘K launcher
 ```
@@ -58,9 +78,11 @@ Surface hierarchy across themes; every theme assigns these in its `:root[data-th
 
 | Tailwind utility | CSS var | Purpose |
 |---|---|---|
-| `border-default` | `--border-default` | Standard borders + dividers |
-| `border-strong` | `--border-strong` | Section separators, focused panels |
-| `border-focus` | `--border-focus` | Focus rings (often shadowed) |
+| `border-border-default` | `--border-default` | Standard borders + dividers |
+| `border-border-strong` | `--border-strong` | Section separators, focused panels |
+| `border-border-focus` | `--border-focus` | Focus rings (often shadowed) |
+
+(Tailwind v4 names colour utilities `border-{token}` where `{token}` is the suffix after `--color-`; since we expose `--color-border-default`, the utility is `border-border-default`.)
 
 | Tailwind utility | CSS var | Purpose |
 |---|---|---|
@@ -118,7 +140,7 @@ Concrete swaps when migrating an existing component:
 
 ### Display-typography helper
 
-Heading surfaces under all four themes use the same triplet. Keep them grouped in the same className for clarity:
+Heading surfaces under all 10 themes use the same triplet. Keep them grouped in the same className for clarity:
 
 ```tsx
 <span className="font-display tracking-[var(--type-tracking-display)] text-fg-default [text-transform:var(--type-uppercase)]">
@@ -126,10 +148,18 @@ Heading surfaces under all four themes use the same triplet. Keep them grouped i
 </span>
 ```
 
-Result:
-- Light/dark: clean Geist sans, no transform, no extra tracking
-- Renaissance: Cinzel uppercase, +0.10em tracking
-- Cyber: Major Mono Display uppercase, +0.18em tracking
+Result by theme (display font / tracking / case):
+- **Light + Dark** — Geist Variable / 0 / `none`
+- **Renaissance** — Cinzel / 0.10em / `uppercase`
+- **Greek** — Cinzel / 0.18em / `uppercase`
+- **Edo** — Shippori Mincho / 0.06em / `none`
+- **Steampunk** — IM Fell English SC / 0.10em / `uppercase`
+- **Atomic** — Bevan / 0.06em / `uppercase`
+- **Cyber** — Major Mono Display / 0.18em / `uppercase`
+- **Wasteland** — Special Elite / 0.10em / `uppercase`
+- **Rot** — Pirata One / 0.04em / `none`
+- **Plague** — UnifrakturCook / 0.06em / `uppercase`
+- **Surveillance** — Anonymous Pro / 0.10em / `uppercase`
 
 ## Adding a new theme
 
@@ -164,9 +194,12 @@ Result:
    }
    ```
 2. Import it in [client/src/main.tsx](../client/src/main.tsx) **before** `index.css`.
-3. Add the name to `AVAILABLE_THEMES` in [client/src/contexts/ThemeContext.tsx](../client/src/contexts/ThemeContext.tsx).
-4. (Optional) Add a `THEME_META` entry in [client/src/components/ui/ThemeSwitcher.tsx](../client/src/components/ui/ThemeSwitcher.tsx) for the dropdown label + blurb.
-5. (Optional) If the theme uses non-system fonts, add a `<link rel="stylesheet">` in [client/index.html](../client/index.html) — currently Renaissance + Cyber load Cinzel / Cormorant Garamond / IM Fell English / Major Mono Display / VT323 / JetBrains Mono via the deferred Google Fonts link there.
+3. Add the name to `ThemeName` + `AVAILABLE_THEMES` in [client/src/contexts/ThemeContext.tsx](../client/src/contexts/ThemeContext.tsx). Add to `DARK_FAMILY` if the theme's background is dark.
+4. Add a `THEME_META` entry in [client/src/components/ui/ThemeSwitcher.tsx](../client/src/components/ui/ThemeSwitcher.tsx) (label + blurb) and append to the matching `THEME_GROUPS` row (System / Utopian / Dystopian).
+5. Add the theme name to `THEME_LABEL` in [client/src/components/ui/StatusBar.tsx](../client/src/components/ui/StatusBar.tsx) and [client/src/components/ui/CommandPaletteHost.tsx](../client/src/components/ui/CommandPaletteHost.tsx).
+6. **(Optional, canvas)** Add a `THEME_OVERRIDES` entry in [client/src/hooks/useAppTheme.ts](../client/src/hooks/useAppTheme.ts) so canvas selection rings, action buttons, and edge strokes pick up the theme's accents. Whichever keys you omit fall through to `lightColors` / `darkColors` (chosen by `DARK_BASE_THEMES`).
+7. **(Optional, fonts)** If the theme uses Google Fonts not already loaded, append the family to the deferred-load `<link>` in [client/index.html](../client/index.html).
+8. **(Optional, sound)** Pick one of the 10 existing `SoundPackName` values in `--sound-pack` (or add a new pack to [client/src/lib/sound.ts](../client/src/lib/sound.ts) and the `VALID_PACKS` set in [client/src/hooks/useSound.ts](../client/src/hooks/useSound.ts)).
 
 **No component code changes.** That is the contract.
 
@@ -176,29 +209,76 @@ Result:
 2. **Whole-store Zustand destructure.** Always `useAppStore((s) => s.x)`, never `{ x } = useAppStore()`.
 3. **Opacity arithmetic on new-contract tokens.** `bg-bg-app/10` does not work — they're full-colour. Add a new variant under `client/src/themes/<name>.css` if you need a different alpha, or fall back to the shadcn alias (`bg-background/10`).
 4. **Hardcoded colours.** No `bg-white`, `bg-black`, `text-gray-500`, `style={{ backgroundColor: '#fff' }}`. Use tokens.
-5. **`useAppTheme()` in new files.** Grandfathered for canvas node components (`AIAgentNode`, `SquareNode`, `TriggerNode`, `StartNode`, `ToolkitNode`, `TeamMonitorNode`, `GenericNode`) and `EdgeConditionEditor` — they interpolate per-definition `nodeColor` into gradients. Plus `MapSelector` / `GoogleMapsPicker` which need hex for the Maps SDK. Every other surface uses Tailwind + tokens.
+5. **`useAppTheme()` in new files.** Allowed only for surfaces that need JS-side hex values Tailwind can't express: canvas node components (`AIAgentNode`, `SquareNode`, `TriggerNode`, `StartNode`, `ToolkitNode`, `TeamMonitorNode`, `GenericNode`), `EdgeConditionEditor`, and the Google Maps SDK consumers (`MapSelector`, `GoogleMapsPicker`, `MapsPreviewPanel`). Every other surface uses Tailwind + tokens. New themes contribute to `useAppTheme` via a `THEME_OVERRIDES` entry, never by importing `lightColors` / `darkColors` directly.
 6. **Hand-rolled modal backdrops.** Use `<Modal>` from `client/src/components/ui/Modal.tsx`.
 7. **Hand-rolled colored buttons.** Use `<ActionButton intent="...">`.
-8. **Static fallback theme palettes in TS.** Themes live in CSS, not TS exports. The `client/src/styles/theme.ts` file is grandfathered for the canvas + Maps SDK only.
+8. **Static fallback theme palettes in TS.** Themes live in CSS (`client/src/themes/<name>.css`), not TS exports. `client/src/styles/theme.ts` ships only the two `lightColors` / `darkColors` base packs that `useAppTheme` overlays on top of — it is not a place to add a third / fourth / Nth palette.
 
 ## What's done vs deferred
 
-### Done (this migration)
-- Token contract: 4 themes (light, dark, renaissance, cyber)
-- ThemeProvider extended; legacy `darkMode` localStorage migration
-- ThemeSwitcher in TopToolbar
-- Tailwind v4 `@theme inline` exposing new utilities
-- Migrated: Modal, TopToolbar, WorkflowSidebar, ComponentPalette, ComponentItem, CollapsibleSection, ConsolePanel chrome, SettingsPanel
-- New: StatusBar (fixed-bottom system console), CommandPalette (⌘K), CommandPaletteHost
-- Google Fonts deferred-load
-- Build + typecheck clean
+### Done
+- **Token contract**: all 10 themes ported in [client/src/themes/](../client/src/themes) (5 utopian + 5 dystopian)
+- **ThemeProvider** ([client/src/contexts/ThemeContext.tsx](../client/src/contexts/ThemeContext.tsx)) — 10-way `ThemeName`, `DARK_FAMILY` ⊃ `{dark, cyber, wasteland, rot, surveillance, steampunk}`, legacy `darkMode` localStorage migration on first load
+- **ThemeSwitcher** — DropdownMenu grouped into System / Utopian / Dystopian sections, all 10 themes
+- **Tailwind v4 `@theme inline`** exposing new-contract utilities (`bg-bg-app`, `text-fg-default`, `border-border-default`, `font-display`, `font-body`, `rounded-pill`)
+- **Decorative wrappers** — Dashboard root carries `app-frame`, the React Flow host carries `canvas-host`, every Modal carries `modal-frame`. Per-theme CSS targets these classes for outer ornaments (gilded corners, scanlines, riveted borders, REC dot, etc.)
+- **Migrated chrome**: TopToolbar, WorkflowSidebar, ComponentPalette + ComponentItem + CollapsibleSection, ConsolePanel chrome, SettingsPanel, Modal, ParameterPanel modal title, AIResultModal title, OutputDisplayPanel title, InputSection title
+- **New shell components**: StatusBar (fixed-bottom system line with WS connection / workflow / theme / clock), CommandPalette (`⌘K`), CommandPaletteHost (canonical command list with Workflow / Run / Open / View / Theme groups)
+- **Google Fonts** — deferred-load `<link>` covers all 10 themes' typefaces (Cinzel, Cormorant Garamond, IM Fell English / SC, JetBrains Mono, Major Mono Display, VT323, Shippori Mincho, Sawarabi Mincho, Special Elite, Bevan, Lato, Pirata One, EB Garamond, UnifrakturCook, Anonymous Pro, IBM Plex Mono, Courier Prime, Space Mono)
+- **Sound contract** — [client/src/lib/sound.ts](../client/src/lib/sound.ts) ports the upstream WebAudio engine with all 10 packs (`parchment`, `marble`, `ink`, `clockwork`, `vibraphone`, `terminal`, `scrap`, `crypt`, `bell`, `telex`). [client/src/hooks/useSound.ts](../client/src/hooks/useSound.ts) reads `--sound-pack` from `:root` on theme change and mirrors the `soundEnabled` Zustand slice into `Sounds.setEnabled()`. ActionButton fires `play('click')` from its onClick wrapper, Modal fires `play('modalOpen' | 'modalClose')` on the `isOpen` transition. Settings panel ships the toggle (Audio section). Persists to `localStorage['machinaos-sound']`; default off (opt-in).
+- **Canvas overlay packs** — [client/src/hooks/useAppTheme.ts](../client/src/hooks/useAppTheme.ts) extended from 2-way (`{light, dark}`) to 10-way: a `THEME_OVERRIDES` map applies a small overlay (primary, focus, focusRing, action colours, edge palette) on top of `lightColors` / `darkColors`. Existing call sites continue to read `theme.colors.X` and `theme.isDarkMode` unchanged; canvas selection rings, action buttons, and edge strokes pick up the active theme's accents under any of the 10 themes.
 
 ### Deferred (future PRs)
-- **Canvas nodes**: `AIAgentNode`, `SquareNode`, `TriggerNode`, `StartNode`, `ToolkitNode`, `TeamMonitorNode`, `GenericNode` still call `useAppTheme()` for inline gradients tied to per-node colours. Under Renaissance/Cyber they'll use the light or dark palette (depending on `isDarkMode`). To fully migrate, extend `useAppTheme` to return one of four colour packs, or move per-node gradient styles into per-theme CSS.
-- **Parameter panel internals** (`ParameterRenderer`, `MiddleSection`, `MasterSkillEditor`): consume shadcn semantic tokens through the bridge — function correctly under all themes but headers don't yet pick up `font-display`. Apply the migration recipe above when touching them.
-- **Credentials modal sub-panels** (`OAuthPanel`, `EmailPanel`, `ApiKeyPanel`, `QrPairingPanel`): same — inherit via the bridge, can be promoted when touched.
-- **Decorative layers** from the design handoff (vellum noise, fleur-de-lis, scanlines, CRT flicker on `.app-frame`): per-theme CSS files include the body-level background gradients, but per-component decorations (corner ornaments, marginalia, scanlines on modals) target classes like `.app-frame`, `.canvas`, `.sq-node` that don't always exist in the React tree. Add wrapper classes (e.g., add `app-frame` to the Dashboard root) and import the decorative blocks from `design_handoff_machinaos_themes/themes/` as the surfaces stabilise.
-- **Sound pack** (`--sound-pack` token): each theme declares its sound name (`parchment`, `terminal`, `chime`); JS hook + WebAudio implementation are tracked on the handoff but not yet wired.
+- **Per-theme icon sets** — the upstream [`app/icons.js`](../design_handoff_machinaos_themes/app/icons.js) ships 28-key glyph sets per theme (heraldic shields under Renaissance, wireframe + glow under Cyber, woodcut hatching under Plague, etc.). The current shell uses `lucide-react` icons under all themes via `currentColor`, which retints correctly via the bridge but doesn't carry per-theme glyph language. Migration recipe: build `client/src/icons/` with an `<Icon name>` component that reads the active theme via `useTheme()` and resolves to one of 10 SVG-string sets. Lucide stays as a fallback for missing keys.
+- **Per-component decorative class hooks** — the `.app-frame` / `.canvas-host` / `.modal-frame` wrappers are wired. A handful of finer-grained hooks remain (`.sq-node`, `.cat`, `.cmdk`, `.menu-pop`) — adding each to the matching React component is a one-line edit per surface and a no-op under themes that don't define decorations for it.
+- **Parameter panel internals** — `MiddleSection`, `MasterSkillEditor`, `ParameterRenderer` consume shadcn tokens through the bridge so they retint correctly, but their interior section headers don't yet carry the display-typography triplet. Apply the recipe (`font-display tracking-[var(--type-tracking-display)] text-fg-default [text-transform:var(--type-uppercase)]`) when next touched.
+- **Credentials modal sub-panels** — `OAuthPanel`, `EmailPanel`, `ApiKeyPanel`, `QrPairingPanel` headers same pattern.
+
+## Sound system
+
+Each theme declares `--sound-pack: "<pack>"` in its `:root[data-theme="..."]` block. Pack names map to event tables in [client/src/lib/sound.ts](../client/src/lib/sound.ts):
+
+| Theme | Pack | Voice |
+|---|---|---|
+| renaissance | `parchment` | Soft sine plucks + low-pass |
+| greek | `marble` | Warm chisel taps |
+| edo | `ink` | Soft brush + temple bell |
+| steampunk | `clockwork` | Mechanical ratchet + brass |
+| atomic | `vibraphone` | Mid-century jazz mallet |
+| cyber | `terminal` | Square-wave terminal beeps |
+| wasteland | `scrap` | Distorted clanging metal |
+| rot | `crypt` | Dripping water + low organ |
+| plague | `bell` | Struck church bell + stone echo |
+| surveillance | `telex` | Typewriter clack + Geiger tick |
+| light / dark | (system fallback `parchment`/`terminal` if requested) | — |
+
+Wiring:
+1. Mount `useSoundSync()` once at the Dashboard root — done in [client/src/Dashboard.tsx](../client/src/Dashboard.tsx).
+2. Every `<ActionButton>` fires `play('click')` on click via the CVA primitive — call sites don't need to wrap.
+3. `<Modal>` fires `play('modalOpen' | 'modalClose')` on `isOpen` edges.
+4. Settings panel ships an Audio section with a Switch bound to `useAppStore.soundEnabled`.
+
+Adding a new sound event: extend `SoundEvent` in `lib/sound.ts`, add an entry per pack, fire `play('<event>')` from the handler.
+
+## Canvas overlay packs (`useAppTheme`)
+
+The hook returns a `theme` object with the same shape every call site already destructures — `theme.colors.X` and `theme.isDarkMode` continue to work. Under non-light/dark themes a small overlay merges into the base pack:
+
+```typescript
+const THEME_OVERRIDES: Partial<Record<ThemeName, ColorOverride>> = {
+  cyber: {
+    primary: '#f51eb6',          // neon magenta
+    focus: '#1dd9e5',
+    actionRun: '#26d97a',
+    edgeDefault: '#f51eb6',
+    edgeSelected: '#1dd9e5',
+    /* ... */
+  },
+  /* ... 9 more themes */
+};
+```
+
+The overlay only re-binds the keys most visible on the canvas (primary, focus, action buttons, edge palette). Everything else (background, text, border) stays on the chosen base pack (`darkColors` for `DARK_BASE_THEMES`, `lightColors` for the rest). Adding a new theme means adding one `THEME_OVERRIDES` entry; missing entries are a no-op (theme falls back to pure light/dark).
 
 ## Verification checklist
 
@@ -233,14 +313,26 @@ cd client && npx eslint <files>
 | [client/src/themes/light.css](../client/src/themes/light.css) | Light theme tokens |
 | [client/src/themes/dark.css](../client/src/themes/dark.css) | Dark theme tokens |
 | [client/src/themes/renaissance.css](../client/src/themes/renaissance.css) | Renaissance theme + bridge |
-| [client/src/themes/cyber.css](../client/src/themes/cyber.css) | Cyber theme + bridge |
+| [client/src/themes/greek.css](../client/src/themes/greek.css) | Greek theme + bridge |
+| [client/src/themes/edo.css](../client/src/themes/edo.css) | Edo theme + bridge |
+| [client/src/themes/steampunk.css](../client/src/themes/steampunk.css) | Steampunk theme + bridge |
+| [client/src/themes/atomic.css](../client/src/themes/atomic.css) | Atomic Modern theme + bridge |
+| [client/src/themes/cyber.css](../client/src/themes/cyber.css) | Cyber-Tyranny theme + bridge |
+| [client/src/themes/wasteland.css](../client/src/themes/wasteland.css) | Wasteland theme + bridge |
+| [client/src/themes/rot.css](../client/src/themes/rot.css) | Necromantic Rot theme + bridge |
+| [client/src/themes/plague.css](../client/src/themes/plague.css) | Plague City theme + bridge |
+| [client/src/themes/surveillance.css](../client/src/themes/surveillance.css) | Surveillance theme + bridge |
 | [client/src/index.css](../client/src/index.css) | shadcn HSL triplets + `@theme inline` Tailwind utilities |
-| [client/src/contexts/ThemeContext.tsx](../client/src/contexts/ThemeContext.tsx) | `<ThemeProvider>` + `useTheme()` |
-| [client/src/components/ui/ThemeSwitcher.tsx](../client/src/components/ui/ThemeSwitcher.tsx) | Dropdown picker in TopToolbar |
+| [client/src/contexts/ThemeContext.tsx](../client/src/contexts/ThemeContext.tsx) | `<ThemeProvider>` + `useTheme()` (10-way) |
+| [client/src/hooks/useAppTheme.ts](../client/src/hooks/useAppTheme.ts) | Canvas overlay packs (10 themes × Colors override) |
+| [client/src/lib/sound.ts](../client/src/lib/sound.ts) | WebAudio engine — 10 sound packs, 9 events |
+| [client/src/hooks/useSound.ts](../client/src/hooks/useSound.ts) | `useSoundSync()` + `useSound()` React glue |
+| [client/src/components/ui/ThemeSwitcher.tsx](../client/src/components/ui/ThemeSwitcher.tsx) | Grouped dropdown picker (System / Utopian / Dystopian) |
 | [client/src/components/ui/StatusBar.tsx](../client/src/components/ui/StatusBar.tsx) | Fixed-bottom system line |
 | [client/src/components/ui/CommandPalette.tsx](../client/src/components/ui/CommandPalette.tsx) | ⌘K palette primitive |
 | [client/src/components/ui/CommandPaletteHost.tsx](../client/src/components/ui/CommandPaletteHost.tsx) | Registered command set |
-| [client/src/components/ui/action-button.tsx](../client/src/components/ui/action-button.tsx) | CVA action role primitive |
-| [client/src/components/ui/Modal.tsx](../client/src/components/ui/Modal.tsx) | Shared modal layout |
-| [client/index.html](../client/index.html) | Google Fonts loading |
+| [client/src/components/ui/action-button.tsx](../client/src/components/ui/action-button.tsx) | CVA action role primitive (fires `play('click')`) |
+| [client/src/components/ui/Modal.tsx](../client/src/components/ui/Modal.tsx) | Shared modal layout (fires `play('modalOpen'/'modalClose')`) |
+| [client/index.html](../client/index.html) | Google Fonts loading (all 10 themes' typefaces) |
 | [design_handoff_machinaos_themes/](../design_handoff_machinaos_themes/) | Reference HTML mocks + token spec |
+| [design_handoff_machinaos_themes/MIGRATION_PLAYBOOK.md](../design_handoff_machinaos_themes/MIGRATION_PLAYBOOK.md) | Upstream recipe for the 4 deferred items (canvas, headers, decorative wrapper, sound) — all now landed |

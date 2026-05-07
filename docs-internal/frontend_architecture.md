@@ -162,9 +162,14 @@ client/src/
 │   └── utils.ts                    # cn() = clsx + tailwind-merge (shadcn convention)
 │
 ├── styles/
-│   └── theme.ts                    # LEGACY. Still exported for components that
-│                                   # reference theme.colors / theme.dracula.* directly.
-│                                   # Will shrink over time as those sites inline Tailwind tokens.
+│   └── theme.ts                    # `lightColors` / `darkColors` base packs +
+│                                   # `dracula` / `solarized` constants. Read
+│                                   # exclusively by `useAppTheme` (which
+│                                   # overlays per-theme accents on top of the
+│                                   # base pack — see hooks/useAppTheme.ts) and
+│                                   # by canvas node components for inline
+│                                   # gradients tied to per-definition node
+│                                   # colors. Not imported anywhere else.
 │
 ├── services/
 │   ├── executionService.ts         # ExecutionResult shape + node-execution plumbing
@@ -184,7 +189,9 @@ client/src/
 
 ## Tokens + theming
 
-Single source of truth: [src/index.css](../client/src/index.css).
+The frontend ships **10 themes** organised utopian / dystopian: `light` · `dark` · `renaissance` · `greek` · `edo` · `steampunk` · `atomic` · `cyber` · `wasteland` · `rot` · `plague` · `surveillance`. Active theme is `<html data-theme="...">` set by `<ThemeProvider>` (see [contexts/ThemeContext.tsx](../client/src/contexts/ThemeContext.tsx)). Per-theme blocks live in [client/src/themes/](../client/src/themes/); shadcn-aliased HSL triplets in [src/index.css](../client/src/index.css). Full token contract, sound + decorative-layer wiring, and the 10-theme migration playbook in **[theme_system.md](./theme_system.md)** — read that before adding a theme or migrating a component.
+
+Single source of truth for the bridge: [src/index.css](../client/src/index.css).
 
 ```css
 @import "tailwindcss";
@@ -222,6 +229,12 @@ Single source of truth: [src/index.css](../client/src/index.css).
   --node-workflow:     27 100% 71%;   /* + -soft / -border */
 }
 
+/* Dark + the 8 designed themes each ship their own per-theme block.
+ * Every block redeclares the shadcn HSL triplets for the bridge AND
+ * the new-contract tokens (--bg-app, --fg-default, --font-display,
+ * --sound-pack, etc.) the migrated chrome consumes via Tailwind's
+ * --color-bg-app etc. utilities. See client/src/themes/<name>.css for
+ * the full 10-block set + theme_system.md for the contract. */
 [data-theme="dark"] {
   --background: 192 100% 11%;   /* Solarized base03 */
   --foreground: 60 30% 96%;     /* Dracula fg */
@@ -246,15 +259,8 @@ Single source of truth: [src/index.css](../client/src/index.css).
 Rules:
 1. **HSL triplets, no `hsl()` wrapper.** Tailwind composes alpha via `bg-primary/50`.
 2. **shadcn's variable names win** (`--background`, `--primary`, `--destructive`, etc.) so every shadcn-generated file resolves against our palette with no re-wiring.
-3. Dark mode flips via `[data-theme="dark"]` + Tailwind's `.dark` class, both set by `App.tsx`:
-   ```tsx
-   useEffect(() => {
-     const root = document.documentElement;
-     root.classList.toggle('dark', isDarkMode);
-     root.dataset.theme = isDarkMode ? 'dark' : 'light';
-   }, [isDarkMode]);
-   ```
-4. `styles/theme.ts` (`theme.dracula.*`, `theme.colors.*`) is still exported for the canvas node components and `EdgeConditionEditor`. New code should prefer Tailwind classes (`bg-primary`, `bg-action-run-soft`, `bg-node-agent-soft`) or `hsl(var(--...))` inline. Palette names (`text-dracula-green`) are forbidden in components -- go through the matching `--action-X` or `--node-X` semantic role token.
+3. Theme switches via `[data-theme="<name>"]` set by `<ThemeProvider>`. Themes whose backgrounds are dark (`dark`, `cyber`, `wasteland`, `rot`, `surveillance`, `steampunk`) also flip Tailwind's `.dark` class so legacy `dark:` variants resolve correctly. The 10-way `THEME_OVERRIDES` map in [hooks/useAppTheme.ts](../client/src/hooks/useAppTheme.ts) layers per-theme accents (primary, focus, action colours, edge palette) on top of `lightColors` / `darkColors` for canvas surfaces.
+4. `styles/theme.ts` exports `lightColors` / `darkColors` base packs + raw `dracula` / `solarized` palette constants. Consumed only by `useAppTheme` (overlay merge) and canvas node components for inline per-definition gradients. New code uses Tailwind classes (`bg-primary`, `bg-action-run-soft`, `bg-node-agent-soft`, `bg-bg-app`, `text-fg-default`) or `hsl(var(--...))` inline. Palette names (`text-dracula-green`) are forbidden in components — go through the matching `--action-X` or `--node-X` semantic role token.
 
 ### Token tier — pick the most specific that fits
 
@@ -521,4 +527,6 @@ The `MACHINAOS_INSTALLING=true` env var suppresses the recursive project postins
 
 This architecture is the post-migration state. Pre-migration was antd + `styled-components` + a custom theme.ts-driven palette. See [ui_migration_plan.md](./ui_migration_plan.md) for the phase-by-phase transition and the 17 commits that executed it.
 
-**`useAppTheme()` is grandfathered** for the canvas node components (`AIAgentNode`, `SquareNode`, `TriggerNode`, `StartNode`, `ToolkitNode`, `TeamMonitorNode`, `BaseChatModelNode`, `ModelNode`, `GenericNode`) and `EdgeConditionEditor` only — they interpolate per-definition `nodeColor` into gradients, borders, and React Flow `<Handle>` styles. Every other surface uses Tailwind + the token tiers above.
+**`useAppTheme()` powers the canvas + maps surface across all 10 themes.** The hook returns a `theme` object with the legacy `Colors` shape (`theme.colors.X`, `theme.isDarkMode`) so existing call sites don't change. Under non-light/dark themes it merges a per-theme overlay (primary, focus, action palette, edge stroke / selection / executing / completed / error) on top of the chosen base pack (`lightColors` for utopian-bright themes, `darkColors` for dystopian / dark themes). Adding a new theme overlay is a single entry in the `THEME_OVERRIDES` map in [hooks/useAppTheme.ts](../client/src/hooks/useAppTheme.ts).
+
+Read sites: every canvas node component (`AIAgentNode`, `SquareNode`, `TriggerNode`, `StartNode`, `ToolkitNode`, `TeamMonitorNode`, `GenericNode`), `EdgeConditionEditor`, and the Maps surface (`MapSelector`, `GoogleMapsPicker`, `MapsPreviewPanel`) — they interpolate per-definition `nodeColor` and JS-side hex values that Tailwind classes can't express. Every other surface uses Tailwind + the token tiers above and retints automatically through the per-theme `[data-theme="..."]` block.
