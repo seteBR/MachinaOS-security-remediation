@@ -97,6 +97,15 @@ _LEGACY_RAW_DICT_CALLSITES: FrozenSet[str] = frozenset({
     # Task-delegation completion. Migration would namespace as
     # ``agent.task.{succeeded,failed}``; matched by taskTrigger.
     "services/handlers/tools.py",
+    # Agent Builder canvas-mutation broadcast. Emits
+    # ``workflow_ops_apply`` carrying a flat
+    # ``{workflow_id, caller_node_id, operations}`` shape consumed by
+    # ``client/src/hooks/useWorkflowOpsListener.ts``. Migration to
+    # WorkflowEvent would change the wire format (envelope vs flat),
+    # requiring a parallel rewrite of the frontend listener +
+    # invariant test fixtures. Deferred — typed-envelope migration
+    # tracked alongside the credentials.* / agent.task.* migrations.
+    "nodes/tool/agent_builder.py",
 })
 
 

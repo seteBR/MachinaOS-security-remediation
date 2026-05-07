@@ -145,8 +145,19 @@ async def _dispatch_tool(tool_name: str, tool_args: Dict[str, Any],
     node_type = config.get('node_type', '')
     node_params = config.get('parameters', {})
 
-    # Execution context available to all tool handlers (workspace, etc.)
-    context = {'workspace_dir': config.get('workspace_dir', '')}
+    # Execution context for tool handlers. Includes canvas state
+    # (nodes/edges/workflow_id) that callers (chat_tool_executor in
+    # ai.py / rlm adapter / deepagents adapter) plumb in via `config`.
+    # Tools that need canvas awareness (e.g. agentBuilder.inspect_canvas)
+    # read these via NodeContext.nodes / .edges / .workflow_id; tools
+    # that don't simply ignore them.
+    context = {
+        'workspace_dir': config.get('workspace_dir', ''),
+        'nodes': config.get('nodes', []),
+        'edges': config.get('edges', []),
+        'workflow_id': config.get('workflow_id'),
+        'parent_node_id': config.get('parent_node_id'),
+    }
 
     logger.info("[Tool] Executing '%s' (node_type=%s, workspace=%s)", tool_name, node_type, context['workspace_dir'])
 
