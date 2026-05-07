@@ -23,6 +23,7 @@ from typing import Any, Dict
 from starlette.websockets import WebSocket
 
 from core.logging import get_logger
+from services.plugin.ws import ws_response
 from services.status_broadcaster import get_status_broadcaster
 
 logger = get_logger(__name__)
@@ -61,6 +62,7 @@ async def handle_execute_android_action(data: Dict[str, Any], websocket: WebSock
     return result
 
 
+@ws_response
 async def handle_android_relay_connect(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Connect to the Android relay server.
 
@@ -79,44 +81,37 @@ async def handle_android_relay_connect(data: Dict[str, Any], websocket: WebSocke
 
     logger.info(f"[WebSocket] Android relay connect: {url}")
 
-    try:
-        client, error = await get_relay_client(url, api_key)
-        if client:
-            logger.info(
-                f"[WebSocket] Android relay connect success, qr_data present: "
-                f"{bool(client.qr_data)}, session_token: {client.session_token}"
-            )
-            return {
-                "success": True,
-                "connected": True,
-                "session_token": client.session_token,
-                "qr_data": client.qr_data,
-                "message": "Connected to relay server",
-            }
+    client, error = await get_relay_client(url, api_key)
+    if client:
+        logger.info(
+            f"[WebSocket] Android relay connect success, qr_data present: "
+            f"{bool(client.qr_data)}, session_token: {client.session_token}"
+        )
         return {
-            "success": False,
-            "connected": False,
-            "error": error or "Failed to connect to relay server",
+            "success": True,
+            "connected": True,
+            "session_token": client.session_token,
+            "qr_data": client.qr_data,
+            "message": "Connected to relay server",
         }
-    except Exception as e:
-        logger.error(f"[WebSocket] Android relay connect error: {e}")
-        return {"success": False, "error": str(e)}
+    return {
+        "success": False,
+        "connected": False,
+        "error": error or "Failed to connect to relay server",
+    }
 
 
+@ws_response
 async def handle_android_relay_disconnect(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Disconnect from the Android relay server."""
     from ._relay import close_relay_client
 
     logger.info("[WebSocket] Android relay disconnect requested")
-
-    try:
-        await close_relay_client()
-        return {"success": True, "connected": False, "message": "Disconnected from relay server"}
-    except Exception as e:
-        logger.error(f"[WebSocket] Android relay disconnect error: {e}")
-        return {"success": False, "error": str(e)}
+    await close_relay_client()
+    return {"success": True, "connected": False, "message": "Disconnected from relay server"}
 
 
+@ws_response
 async def handle_android_relay_reconnect(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Reconnect to the relay with a fresh session token + QR code."""
     from ._relay import close_relay_client, get_relay_client
@@ -131,27 +126,23 @@ async def handle_android_relay_reconnect(data: Dict[str, Any], websocket: WebSoc
 
     logger.info("[WebSocket] Android relay reconnect: forcing new session")
 
-    try:
-        await close_relay_client()
-        await asyncio.sleep(0.5)  # ensure clean disconnect
+    await close_relay_client()
+    await asyncio.sleep(0.5)  # ensure clean disconnect
 
-        client, error = await get_relay_client(url, api_key)
-        if client:
-            return {
-                "success": True,
-                "connected": True,
-                "session_token": client.session_token,
-                "qr_data": client.qr_data,
-                "message": "Reconnected with new session token",
-            }
+    client, error = await get_relay_client(url, api_key)
+    if client:
         return {
-            "success": False,
-            "connected": False,
-            "error": error or "Failed to reconnect to relay server",
+            "success": True,
+            "connected": True,
+            "session_token": client.session_token,
+            "qr_data": client.qr_data,
+            "message": "Reconnected with new session token",
         }
-    except Exception as e:
-        logger.error(f"[WebSocket] Android relay reconnect error: {e}")
-        return {"success": False, "error": str(e)}
+    return {
+        "success": False,
+        "connected": False,
+        "error": error or "Failed to reconnect to relay server",
+    }
 
 
 WS_HANDLERS = {

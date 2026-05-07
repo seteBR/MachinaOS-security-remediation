@@ -19,6 +19,8 @@ from typing import Any, Awaitable, Callable, Dict
 
 from fastapi import WebSocket
 
+from services.plugin.ws import ws_response
+
 from ._credentials import TelegramCredential
 from ._service import get_telegram_service
 
@@ -112,8 +114,15 @@ async def handle_telegram_status(data: Dict[str, Any], websocket: WebSocket) -> 
     return {"success": True, "status": status}
 
 
+@ws_response
 async def handle_telegram_send(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Direct send via WebSocket (not via workflow node)."""
+    """Direct send via WebSocket (not via workflow node).
+
+    ``@ws_response`` collapses the catch-all ``try / except Exception``
+    block at the bottom of the function -- exceptions become
+    ``{success: False, error: str(e)}`` automatically. Early-return
+    validation stays since those are deterministic input checks.
+    """
     service = get_telegram_service()
     if not service.connected:
         return {"success": False, "error": "Telegram bot not connected"}
@@ -125,15 +134,11 @@ async def handle_telegram_send(data: Dict[str, Any], websocket: WebSocket) -> Di
     if dispatch is None:
         return {"success": False, "error": f"Unsupported message type: {message_type}"}
 
-    try:
-        coro_or_none, err = dispatch(service, data, data.get("parse_mode"))
-        if err:
-            return {"success": False, "error": err}
-        result = await coro_or_none
-        return {"success": True, "result": result}
-    except Exception as e:
-        logger.error(f"[Telegram] Send error: {e}")
-        return {"success": False, "error": str(e)}
+    coro_or_none, err = dispatch(service, data, data.get("parse_mode"))
+    if err:
+        return {"success": False, "error": err}
+    result = await coro_or_none
+    return {"success": True, "result": result}
 
 
 async def handle_telegram_reconnect(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
@@ -155,26 +160,22 @@ async def handle_telegram_reconnect(data: Dict[str, Any], websocket: WebSocket) 
     return await get_telegram_service().connect(secrets["api_key"])
 
 
+@ws_response
 async def handle_telegram_get_me(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     service = get_telegram_service()
     if not service.connected:
         return {"success": False, "error": "Telegram bot not connected"}
-    try:
-        return {"success": True, "result": await service.get_me()}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    return {"success": True, "result": await service.get_me()}
 
 
+@ws_response
 async def handle_telegram_get_chat(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     service = get_telegram_service()
     if not service.connected:
         return {"success": False, "error": "Telegram bot not connected"}
     if not data.get("chat_id"):
         return {"success": False, "error": "chat_id required"}
-    try:
-        return {"success": True, "result": await service.get_chat(data["chat_id"])}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    return {"success": True, "result": await service.get_chat(data["chat_id"])}
 
 
 # ---------------------------------------------------------------------------
