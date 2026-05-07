@@ -514,11 +514,17 @@ const DashboardContent: React.FC = () => {
     strokeWidth: 2
   }), [theme.dracula.cyan]);
 
+  // `.react-flow` is intentionally transparent so the parent
+  // `.canvas-host` / `.canvas` background-image (per-theme
+  // `--canvas-grid` + multi-layer gradient stack from
+  // client/src/themes/<theme>.css) paints through. Painting a
+  // backgroundColor here would hide every theme decoration —
+  // Cyber perspective grid, Renaissance fleur-de-lis, Surveillance
+  // CCTV reticle, Steampunk brass bolts, etc.
   const reactFlowStyle = React.useMemo(() => ({
     width: '100%',
     height: '100%',
-    backgroundColor: theme.colors.background,
-  }), [theme.colors.background]);
+  }), []);
 
   const snapGrid: [number, number] = React.useMemo(() => [20, 20], []);
 
@@ -1194,7 +1200,13 @@ const DashboardContent: React.FC = () => {
               className="canvas-host canvas"
               style={{
                 flex: 1,
-                backgroundColor: theme.colors.backgroundAlt,
+                // `backgroundColor` intentionally omitted — the per-theme
+                // CSS in client/src/themes/<theme>.css owns the canvas
+                // surface paint via the `:root[data-theme="..."] .canvas`
+                // multi-layer `background` declaration (radial-gradient
+                // vignette + grid pattern + noise texture + var(--bg-canvas)).
+                // base.css `.canvas-host { background-image: var(--canvas-grid); }`
+                // provides the fallback grid layer.
                 position: 'relative',
               }}
             >

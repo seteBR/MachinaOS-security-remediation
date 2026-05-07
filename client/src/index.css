@@ -350,9 +350,16 @@
  * React Flow chrome — light + dark
  * ============================================================================ */
 
-.react-flow {
-  background-color: hsl(var(--background)) !important;
-}
+/* `.react-flow` is intentionally transparent so the parent
+ * `.canvas-host` / `.canvas` `background-image` (per-theme
+ * `--canvas-grid` + multi-layer gradient stack) paints through.
+ * Per the upstream v11 stylesheet, `.react-flow` ships with only
+ * `direction: ltr;` — no background. Painting one here would hide
+ * the per-theme decorations (Cyber perspective grid, Renaissance
+ * fleur-de-lis, Surveillance CCTV reticle, etc.). When migrating
+ * to @xyflow/react v12, set `--xy-background-color: transparent;`
+ * on `.xy-flow` (v12 sets a default opaque background via custom
+ * property). */
 
 .react-flow__background pattern circle {
   fill: hsl(var(--muted-foreground) / 0.3) !important;
