@@ -51,6 +51,7 @@ export interface NodeSpec {
   componentKind?: 'square' | 'circle' | 'trigger' | 'start' | 'agent' | 'chat' | 'tool' | 'model' | 'generic';
   handles?: NodeSpecHandle[];
   hideOutputHandle?: boolean;
+  hideInputHandle?: boolean;
   visibility?: 'all' | 'normal' | 'dev';
 }
 

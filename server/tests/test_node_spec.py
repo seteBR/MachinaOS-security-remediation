@@ -906,9 +906,25 @@ class TestPluginContractInvariants:
     def test_hide_output_handle_nodes_really_have_no_output(self):
         # If a node advertises hideOutputHandle=True, it shouldn't also
         # declare an output in its handles list — inconsistent.
+        # Exception: tool-oriented nodes (component_kind="tool" pure
+        # ToolNodes, or ActionNode + usable_as_tool=True dual-use nodes)
+        # have hide_output_handle auto-derived True via
+        # BaseNode.__init_subclass__. Their declared handles tuple still
+        # carries output-tool / output-main for backend awareness, but
+        # the SquareNode frontend suppresses the default render. The
+        # invariant's original intent was "explicit author intent should
+        # be consistent" — auto-derived is not author intent, so skip
+        # those nodes.
+        from services.node_registry import get_node_class
         for t in self._plugin_types():
             spec = get_node_spec(t)
             if not spec.get("hideOutputHandle"):
+                continue
+            cls = get_node_class(t)
+            if cls is not None and (
+                getattr(cls, "usable_as_tool", False)
+                or getattr(cls, "component_kind", "") == "tool"
+            ):
                 continue
             outs = [h for h in spec.get("handles") or [] if h.get("kind") == "output"]
             assert not outs, (

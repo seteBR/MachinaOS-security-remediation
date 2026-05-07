@@ -383,26 +383,30 @@ const SquareNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnectab
           title={getStatusTitle()}
         />
 
-        {/* Square Input Handle */}
-        <Handle
-          id="input-main"
-          type="target"
-          position={Position.Left}
-          isConnectable={isConnectable}
-          style={{
-            position: 'absolute',
-            left: '-6px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            width: theme.nodeSize.handle,
-            height: theme.nodeSize.handle,
-            backgroundColor: theme.isDarkMode ? theme.colors.background : '#ffffff',
-            border: `2px solid ${theme.isDarkMode ? theme.colors.textSecondary : '#6b7280'}`,
-            borderRadius: '50%',
-            zIndex: 20
-          }}
-          title="Service Input"
-        />
+        {/* Square Input Handle (gated by spec.hideInputHandle, mirrors
+            the hideOutputHandle pattern below — auto-derived True for
+            usable_as_tool=True nodes via BaseNode.__init_subclass__). */}
+        {!getCachedNodeSpec(type || '')?.hideInputHandle && (
+          <Handle
+            id="input-main"
+            type="target"
+            position={Position.Left}
+            isConnectable={isConnectable}
+            style={{
+              position: 'absolute',
+              left: '-6px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: theme.nodeSize.handle,
+              height: theme.nodeSize.handle,
+              backgroundColor: theme.isDarkMode ? theme.colors.background : '#ffffff',
+              border: `2px solid ${theme.isDarkMode ? theme.colors.textSecondary : '#6b7280'}`,
+              borderRadius: '50%',
+              zIndex: 20
+            }}
+            title="Service Input"
+          />
+        )}
 
         {/* Square Output Handle (Wave 10.E: spec.hideOutputHandle replaces the
             local NO_OUTPUT_NODE_TYPES list) */}

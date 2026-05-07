@@ -85,7 +85,7 @@ def get_node_spec(node_type: str) -> Optional[dict[str, Any]]:
     # Wave 10.A — full visual contract. Only emit fields when seeded so the
     # wire format stays compact and unseeded types keep the pre-10 shape.
     for key in ("color", "componentKind", "handles", "credentials",
-                "hideOutputHandle", "visibility"):
+                "hideOutputHandle", "hideInputHandle", "visibility"):
         if key in meta:
             spec[key] = meta[key]
 

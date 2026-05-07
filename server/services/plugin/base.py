@@ -127,6 +127,7 @@ class BaseNode:
     handles: ClassVar[Sequence[Dict[str, Any]]] = ()
     visibility: ClassVar[str] = "all"
     hide_output_handle: ClassVar[bool] = False
+    hide_input_handle: ClassVar[bool] = False
     ui_hints: ClassVar[Dict[str, Any]] = {}
     annotations: ClassVar[Dict[str, Any]] = {}
 
@@ -156,6 +157,27 @@ class BaseNode:
         cls._operations = collect_operations(cls)
         if abstract or not cls.type:
             return
+        # Auto-hide default canvas input/output handles for nodes whose
+        # primary surface area is the LLM-tool call path. Two cases:
+        #   * Pure ToolNodes (component_kind="tool" -- calculator,
+        #     duckduckgoSearch, writeTodos, agentBuilder, ...). They
+        #     wire through their own output-tool handle; the hardcoded
+        #     SquareNode input-main + output-main are visual clutter.
+        #   * Dual-purpose ActionNodes with usable_as_tool=True (gmail,
+        #     twitter*, brave_search, all 16 android nodes via cascade,
+        #     code executors via cascade, ...). Same reasoning: the
+        #     LLM-tool path is the dominant use; default handles confuse
+        #     the canvas.
+        # Subclasses opt out by explicitly setting either flag to False
+        # on the class.
+        is_tool_oriented = (
+            cls.usable_as_tool or cls.component_kind == "tool"
+        )
+        if is_tool_oriented:
+            if "hide_input_handle" not in cls.__dict__:
+                cls.hide_input_handle = True
+            if "hide_output_handle" not in cls.__dict__:
+                cls.hide_output_handle = True
         # Eager registry write — same four registries as @register_node.
         from services.node_registry import register_node, register_node_class
         register_node(
@@ -201,6 +223,8 @@ class BaseNode:
             meta["credentials"] = [c.id for c in cls.credentials]
         if cls.hide_output_handle:
             meta["hideOutputHandle"] = True
+        if cls.hide_input_handle:
+            meta["hideInputHandle"] = True
         if cls.visibility != "all":
             meta["visibility"] = cls.visibility
         ui_hints = _derive_auto_ui_hints(cls.group)

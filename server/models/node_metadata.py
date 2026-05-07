@@ -49,6 +49,7 @@ class NodeMetadata(TypedDict, total=False):
     handles: list[NodeHandle]                            # replaces AGENT_CONFIGS topology
     credentials: list[str]                               # provider keys
     hideOutputHandle: bool                               # replaces NO_OUTPUT_NODE_TYPES
+    hideInputHandle: bool                                # auto-derived for usable_as_tool=True nodes
     visibility: Literal["all", "normal", "dev"]          # replaces SIMPLE_MODE_CATEGORIES
 
 
