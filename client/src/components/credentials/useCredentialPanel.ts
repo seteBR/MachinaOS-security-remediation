@@ -95,11 +95,23 @@ export function useCredentialPanel(config: ProviderConfig, visible: boolean) {
   valuesRef.current = values;
 
   const providerKey = config.id;
+  // The query stores `{values, hadStored}` (see queryFn above), NOT a flat
+  // CredentialFormValues. Earlier this called
+  // `setQueryData<CredentialFormValues>(...)` and the updater spread `prev`
+  // as if it were the inner `values` dict — at runtime `prev` was the whole
+  // envelope, so typed characters were merged at the envelope level next to
+  // `values` / `hadStored` and the input selector (which reads `.values[k]`)
+  // never saw them. Net effect: input felt unresponsive even though the
+  // setter was firing. Fix: update only the envelope's inner `values` and
+  // preserve `hadStored` verbatim.
   const writeValues = useCallback(
     (updater: (prev: CredentialFormValues) => CredentialFormValues) => {
-      qc.setQueryData<CredentialFormValues>(
+      qc.setQueryData<{ values: CredentialFormValues; hadStored: boolean }>(
         queryKeys.credentialValues.byProvider(providerKey).queryKey,
-        (prev) => updater(prev ?? EMPTY_VALUES),
+        (prev) => ({
+          values: updater(prev?.values ?? EMPTY_VALUES),
+          hadStored: prev?.hadStored ?? false,
+        }),
       );
     },
     [qc, providerKey],
