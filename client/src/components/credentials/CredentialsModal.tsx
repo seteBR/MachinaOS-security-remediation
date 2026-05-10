@@ -28,6 +28,7 @@ import CredentialsPalette from './CredentialsPalette';
 import { rehydrateCatalogue } from './catalogueAdapter';
 import { useCatalogueQuery } from '../../hooks/useCatalogueQuery';
 import { useCredentialRegistry } from '../../store/useCredentialRegistry';
+import { useNodeAllowlist } from '../../hooks/useNodeAllowlist';
 
 interface Props {
   visible: boolean;
@@ -50,8 +51,26 @@ const CredentialsModal: React.FC<Props> = ({ visible, onClose }) => {
     return rehydrateCatalogue(catalogue.data);
   }, [catalogue.data]);
 
-  const providers = rehydrated?.providers ?? [];
-  const categories = rehydrated?.categories ?? [];
+  // Apply the absolute blocklist from server/config/node_allowlist.json
+  // (`disabled_credential_categories`). Hides the entire category +
+  // every provider belonging to it. Mode-independent; complements the
+  // node-side `disabled_groups` so disabling Android removes both the
+  // canvas nodes AND the credentials panel in one config edit.
+  const { isCredentialCategoryDisabled } = useNodeAllowlist();
+  const providers = useMemo(
+    () =>
+      (rehydrated?.providers ?? []).filter(
+        (p) => !isCredentialCategoryDisabled(p.category),
+      ),
+    [rehydrated?.providers, isCredentialCategoryDisabled],
+  );
+  const categories = useMemo(
+    () =>
+      (rehydrated?.categories ?? []).filter(
+        (c) => !isCredentialCategoryDisabled(c.key),
+      ),
+    [rehydrated?.categories, isCredentialCategoryDisabled],
+  );
 
   // Default selection: if nothing is selected yet (or the previous
   // selection isn't in the current catalogue), pick the first provider.

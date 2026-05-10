@@ -29,32 +29,75 @@ class NodeAllowlistService:
 
         Response shape:
             show_all: bool
-                true  -> do not filter the palette; every node is visible.
+                true  -> do not filter the palette; every node is visible
+                         (still subject to disabled_groups + disabled_nodes).
                 false -> show only node types listed in enabled_nodes.
             enabled_nodes: list[str]
                 Only meaningful when show_all is false.
+            disabled_groups: list[str]
+                Absolute blocklist. A node whose first group matches any
+                entry here is hidden in BOTH normal and dev mode, even
+                if listed in enabled_nodes. Use to disable an entire
+                backend group (e.g. 'android' hides all 16 Android
+                service nodes + androidTool).
+            disabled_nodes: list[str]
+                Absolute blocklist by exact node-type identifier. Same
+                mode-independent enforcement as disabled_groups; use
+                for one-off types whose group label doesn't match
+                (e.g. 'android_agent' belongs to the 'agent' group).
+            disabled_credential_categories: list[str]
+                Absolute blocklist for the Credentials Modal — every
+                provider whose `category` matches an entry here is
+                hidden from the modal AND its category header is
+                stripped. Use to disable an entire credential category
+                (e.g. 'android' hides the Android relay panel + the
+                Android category header). Mirrors disabled_groups
+                semantically — the same conceptual entity (android
+                feature surface) but the credential catalogue uses its
+                own category taxonomy independent of node groups.
         """
+        defaults = {
+            "show_all": True,
+            "enabled_nodes": [],
+            "disabled_groups": [],
+            "disabled_nodes": [],
+            "disabled_credential_categories": [],
+        }
+
         if not self._config_path.exists():
-            return {"show_all": True, "enabled_nodes": []}
+            return defaults
 
         try:
             with self._config_path.open("r", encoding="utf-8") as f:
                 raw = json.load(f)
         except Exception as e:
             logger.warning("Failed to parse node_allowlist.json, falling back to show_all: %s", e)
-            return {"show_all": True, "enabled_nodes": []}
+            return defaults
 
-        enabled_nodes = raw.get("enabled_nodes", [])
-        if not isinstance(enabled_nodes, list):
-            logger.warning("node_allowlist.json 'enabled_nodes' is not a list, falling back to show_all")
-            return {"show_all": True, "enabled_nodes": []}
+        def _str_list(key: str) -> List[str]:
+            value = raw.get(key, [])
+            if not isinstance(value, list):
+                logger.warning(
+                    "node_allowlist.json '%s' is not a list, treating as empty",
+                    key,
+                )
+                return []
+            return [n for n in value if isinstance(n, str)]
 
-        enabled_nodes = [n for n in enabled_nodes if isinstance(n, str)]
+        enabled_nodes = _str_list("enabled_nodes")
+        disabled_groups = _str_list("disabled_groups")
+        disabled_nodes = _str_list("disabled_nodes")
+        disabled_credential_categories = _str_list("disabled_credential_categories")
 
-        if len(enabled_nodes) == 0:
-            return {"show_all": True, "enabled_nodes": []}
+        show_all = len(enabled_nodes) == 0
 
-        return {"show_all": False, "enabled_nodes": enabled_nodes}
+        return {
+            "show_all": show_all,
+            "enabled_nodes": enabled_nodes,
+            "disabled_groups": disabled_groups,
+            "disabled_nodes": disabled_nodes,
+            "disabled_credential_categories": disabled_credential_categories,
+        }
 
 
 _instance: NodeAllowlistService | None = None

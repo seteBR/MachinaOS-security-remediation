@@ -4,15 +4,47 @@ import { useWebSocket } from '../contexts/WebSocketContext';
 interface NodeAllowlistResponse {
   show_all: boolean;
   enabled_nodes: string[];
+  /** Mode-independent blocklist by backend group (e.g. 'android' hides
+   *  every plugin in the android group + androidTool). Empty array if
+   *  the backend doesn't ship the field (older deployments). */
+  disabled_groups: string[];
+  /** Mode-independent blocklist by exact node type. Use for one-off
+   *  types whose group label doesn't match (e.g. 'android_agent' is in
+   *  the 'agent' group, not 'android'). */
+  disabled_nodes: string[];
+  /** Mode-independent blocklist for the Credentials Modal by category
+   *  key (matches `category` in server/config/credential_providers.json,
+   *  e.g. 'android' / 'ai' / 'social'). Empty array on older
+   *  deployments. */
+  disabled_credential_categories: string[];
 }
 
 /**
- * Fetches the node allowlist from the backend and exposes a membership check
- * for the Component Palette.
+ * Fetches the node allowlist from the backend and exposes the membership
+ * checks every UI surface that lists nodes uses (Component Palette,
+ * dropdowns, AI tool selectors, master skill folder, etc.).
  *
- * The backend decides whether to filter (show_all flag); the frontend only
- * checks list membership. While the response is loading, all nodes are shown
- * to avoid a palette flash.
+ * Two independent checks:
+ *
+ *   `isBlocked(nodeType, groups?)` — absolute blocklist. Mode-independent.
+ *     Driven by `disabled_groups` + `disabled_nodes` from the JSON
+ *     config. Use to turn off entire groups (e.g. android) or specific
+ *     types (e.g. android_agent) so they're hidden in BOTH normal and
+ *     dev mode. Pass the node's group array so disabled_groups can
+ *     fire — without groups, only exact-type matches catch.
+ *
+ *   `isAllowed(nodeType)` — positive allowlist. Driven by `enabled_nodes`.
+ *     `show_all=true` (empty list) returns true for everything. Call
+ *     sites typically gate this on `!proMode` so dev mode bypasses
+ *     the allowlist.
+ *
+ *   `isVisible(nodeType, groups?)` — convenience: `!isBlocked && isAllowed`.
+ *     Use when proMode doesn't matter (every surface SHOULD respect
+ *     both layers).
+ *
+ * While the response is loading, all checks return permissively (no
+ * palette flash). Both blocklists default to empty when the backend
+ * doesn't ship the fields (older deployments).
  */
 export const useNodeAllowlist = () => {
   const { sendRequest, isConnected } = useWebSocket();
@@ -28,15 +60,42 @@ export const useNodeAllowlist = () => {
         setConfig({
           show_all: response?.show_all ?? true,
           enabled_nodes: response?.enabled_nodes ?? [],
+          disabled_groups: response?.disabled_groups ?? [],
+          disabled_nodes: response?.disabled_nodes ?? [],
+          disabled_credential_categories: response?.disabled_credential_categories ?? [],
         });
       })
       .catch((error) => {
         console.error('[NodeAllowlist] Failed to fetch:', error);
-        setConfig({ show_all: true, enabled_nodes: [] });
+        setConfig({
+          show_all: true,
+          enabled_nodes: [],
+          disabled_groups: [],
+          disabled_nodes: [],
+          disabled_credential_categories: [],
+        });
       });
   }, [isConnected, sendRequest]);
 
-  const isVisible = useCallback(
+  /** Absolute blocklist check (mode-independent). False while loading
+   *  so UI doesn't pre-hide nodes during the fetch round-trip. */
+  const isBlocked = useCallback(
+    (nodeType: string, groups?: string[] | readonly string[]): boolean => {
+      if (!config) return false;
+      if (config.disabled_nodes.includes(nodeType)) return true;
+      if (groups && groups.length > 0) {
+        for (const g of groups) {
+          if (config.disabled_groups.includes(g)) return true;
+        }
+      }
+      return false;
+    },
+    [config]
+  );
+
+  /** Positive allowlist check. True while loading so UI doesn't hide
+   *  during the fetch. show_all=true returns true for every node. */
+  const isAllowed = useCallback(
     (nodeType: string): boolean => {
       if (!config) return true;
       if (config.show_all) return true;
@@ -45,5 +104,29 @@ export const useNodeAllowlist = () => {
     [config]
   );
 
-  return { isVisible };
+  /** Convenience: hidden if blocked OR not allowed. Honors both layers
+   *  unconditionally — call sites that want to bypass the allowlist
+   *  in dev mode should call isBlocked directly and short-circuit
+   *  the allowlist when proMode is true. */
+  const isVisible = useCallback(
+    (nodeType: string, groups?: string[] | readonly string[]): boolean => {
+      if (isBlocked(nodeType, groups)) return false;
+      return isAllowed(nodeType);
+    },
+    [isBlocked, isAllowed]
+  );
+
+  /** True if the credential category is in the absolute blocklist —
+   *  use to filter the Credentials Modal's category list (e.g. hide
+   *  the entire 'android' panel without removing it from the backend
+   *  catalogue). False while loading so the modal doesn't pre-hide. */
+  const isCredentialCategoryDisabled = useCallback(
+    (categoryKey: string): boolean => {
+      if (!config) return false;
+      return config.disabled_credential_categories.includes(categoryKey);
+    },
+    [config]
+  );
+
+  return { isVisible, isBlocked, isAllowed, isCredentialCategoryDisabled };
 };

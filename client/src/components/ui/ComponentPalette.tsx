@@ -27,7 +27,7 @@ const ComponentPalette: React.FC<ComponentPaletteProps> = ({
   specsReady = false,
 }) => {
   const theme = useAppTheme();
-  const { isVisible } = useNodeAllowlist();
+  const { isBlocked, isAllowed } = useNodeAllowlist();
 
   // Backend-driven group metadata via the shared WS-in-queryFn hook.
   // `useNodeGroups` returns the full query result so we can render a
@@ -55,9 +55,16 @@ const ComponentPalette: React.FC<ComponentPaletteProps> = ({
     const definitions = listCachedNodeSpecs().map(nodeSpecToDescription);
 
     const filteredDefinitions = definitions.filter((definition) => {
-      // Filter by backend allowlist (server/config/node_allowlist.json).
-      // Applied only in normal mode; dev mode shows every node.
-      if (!proMode && !isVisible(definition.name)) return false;
+      // Backend allowlist (server/config/node_allowlist.json). Two-tier:
+      //   1. `disabled_groups` + `disabled_nodes` — absolute blocklist
+      //      enforced in BOTH normal and dev mode. The node's group
+      //      array is passed so `disabled_groups` fires on every plugin
+      //      in the group (e.g. all 16 android service nodes hidden by
+      //      one entry).
+      //   2. `enabled_nodes` — positive allowlist applied only in
+      //      normal mode; dev/pro mode bypasses it.
+      if (isBlocked(definition.name, definition.group)) return false;
+      if (!proMode && !isAllowed(definition.name)) return false;
 
       // Filter by search query
       if (searchQuery.trim()) {
@@ -99,7 +106,7 @@ const ComponentPalette: React.FC<ComponentPaletteProps> = ({
     });
 
     return categories;
-  }, [searchQuery, proMode, groupIndex, isVisible, specsReady]);
+  }, [searchQuery, proMode, groupIndex, isBlocked, isAllowed, specsReady]);
 
   const totalComponents = Object.values(categorizedComponents).reduce(
     (acc, components) => acc + components.length, 
