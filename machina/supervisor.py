@@ -287,9 +287,19 @@ class Manager:
             stderr=subprocess.PIPE,
             **spawn_kwargs,
         ) as proc:
-            if sys.platform == "win32":
-                add_to_job(proc.pid)
             color = spec.color or "white"
+            if sys.platform == "win32":
+                # Best-effort enrollment in the supervisor's Job Object so
+                # the OS tree-kills the child if the supervisor itself
+                # dies abnormally. Loud warning (from tree.py) on failure.
+                if not add_to_job(proc.pid):
+                    emit(
+                        spec.name,
+                        "yellow",
+                        f"WARN: pid={proc.pid} not enrolled in Job Object -- "
+                        f"orphan risk if supervisor crashes",
+                        stream="stderr",
+                    )
             emit(spec.name, color, f"started pid={proc.pid}")
             # Register for force-kill access on second Ctrl-C; deregister on
             # exit so a restarted-then-died service doesn't leave a stale entry.

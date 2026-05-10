@@ -9,6 +9,10 @@ dependencies = [
   "psutil>=6",
   "anyio>=4",
   "python-dotenv>=1",
+  # Required on Windows for the supervisor's Job Object (machina/tree.py).
+  # Without it, child processes survive abnormal supervisor exit (SIGKILL,
+  # BSOD, console close) and accumulate as orphans across dev restarts.
+  # Floor 308 is the first release shipping prebuilt wheels for Python 3.13.
   "pywin32>=308; platform_system == 'Windows'",
 ]
 

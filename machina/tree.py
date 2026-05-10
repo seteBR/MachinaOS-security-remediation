@@ -48,40 +48,90 @@ def signal_group(pid: int, sig: signal.Signals = signal.SIGTERM) -> None:
 # ---------------------------------------------------------------- Windows Job Object
 
 class _JobObject:
-    """Lazy-imported wrapper around a Windows Job Object."""
+    """Lazy-imported wrapper around a Windows Job Object.
 
+    Failure modes are surfaced to stderr instead of swallowed. When this
+    fails the supervisor cannot tree-kill children if it itself dies
+    abnormally (SIGKILL, BSOD, console close), so silent failure leads
+    directly to orphan-process accumulation on Windows.
+    """
+
+    # Win10/11 supports nested jobs, but the parent must allow it. When
+    # the supervisor was launched from another process that already put
+    # us inside a Job Object (npm/pnpm/conhost wrappers occasionally do
+    # this), AssignProcessToJobObject succeeds at the API level but the
+    # child silently lands in the OUTER job, not ours. We detect that
+    # via IsProcessInJob in ``add()`` and warn explicitly.
     def __init__(self) -> None:
         self._handle = None
         self._win32job = None
-        if sys.platform == "win32":
-            try:
-                import win32job  # type: ignore[import-not-found]
-
-                self._win32job = win32job
-                self._handle = win32job.CreateJobObject(None, "")
-                info = win32job.QueryInformationJobObject(
-                    self._handle, win32job.JobObjectExtendedLimitInformation
-                )
-                info["BasicLimitInformation"]["LimitFlags"] |= (
-                    win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                )
-                win32job.SetInformationJobObject(
-                    self._handle, win32job.JobObjectExtendedLimitInformation, info
-                )
-            except Exception:  # pywin32 missing or denied
-                self._handle = None
+        if sys.platform != "win32":
+            return
+        try:
+            import win32job  # type: ignore[import-not-found]
+        except ImportError as e:
+            sys.stderr.write(
+                f"[supervisor] WARN: pywin32 import failed ({e}). "
+                f"Children will NOT be tree-killed if the supervisor dies "
+                f"abnormally on Windows. Reinstall via: pip install --force-reinstall pywin32\n"
+            )
+            return
+        try:
+            self._win32job = win32job
+            self._handle = win32job.CreateJobObject(None, "")
+            info = win32job.QueryInformationJobObject(
+                self._handle, win32job.JobObjectExtendedLimitInformation
+            )
+            info["BasicLimitInformation"]["LimitFlags"] |= (
+                win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            )
+            win32job.SetInformationJobObject(
+                self._handle, win32job.JobObjectExtendedLimitInformation, info
+            )
+        except Exception as e:
+            sys.stderr.write(
+                f"[supervisor] WARN: Job Object init failed: {e!r}. "
+                f"Tree-kill on abnormal supervisor exit will not work.\n"
+            )
+            self._handle = None
+            self._win32job = None
 
     def add(self, pid: int) -> bool:
-        """Enroll ``pid`` in the job. Returns False when unavailable."""
+        """Enroll ``pid`` in the job. Returns False when enrollment did
+        not actually take effect.
+
+        ``AssignProcessToJobObject`` can return success even when the
+        child remains in a different job (inherited from an outer
+        wrapper that doesn't allow nesting). We verify with
+        ``IsProcessInJob`` so the caller learns the truth.
+        """
         if self._handle is None or self._win32job is None:
             return False
         try:
             import win32api  # type: ignore[import-not-found]
-
+        except ImportError as e:
+            sys.stderr.write(f"[supervisor] WARN: win32api import failed ({e})\n")
+            return False
+        try:
+            # PROCESS_ALL_ACCESS = 0x1F0FFF
             handle = win32api.OpenProcess(0x1F0FFF, False, pid)
             self._win32job.AssignProcessToJobObject(self._handle, handle)
+            in_our_job = self._win32job.IsProcessInJob(handle, self._handle)
+            if not in_our_job:
+                in_some_job = self._win32job.IsProcessInJob(handle, None)
+                sys.stderr.write(
+                    f"[supervisor] WARN: pid={pid} did not enter our Job Object "
+                    f"(already in another job: {in_some_job}). Likely cause: "
+                    f"this supervisor was launched from a wrapper (npm/pnpm/conhost) "
+                    f"whose own Job Object disallows nesting. Tree-kill on abnormal "
+                    f"supervisor exit will not reach this child.\n"
+                )
+                return False
             return True
-        except Exception:
+        except Exception as e:
+            sys.stderr.write(
+                f"[supervisor] WARN: AssignProcessToJobObject(pid={pid}) failed: {e!r}\n"
+            )
             return False
 
 
