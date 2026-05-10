@@ -1,7 +1,7 @@
 """Telegram Send — Wave 11.C migration.
 
-Dual-purpose: workflow ActionNode + AI tool. The Telegram bot token
-lives in ``auth_service`` under ``telegram_bot_token``. Plugin
+Workflow-only ActionNode (no AI-tool exposure). The Telegram bot
+token lives in ``auth_service`` under ``telegram_bot_token``. Plugin
 delegates to the legacy ``handle_telegram_send`` handler during
 thin-migration; 11.E converts to a declarative ``TelegramCredential``.
 """
@@ -148,7 +148,7 @@ class TelegramSendNode(ActionNode):
     type = "telegramSend"
     display_name = "Telegram Send"
     subtitle = "Send Message"
-    group = ("social", "tool")
+    group = ("social",)
     description = "Send text, photo, document, location, or contact via Telegram bot"
     component_kind = "square"
     handles = (
@@ -160,7 +160,6 @@ class TelegramSendNode(ActionNode):
     annotations = {"destructive": False, "readonly": False, "open_world": True}
     credentials = (TelegramCredential,)
     task_queue = TaskQueue.MESSAGING
-    usable_as_tool = True
 
     Params = TelegramSendParams
     Output = TelegramSendOutput
