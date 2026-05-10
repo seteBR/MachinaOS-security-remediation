@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import anyio
+import yaml
 
 from core.logging import get_logger
 from services._supervisor.process import BaseProcessSupervisor
@@ -63,6 +65,7 @@ class AICliSession(BaseProcessSupervisor):
         mcp_port: int,
         batch_token: str,
         connected_tool_names: Optional[List[str]] = None,
+        connected_skill_names: Optional[List[str]] = None,
     ) -> None:
         super().__init__()
         self._provider = provider
@@ -81,6 +84,10 @@ class AICliSession(BaseProcessSupervisor):
         self._workflow_id = workflow_id
         # Names of `mcp__machinaos__*` tools to add to `--allowedTools`.
         self._connected_tool_names: List[str] = list(connected_tool_names or [])
+        # Skills to materialise into `<worktree>/.claude/skills/<name>/SKILL.md`
+        # so claude auto-discovers them per the documented project-scope
+        # path (https://code.claude.com/docs/en/skills#where-skills-live).
+        self._connected_skill_names: List[str] = list(connected_skill_names or [])
 
         # Streaming state
         self._events: List[Dict[str, Any]] = []
@@ -187,6 +194,80 @@ class AICliSession(BaseProcessSupervisor):
                 logger.warning(
                     "[%s] IDE lockfile write failed (%s) — continuing without MCP tools",
                     self.label, exc,
+                )
+
+        # 3. Materialise connected skills into `<worktree>/.claude/skills/`.
+        # Project-scope path auto-discovers because the worktree IS claude's
+        # cwd. Best-effort — failures warn but don't abort the spawn.
+        if self._connected_skill_names:
+            await self._materialise_skills()
+
+    async def _materialise_skills(self) -> None:
+        """Write `<worktree>/.claude/skills/<name>/SKILL.md` for each
+        connected skill so the spawned claude can invoke them via the
+        built-in `Skill` tool. Filesystem skills are copied wholesale
+        (preserves `scripts/` + `references/`); DB skills are
+        reconstructed from frontmatter."""
+        from services.skill_loader import get_skill_loader
+
+        loader = get_skill_loader()
+        skills_dir = self._worktree_dir / ".claude" / "skills"
+        try:
+            skills_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "[%s] cannot create skills dir %s: %s — skipping",
+                self.label, skills_dir, exc,
+            )
+            return
+
+        for name in self._connected_skill_names:
+            try:
+                skill = await loader.load_skill_async(name)
+            except Exception as exc:
+                logger.warning(
+                    "[%s] load_skill_async(%r) failed: %s",
+                    self.label, name, exc,
+                )
+                continue
+            if skill is None:
+                logger.warning(
+                    "[%s] skill %r not found — skipping materialisation",
+                    self.label, name,
+                )
+                continue
+
+            dest = skills_dir / name
+            try:
+                if skill.metadata.path is not None:
+                    # Filesystem skill: copy whole directory tree.
+                    shutil.copytree(
+                        skill.metadata.path, dest, dirs_exist_ok=True,
+                    )
+                else:
+                    # DB skill: reconstruct frontmatter + body.
+                    dest.mkdir(parents=True, exist_ok=True)
+                    frontmatter = {
+                        "name": skill.metadata.name,
+                        "description": skill.metadata.description,
+                        "allowed-tools": " ".join(skill.metadata.allowed_tools),
+                        "metadata": skill.metadata.metadata,
+                    }
+                    body = (
+                        f"---\n"
+                        f"{yaml.safe_dump(frontmatter, sort_keys=False)}"
+                        f"---\n\n"
+                        f"{skill.instructions}"
+                    )
+                    (dest / "SKILL.md").write_text(body, encoding="utf-8")
+                logger.info(
+                    "[CC-Agent _pre_spawn] materialised skill %r -> %s",
+                    name, dest,
+                )
+            except OSError as exc:
+                logger.warning(
+                    "[%s] failed to materialise skill %r at %s: %s",
+                    self.label, name, dest, exc,
                 )
 
     # ------------------------------------------------------------------

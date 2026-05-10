@@ -23,6 +23,7 @@ Public API:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import Any, Dict, List, Optional
 
@@ -69,6 +70,7 @@ def expose_workflow_tools(connected_tools: List[Dict[str, Any]]) -> None:
             logger.info("[CC-Agent MCP] exposed mcp__machinaos__%s", node_type)
         except Exception as exc:  # pragma: no cover
             logger.warning("[CC-Agent MCP] add_tool(%s) failed: %s", node_type, exc)
+    _schedule_list_changed_notify()
 
 
 def unexpose_workflow_tools(connected_tools: List[Dict[str, Any]]) -> None:
@@ -90,6 +92,7 @@ def unexpose_workflow_tools(connected_tools: List[Dict[str, Any]]) -> None:
             logger.info("[CC-Agent MCP] removed mcp__machinaos__%s", node_type)
         except Exception as exc:  # pragma: no cover
             logger.debug("[CC-Agent MCP] remove_tool(%s): %s", node_type, exc)
+    _schedule_list_changed_notify()
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +103,46 @@ def _get_mcp() -> Optional[Any]:
     """Late import to avoid a circular import with ``mcp_server``."""
     from services.cli_agent import mcp_server
     return mcp_server._mcp_singleton
+
+
+def _schedule_list_changed_notify() -> None:
+    """Fire-and-forget ``notifications/tools/list_changed`` to the
+    connected MCP client.
+
+    FastMCP does NOT emit this automatically on ``add_tool`` /
+    ``remove_tool`` (verified at
+    ``mcp/server/fastmcp/tools/tool_manager.py`` — both methods only
+    mutate the ``_tools`` dict, with no notification dispatch). Without
+    this manual notify, tools registered after the agent's first
+    ``tools/list`` request stay invisible until reconnect.
+
+    Best-effort: requires a running asyncio loop (always true in the
+    ``service.run_batch`` call path). Failures log at WARN and don't
+    abort the batch.
+    """
+    mcp = _get_mcp()
+    if mcp is None:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no running loop — sync test path
+
+    async def _do_notify() -> None:
+        try:
+            session = (
+                getattr(mcp, "session", None)
+                or getattr(getattr(mcp, "_mcp_server", None), "session", None)
+            )
+            if session is not None and hasattr(session, "send_tool_list_changed"):
+                await session.send_tool_list_changed()
+        except Exception as exc:
+            logger.warning(
+                "[CC-Agent workflow_tools] tools/list_changed notify failed: %s",
+                exc,
+            )
+
+    loop.create_task(_do_notify())
 
 
 def _build_handler(node_type: str, params_cls: type):

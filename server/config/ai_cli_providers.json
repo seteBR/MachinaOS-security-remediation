@@ -9,7 +9,7 @@
     "default_model": "claude-sonnet-4-6",
     "default_max_turns": 10,
     "default_max_budget_usd": 5.0,
-    "default_allowed_tools": "Read,Edit,Bash,Glob,Grep,Write",
+    "default_allowed_tools": "Read,Edit,Bash,Glob,Grep,Write,Skill,WebSearch,WebFetch",
     "default_permission_mode": "acceptEdits",
     "supports": [
       "max_budget",

@@ -109,6 +109,13 @@ class AnthropicClaudeProvider:
         # ``claude mcp add --transport http <name> <url> --header
         # "Authorization: Bearer ..."`` invocation.
         if mcp_endpoint_url and mcp_bearer_token:
+            # `alwaysLoad: true` opts this server out of MCP tool-search
+            # deferral so all `mcp__machinaos__*` tools enter context at
+            # session start instead of waiting for a `ToolSearch` call
+            # that the agent often doesn't make
+            # (https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search).
+            # Startup blocks <=5s waiting for the FastMCP connection;
+            # acceptable since our server is already up before spawn.
             mcp_payload = json.dumps({
                 "mcpServers": {
                     "machinaos": {
@@ -117,6 +124,7 @@ class AnthropicClaudeProvider:
                         "headers": {
                             "Authorization": f"Bearer {mcp_bearer_token}",
                         },
+                        "alwaysLoad": True,
                     }
                 }
             })
@@ -167,10 +175,17 @@ class AnthropicClaudeProvider:
         # invoke them ("I don't have permission to run a web search…")
         # because `--permission-mode acceptEdits` only auto-permits
         # Edit; everything else falls through to the allowlist.
+        # Default fallback includes:
+        #   - Read,Edit,Bash,Glob,Grep,Write — filesystem + shell escape hatches
+        #   - Skill — invoke materialised `.claude/skills/<name>/SKILL.md`
+        #   - WebSearch,WebFetch — escape hatches when no MCP tool matches
+        # `ToolSearch` is intentionally NOT here: it's permission-free per
+        # https://code.claude.com/docs/en/tools-reference#built-in-tools.
         allowed = task.allowed_tools or defaults.get(
             "default_allowed_tools",
             self._defaults.get(
-                "default_allowed_tools", "Read,Edit,Bash,Glob,Grep,Write"
+                "default_allowed_tools",
+                "Read,Edit,Bash,Glob,Grep,Write,Skill,WebSearch,WebFetch",
             ),
         )
         allowed_list: List[str] = (
@@ -204,6 +219,24 @@ class AnthropicClaudeProvider:
         # System prompt — appended to Claude Code's built-in system prompt
         if task.system_prompt:
             argv += ["--append-system-prompt", task.system_prompt]
+
+        # Connected-tools steering directive — ensures the agent prefers
+        # wired MCP tools over built-in escape hatches (WebSearch,
+        # WebFetch, Bash) when their purpose matches the user's request.
+        # Mirrors Cursor's per-request rule prepend pattern
+        # (https://cursor.com/docs/rules). Multiple `--append-system-prompt`
+        # flags concatenate per the CLI reference.
+        if connected_tool_names:
+            tool_list = ", ".join(
+                f"mcp__machinaos__{name}" for name in connected_tool_names
+            )
+            directive = (
+                f"Workflow tools wired to this agent: {tool_list}. "
+                "Prefer them over built-in equivalents (WebSearch, "
+                "WebFetch, Bash) when the user's request matches their "
+                "purpose."
+            )
+            argv += ["--append-system-prompt", directive]
 
         # Optional per-task overrides (documented at code.claude.com/docs/en/cli-reference)
         if task.effort:

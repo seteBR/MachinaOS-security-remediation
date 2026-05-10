@@ -172,6 +172,7 @@ class AICliService:
                         t.get("node_type") for t in (connected_tools or [])
                         if t.get("node_type")
                     ],
+                    connected_skill_names=list(connected_skill_names or []),
                 )
                 async with self._lock:
                     self._active_sessions[key].append(session)
