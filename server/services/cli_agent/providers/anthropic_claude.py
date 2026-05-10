@@ -219,6 +219,11 @@ class AnthropicClaudeProvider:
         # System prompt — appended to Claude Code's built-in system prompt
         if task.system_prompt:
             argv += ["--append-system-prompt", task.system_prompt]
+            logger.info(
+                "[CC-Agent argv] --append-system-prompt (task) "
+                "length=%d preview=%r",
+                len(task.system_prompt), task.system_prompt[:200],
+            )
 
         # Connected-tools steering directive — ensures the agent prefers
         # wired MCP tools over built-in escape hatches (WebSearch,
@@ -237,6 +242,11 @@ class AnthropicClaudeProvider:
                 "purpose."
             )
             argv += ["--append-system-prompt", directive]
+            logger.info(
+                "[CC-Agent argv] --append-system-prompt (tools-directive) "
+                "length=%d",
+                len(directive),
+            )
 
         # Optional per-task overrides (documented at code.claude.com/docs/en/cli-reference)
         if task.effort:

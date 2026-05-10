@@ -17,6 +17,7 @@ and passed to ``run_batch()`` so the MCP server can scope its responses.
 from __future__ import annotations
 
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
@@ -36,22 +37,6 @@ logger = get_logger(__name__)
 # the whole MCP / pool stack at module import time.
 from services.cli_agent import ClaudeTaskSpec  # noqa: E402
 from services.cli_agent.types import SessionResultModel  # noqa: E402
-
-
-def _compose_system_prompt(
-    base: Optional[str], memory_context: Optional[str],
-) -> Optional[str]:
-    """Stitch a memory-context block onto a base ``system_prompt``.
-
-    The base (per-task or per-node) sets behaviour ("you are X with Y
-    persona"); memory context gives prior conversation. Memory comes
-    AFTER the base so behaviour-defining instructions land first.
-    """
-    if not memory_context:
-        return base
-    if not base:
-        return memory_context
-    return f"{base}\n\n{memory_context}"
 
 
 class ClaudeCodeAgentParams(BaseModel):
@@ -182,37 +167,52 @@ class ClaudeCodeAgentNode(ActionNode):
             if s.get("skill_name") or s.get("label")
         ]
 
-        # Memory bridge: inject simpleMemory.memory_content (markdown)
-        # as a system-prompt context block. Universal P2 pattern —
-        # Cline/Continue/Aider/Cursor/Hermes/Anthropic-SDK all persist
-        # conversation in caller state and re-pass it each turn.
-        # `claude -p --session-id` doesn't auto-load and `--resume` is
-        # broken in headless mode (open bug
-        # `anthropics/claude-code#43696`), so we paste prior turns as
-        # `--append-system-prompt`. The same markdown surface aiAgent /
-        # chatAgent / deep_agent / rlm_agent already use.
-        memory_context: Optional[str] = None
+        # Memory bridge: claude maintains its own session JSONL on disk
+        # under `<CLAUDE_CONFIG_DIR>/projects/<cwd-encoded>/<UUID>.jsonl`.
+        # The project_key is derived from cwd (`[^a-zA-Z0-9.-] -> -`),
+        # so memory continuity needs (a) a STABLE cwd across runs and
+        # (b) the right session_id passed on argv.
+        #
+        # (a) is handled by AICliService passing memory_bound=True so
+        # AICliSession spawns under repo_root instead of an ephemeral
+        # worktree — see `services/cli_agent/session.py:cwd()`.
+        #
+        # (b) splits on whether claude has run for this memory before:
+        #
+        #   - First run (no last_session_id): pass `--session-id <UUID5>`
+        #     where UUID5 is deterministically derived from
+        #     (memory_node_id, simpleMemory.session_id). Claude creates
+        #     the session at exactly that UUID, writes its JSONL to a
+        #     predictable location. _persist_memory saves the same
+        #     UUID as last_session_id after success.
+        #
+        #   - Subsequent runs: pass `--resume <last_session_id>`.
+        #     Claude finds its own JSONL and continues.
+        #
+        # Stale-`last_session_id` self-healing: if `--resume` fails with
+        # "No conversation found", `_persist_memory` clears the stale
+        # UUID; the next run falls into the first-run branch and
+        # recovers automatically.
+        resume_session_id: Optional[str] = None
+        first_run_session_uuid: Optional[str] = None
         if memory_data:
-            raw = (memory_data.get("memory_content") or "").strip()
-            has_real_content = bool(raw) and "*No messages yet.*" not in raw
+            last = memory_data.get("last_session_id") or None
+            if last:
+                resume_session_id = last
+            else:
+                raw = memory_data.get("session_id") or memory_data["node_id"]
+                name = f"{memory_data['node_id']}:{raw}"
+                first_run_session_uuid = str(
+                    uuid.uuid5(uuid.NAMESPACE_OID, name)
+                )
             logger.info(
-                "[Claude Code memory] memory_content_length=%d real_content=%s",
-                len(raw), has_real_content,
+                "[Claude Code memory] memory_node=%s last_session_id=%s "
+                "-> %s",
+                memory_data.get("node_id"),
+                last,
+                f"--resume {resume_session_id}" if resume_session_id
+                else f"--session-id {first_run_session_uuid} (first run)",
             )
-            if has_real_content:
-                memory_context = (
-                    "## Prior conversation context\n\n"
-                    "The following is the prior conversation between you "
-                    "and the user in this session. Continue naturally "
-                    "from this context without re-introducing yourself "
-                    "or restating prior steps.\n\n"
-                    + raw
-                )
-                logger.info(
-                    "[Claude Code memory] injecting %d chars of markdown "
-                    "context as --append-system-prompt",
-                    len(memory_context),
-                )
 
         tasks = list(params.tasks)
         if not tasks:
@@ -236,10 +236,12 @@ class ClaudeCodeAgentNode(ActionNode):
             spec_kwargs: dict = {
                 "prompt": prompt,
                 "model": params.model,
-                "system_prompt": _compose_system_prompt(
-                    params.system_prompt, memory_context,
-                ),
+                "system_prompt": params.system_prompt,
             }
+            if resume_session_id:
+                spec_kwargs["resume_session_id"] = resume_session_id
+            elif first_run_session_uuid:
+                spec_kwargs["session_id"] = first_run_session_uuid
             tasks = [ClaudeTaskSpec(**spec_kwargs)]
         else:
             # Apply node-level defaults to tasks that don't override.
@@ -247,12 +249,13 @@ class ClaudeCodeAgentNode(ActionNode):
                 changed: dict = {}
                 if not t.model and params.model:
                     changed["model"] = params.model
-                # System prompt: per-task overrides node-level; memory
-                # context (if any) appends to whichever wins.
-                base_sp = t.system_prompt or params.system_prompt
-                composed = _compose_system_prompt(base_sp, memory_context)
-                if composed != t.system_prompt:
-                    changed["system_prompt"] = composed
+                if not t.system_prompt and params.system_prompt:
+                    changed["system_prompt"] = params.system_prompt
+                if not t.session_id and not t.resume_session_id:
+                    if resume_session_id:
+                        changed["resume_session_id"] = resume_session_id
+                    elif first_run_session_uuid:
+                        changed["session_id"] = first_run_session_uuid
                 if changed:
                     tasks[i] = t.model_copy(update=changed)
 

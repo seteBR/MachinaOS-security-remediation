@@ -84,13 +84,17 @@ async def clear_agent_session_state(
         db = get_database()
         params = await db.get_node_parameters(memory_node_id) or {}
         params["memory_content"] = DEFAULT_MEMORY_CONTENT
-        params["memory_jsonl"] = None
+        # Wipe `last_session_id` so claude_code_agent starts a fresh
+        # session on next spawn instead of `--resume`-ing into the now-
+        # cleared transcript. Drop any orphan JSONL field from the
+        # earlier bridge revision.
         params["last_session_id"] = None
+        params.pop("memory_jsonl", None)
         await db.save_node_parameters(memory_node_id, params)
         cleared_memory_node = True
         logger.info(
             "[Memory] Cleared simpleMemory node fields memory_node=%s "
-            "(memory_content reset, memory_jsonl + last_session_id wiped)",
+            "(memory_content reset + last_session_id wiped)",
             memory_node_id,
         )
 

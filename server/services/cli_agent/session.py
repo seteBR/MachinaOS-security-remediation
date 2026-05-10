@@ -66,6 +66,7 @@ class AICliSession(BaseProcessSupervisor):
         batch_token: str,
         connected_tool_names: Optional[List[str]] = None,
         connected_skill_names: Optional[List[str]] = None,
+        memory_bound: bool = False,
     ) -> None:
         super().__init__()
         self._provider = provider
@@ -88,6 +89,15 @@ class AICliSession(BaseProcessSupervisor):
         # so claude auto-discovers them per the documented project-scope
         # path (https://code.claude.com/docs/en/skills#where-skills-live).
         self._connected_skill_names: List[str] = list(connected_skill_names or [])
+        # Memory-bound runs use ``cwd=repo_root`` so claude's project_key
+        # (derived from cwd via `[^a-zA-Z0-9.-] -> -`) stays stable
+        # across spawns. With a stable project_key, ``--resume <UUID>``
+        # finds the prior session JSONL claude wrote on its previous
+        # turn under ``<CLAUDE_CONFIG_DIR>/projects/<key>/<UUID>.jsonl``.
+        # The per-task git worktree (random `wt_t_<rand>` suffix) is
+        # incompatible with this — every spawn would land under a
+        # brand-new project_key with no prior JSONL.
+        self._memory_bound: bool = bool(memory_bound)
 
         # Streaming state
         self._events: List[Dict[str, Any]] = []
@@ -140,6 +150,11 @@ class AICliSession(BaseProcessSupervisor):
         return f"http://127.0.0.1:{self._mcp_port}/mcp/ide/mcp"
 
     def cwd(self) -> Optional[Path]:
+        # Memory-bound runs spawn directly under repo_root so claude's
+        # project_key stays constant and `--resume` finds the prior
+        # JSONL across runs. Non-memory runs use the per-task worktree.
+        if self._memory_bound:
+            return self._repo_root
         return self._worktree_dir
 
     def env(self) -> Dict[str, str]:
@@ -162,24 +177,39 @@ class AICliSession(BaseProcessSupervisor):
         return e
 
     async def _pre_spawn(self) -> None:
-        """Create the per-task git worktree and (if supported) write the
-        IDE lockfile. Failures abort `_do_start` cleanly via RuntimeError."""
-        # 1. git worktree
-        self._worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-        wt_proc = await anyio.run_process(
-            [
-                "git", "-C", str(self._repo_root),
-                "worktree", "add",
-                str(self._worktree_dir),
-                "-b", self._branch,
-            ],
-            check=False,
-        )
-        if wt_proc.returncode != 0:
-            err = (wt_proc.stderr or b"").decode("utf-8", errors="replace").strip()
-            raise RuntimeError(f"git worktree add failed: {err}")
+        """Create the per-task git worktree (non-memory-bound runs only)
+        and (if supported) write the IDE lockfile. Failures abort
+        `_do_start` cleanly via RuntimeError."""
+        # 1. Per-task git worktree — skipped for memory-bound runs
+        # which use cwd=repo_root to keep claude's project_key stable.
+        if not self._memory_bound:
+            self._worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+            wt_proc = await anyio.run_process(
+                [
+                    "git", "-C", str(self._repo_root),
+                    "worktree", "add",
+                    str(self._worktree_dir),
+                    "-b", self._branch,
+                ],
+                check=False,
+            )
+            if wt_proc.returncode != 0:
+                err = (wt_proc.stderr or b"").decode(
+                    "utf-8", errors="replace",
+                ).strip()
+                raise RuntimeError(f"git worktree add failed: {err}")
+        else:
+            logger.info(
+                "[%s] memory-bound: skipping worktree, using cwd=%s",
+                self.label, self._repo_root,
+            )
 
-        # 2. IDE lockfile (VSCode pattern) — providers that support it
+        # 2. IDE lockfile (VSCode pattern) — providers that support it.
+        # `workspace_dir` in the lockfile points at whatever cwd will
+        # actually be — repo_root for memory-bound runs, else worktree.
+        lockfile_workspace = (
+            self._repo_root if self._memory_bound else self._worktree_dir
+        )
         if self._provider.supports("ide_lockfile") and self._provider.ide_lockfile_dir:
             try:
                 self._lockfile_path = write_ide_lockfile(
@@ -187,7 +217,7 @@ class AICliSession(BaseProcessSupervisor):
                     pid=os.getpid(),
                     port=self._mcp_port,
                     token=self._batch_token,
-                    workspace_dir=self._worktree_dir,
+                    workspace_dir=lockfile_workspace,
                     ide_name=self._provider.name,
                 )
             except OSError as exc:
@@ -196,9 +226,9 @@ class AICliSession(BaseProcessSupervisor):
                     self.label, exc,
                 )
 
-        # 3. Materialise connected skills into `<worktree>/.claude/skills/`.
-        # Project-scope path auto-discovers because the worktree IS claude's
-        # cwd. Best-effort — failures warn but don't abort the spawn.
+        # 3. Materialise connected skills under cwd's `.claude/skills/`.
+        # cwd is repo_root for memory-bound, worktree otherwise — both
+        # are project-scope per the spec.
         if self._connected_skill_names:
             await self._materialise_skills()
 
@@ -211,7 +241,8 @@ class AICliSession(BaseProcessSupervisor):
         from services.skill_loader import get_skill_loader
 
         loader = get_skill_loader()
-        skills_dir = self._worktree_dir / ".claude" / "skills"
+        # cwd-relative — repo_root for memory-bound runs, worktree otherwise.
+        skills_dir = self.cwd() / ".claude" / "skills"
         try:
             skills_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -530,19 +561,20 @@ class AICliSession(BaseProcessSupervisor):
             remove_ide_lockfile(self._lockfile_path)
             self._lockfile_path = None
 
-        # Remove the worktree (force, since branch lifecycle is the
-        # batch's responsibility — best-effort).
-        try:
-            await anyio.run_process(
-                [
-                    "git", "-C", str(self._repo_root),
-                    "worktree", "remove", "--force",
-                    str(self._worktree_dir),
-                ],
-                check=False,
-            )
-        except Exception as exc:
-            self._logger.debug("[%s] worktree remove: %s", self.label, exc)
+        # Remove the per-task worktree (only created for non-memory
+        # runs; memory-bound spawns ran directly under repo_root).
+        if not self._memory_bound:
+            try:
+                await anyio.run_process(
+                    [
+                        "git", "-C", str(self._repo_root),
+                        "worktree", "remove", "--force",
+                        str(self._worktree_dir),
+                    ],
+                    check=False,
+                )
+            except Exception as exc:
+                self._logger.debug("[%s] worktree remove: %s", self.label, exc)
 
     # ------------------------------------------------------------------
     # Result construction

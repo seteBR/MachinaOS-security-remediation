@@ -68,6 +68,18 @@ class SimpleMemoryParams(BaseModel):
         description="Number of relevant memories to retrieve from long-term storage",
         json_schema_extra={"displayOptions": {"show": {"long_term_enabled": [True]}}},
     )
+    last_session_id: Optional[str] = Field(
+        default=None,
+        title="Last Claude Session ID",
+        description=(
+            "Internal: the session UUID claude returned on the most "
+            "recent successful run. Drives `--resume <UUID>` on the "
+            "next spawn so claude finds and continues its own JSONL "
+            "transcript on disk. Hidden from the UI; clearing the "
+            "memory wipes this too."
+        ),
+        json_schema_extra={"hidden": True},
+    )
 
     model_config = ConfigDict(extra="ignore")
 

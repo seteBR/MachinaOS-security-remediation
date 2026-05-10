@@ -177,6 +177,7 @@ class AICliService:
                         if t.get("node_type")
                     ],
                     connected_skill_names=list(connected_skill_names or []),
+                    memory_bound=bool(connected_memory),
                 )
                 async with self._lock:
                     self._active_sessions[key].append(session)
@@ -217,13 +218,15 @@ class AICliService:
             unregister_batch(token)
 
         # Memory bridge: persist claude's session_id + append the
-        # rendered exchange to simpleMemory's JSONL transcript so the
-        # next run can `--resume <UUID>` and the UI shows the
-        # conversation. Fire-and-forget — failure here doesn't fail
-        # the batch.
+        # rendered exchange to simpleMemory's markdown transcript so the
+        # next run can `--resume <UUID>` and the UI sees the
+        # conversation refresh live. Fire-and-forget — failure here
+        # doesn't fail the batch.
         if connected_memory:
             try:
-                await self._persist_memory(connected_memory, results)
+                await self._persist_memory(
+                    connected_memory, results, broadcaster=broadcaster,
+                )
             except Exception as exc:  # pragma: no cover — best-effort
                 logger.warning(
                     "[CC-Agent run_batch] memory persistence failed: %s",
@@ -308,9 +311,39 @@ class AICliService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    async def _clear_stale_session_id(
+        connected_memory: Dict[str, Any],
+    ) -> None:
+        """Wipe a stale ``last_session_id`` that no longer maps to any
+        JSONL under the current cwd's project dir.
+
+        Triggered when claude reports ``No conversation found with
+        session ID: <UUID>``. Preserves ``memory_content`` (the
+        user-visible markdown mirror) since that's informational; only
+        the resume UUID is broken.
+        """
+        from services.plugin.deps import get_database
+
+        db = get_database()
+        memory_node_id = connected_memory["node_id"]
+        params = await db.get_node_parameters(memory_node_id) or {}
+        prior = params.get("last_session_id")
+        if not prior:
+            return  # already cleared
+        params["last_session_id"] = None
+        await db.save_node_parameters(memory_node_id, params)
+        logger.warning(
+            "[CC-Agent _persist_memory] cleared stale last_session_id=%s "
+            "from memory_node=%s; next run will spawn a fresh claude "
+            "session and persist its new UUID.",
+            prior, memory_node_id,
+        )
+
+    @staticmethod
     async def _persist_memory(
         connected_memory: Dict[str, Any],
         results: List[SessionResult],
+        broadcaster: Any = None,
     ) -> None:
         """Append each successful run's user prompt + assistant response
         to ``simpleMemory.memory_content`` (markdown). Mirrors aiAgent /
@@ -321,10 +354,11 @@ class AICliService:
         successful = [r for r in results if r.success]
         logger.info(
             "[CC-Agent _persist_memory] memory_node=%s results=%d "
-            "successful=%d",
+            "successful=%d session_ids=%s",
             connected_memory.get("node_id"),
             len(results),
             len(successful),
+            [r.session_id for r in successful],
         )
         if not successful:
             logger.warning(
@@ -332,10 +366,26 @@ class AICliService:
                 "save (memory_node=%s). Per-result: %s",
                 connected_memory.get("node_id"),
                 [
-                    {"success": r.success, "error": (r.error or "")[:80]}
+                    {"success": r.success, "session_id": r.session_id,
+                     "error": (r.error or "")[:80]}
                     for r in results
                 ],
             )
+            # Auto-recovery: claude returns
+            # ``No conversation found with session ID: <UUID>`` when the
+            # `--resume <UUID>` we passed doesn't exist under the current
+            # cwd's project dir (most often: a `last_session_id` saved
+            # before the cwd-stability fix landed, or a session JSONL
+            # that was wiped). Without this clear the same stale UUID
+            # would re-fire on every retry and lock the user out
+            # forever. The next run after this point will spawn a
+            # fresh session and `_persist_memory` will save its UUID.
+            stale = any(
+                r.error and "No conversation found with session ID" in r.error
+                for r in results
+            )
+            if stale:
+                await AICliService._clear_stale_session_id(connected_memory)
             return
 
         from services.memory import (
@@ -348,6 +398,14 @@ class AICliService:
         memory_node_id = connected_memory["node_id"]
         params = await db.get_node_parameters(memory_node_id) or {}
 
+        # 1. Persist claude's returned session_id from the most recent
+        # successful run. Drives `--resume <UUID>` on the next spawn so
+        # claude finds and continues its own JSONL transcript on disk.
+        last_run = next((r for r in reversed(successful) if r.session_id), None)
+        if last_run is not None:
+            params["last_session_id"] = last_run.session_id
+
+        # 2. Update the user-visible markdown mirror.
         content = params.get("memory_content") or (
             "# Conversation History\n\n*No messages yet.*\n"
         )
@@ -364,10 +422,31 @@ class AICliService:
         await db.save_node_parameters(memory_node_id, params)
         logger.info(
             "[CC-Agent _persist_memory] saved memory_node=%s "
-            "appended_turns=%d archived_blocks=%d content_length=%d",
-            memory_node_id, len(successful),
-            len(removed_texts), len(content),
+            "last_session_id=%s appended_turns=%d archived_blocks=%d "
+            "content_length=%d",
+            memory_node_id, params.get("last_session_id"),
+            len(successful), len(removed_texts), len(content),
         )
+
+        # Broadcast `node_parameters_updated` so the simpleMemory's
+        # parameter panel + memory editor refetch live without a page
+        # reload. Mirrors the pattern in
+        # `routers/websocket.py:handle_save_node_parameters`. Without
+        # this the DB has the latest conversation but the UI keeps
+        # showing the stale snapshot it loaded at workflow open.
+        if broadcaster is not None:
+            try:
+                await broadcaster.broadcast({
+                    "type": "node_parameters_updated",
+                    "node_id": memory_node_id,
+                    "parameters": params,
+                    "version": 1,
+                    "timestamp": time.time(),
+                })
+            except Exception as exc:
+                logger.warning(
+                    "[CC-Agent _persist_memory] broadcast failed: %s", exc,
+                )
 
         if connected_memory.get("long_term_enabled") and removed_texts:
             from services.memory.vector_store import get_memory_vector_store
