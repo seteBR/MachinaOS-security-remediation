@@ -53,6 +53,10 @@
   --motion-style: mechanical;
   --sound-pack: clockwork;
 
+  /* Wave 30: copper-accent pulse — high-contrast against leather +
+   * brass canvas, matches the rivet decorations. */
+  --node-pulse-color: hsl(var(--accent));
+
   --cursor-default: auto;
   --cursor-pointer: pointer;
   --scrollbar-track: #2a1f12;

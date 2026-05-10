@@ -54,6 +54,10 @@
   --motion-style: stiff;
   --sound-pack: bell;
 
+  /* Wave 30: bile-red pulse — matches the broadsheet warning palette
+   * + reads against parchment. */
+  --node-pulse-color: hsl(var(--destructive));
+
   --cursor-default: auto;
   --cursor-pointer: pointer;
   --scrollbar-track: #d8d4c0;

@@ -47,6 +47,14 @@
    * gradient or SVG data-url. Default: no pattern. */
   --canvas-grid: none;
   --canvas-grid-opacity: 0.4;
+
+  /* Node execution pulse colour (Wave 30). Independent of `--node-color`
+   * (the plugin accent) so the executing-node glow stays high-contrast
+   * against the canvas background regardless of which plugin is running.
+   * Each theme overrides this to its most visible accent (Cyber neon
+   * cyan, Renaissance gold, Surveillance REC red, etc.). The default
+   * `hsl(var(--info))` resolves to a theme-tinted blue under shadcn. */
+  --node-pulse-color: hsl(var(--info));
 }
 
 /* ============================================================================
@@ -131,18 +139,30 @@
 }
 
 /* Pulse during execution — react-flow toggles `.executing` on the wrapper
-   via canvasAnimations.ts (`.react-flow__node.executing`). */
+   via canvasAnimations.ts (`.react-flow__node.executing`). The keyframe
+   uses --node-pulse-color (theme-controlled high-contrast accent) NOT
+   --node-color (plugin accent), so the glow stays visible against any
+   theme background — Cyber's near-black, Renaissance's vellum,
+   Surveillance's grey, etc. */
 .react-flow__node.executing .node {
-  animation: node-pulse 1.5s ease-in-out infinite;
+  animation: node-pulse 1.4s ease-in-out infinite;
 }
 
+/* Two-layer pulse: a soft far-halo (drop shadow) for visibility at
+ * canvas zoom + a hard ring that breathes outward. Range is 0→14px
+ * ring + 8→22px halo so the executing signal reads from at least
+ * 50% canvas zoom. References the pre-W21 inline glow pattern. */
 @keyframes node-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--node-color, hsl(var(--ring))) 60%, transparent);
+    box-shadow:
+      0 0 0 0 color-mix(in srgb, var(--node-pulse-color) 75%, transparent),
+      0 0 8px 0 color-mix(in srgb, var(--node-pulse-color) 50%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--node-color, hsl(var(--ring))) 0%, transparent);
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--node-pulse-color) 35%, transparent),
+      0 0 22px 6px color-mix(in srgb, var(--node-pulse-color) 60%, transparent);
   }
 }
 

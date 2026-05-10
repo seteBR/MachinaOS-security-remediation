@@ -54,6 +54,10 @@
   --motion-style: scanline;
   --sound-pack: telex;
 
+  /* Wave 30: REC-red executing pulse — matches the surv-blink LED
+   * rhythm and reads against the grey CCTV canvas. */
+  --node-pulse-color: hsl(var(--destructive));
+
   /* Cursor — CCTV snooper reticle (REC-red crosshair with center dot) */
   --cursor-default: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g stroke='%23e82626' stroke-width='1' fill='none'><circle cx='12' cy='12' r='8'/><path d='M12 1 L12 6 M12 18 L12 23 M1 12 L6 12 M18 12 L23 12'/><circle cx='12' cy='12' r='1.5' fill='%23e82626'/></g></svg>") 12 12, crosshair;
   --cursor-pointer: pointer;

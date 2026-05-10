@@ -54,6 +54,10 @@
   --motion-style: organic;
   --sound-pack: ink;
 
+  /* Wave 30: vermillion pulse — matches hanko seal + reads against
+   * washi paper background. */
+  --node-pulse-color: hsl(var(--accent));
+
   --cursor-default: auto;
   --cursor-pointer: pointer;
   --scrollbar-track: #f4ecd8;

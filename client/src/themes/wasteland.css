@@ -52,6 +52,10 @@
   --motion-style: jittery;
   --sound-pack: scrap;
 
+  /* Wave 30: radioactive-yellow pulse — high-contrast against ochre
+   * dust + matches the rust-belt accent palette. */
+  --node-pulse-color: hsl(var(--accent));
+
   --cursor-default: auto;
   --cursor-pointer: pointer;
   --scrollbar-track: #2a2018;

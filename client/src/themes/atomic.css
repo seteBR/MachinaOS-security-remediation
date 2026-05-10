@@ -52,6 +52,10 @@
   --motion-style: bouncy;
   --sound-pack: vibraphone;
 
+  /* Wave 30: turquoise pulse — matches the atomic accent + the
+   * boomerang selection halo. Reads against cardstock backgrounds. */
+  --node-pulse-color: hsl(var(--accent));
+
   --cursor-default: auto;
   --cursor-pointer: pointer;
   --scrollbar-track: #f0e6d2;

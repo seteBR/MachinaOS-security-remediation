@@ -62,6 +62,10 @@
   --motion-style: smooth;
   --sound-pack: marble;
 
+  /* Wave 30: lapis-accent pulse — high-contrast against marble +
+   * matches the temple-floor selection halo. */
+  --node-pulse-color: hsl(var(--accent));
+
   --cursor-default: auto;
   --cursor-pointer: pointer;
   --scrollbar-track: #ede5d0;
