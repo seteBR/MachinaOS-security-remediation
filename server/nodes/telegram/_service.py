@@ -257,12 +257,11 @@ class TelegramService(ServiceSingleton):
                 }
                 logger.info(f"[Telegram] Bot validated: @{me.username} (ID: {me.id})")
 
-                self._polling_task = asyncio.create_task(self._run_polling())
-                self._connected = True
-
-                await self._broadcast_status()
-
-                # Hydrate runtime owner_chat_id from stored credential.
+                # Hydrate runtime owner_chat_id from stored credential
+                # BEFORE polling starts so the pre-poll peek below can
+                # short-circuit when we already know the owner. (Was
+                # previously after polling -- race-prone with the
+                # capture path in _on_message_received.)
                 saved_owner = secrets.get("telegram_owner_chat_id")
                 if saved_owner is None:
                     try:
@@ -276,6 +275,28 @@ class TelegramService(ServiceSingleton):
                         self._owner_chat_id = int(saved_owner)
                     except (TypeError, ValueError):
                         pass
+
+                # Pre-poll peek for historical owner capture.
+                # Polling starts with drop_pending_updates=True
+                # (correct hygiene for operational events -- we do
+                # not want stale group spam replaying on every
+                # restart) but that ALSO drops any DM the user sent
+                # before the bot connected. Without this peek the
+                # only path to owner capture is "DM the bot AFTER
+                # polling has started", which is the surprising UX
+                # that produces "Bot owner not detected" on every
+                # fresh setup. get_updates() with no offset returns
+                # the same pending queue without advancing it, so
+                # the subsequent start_polling drop-pass is a no-op
+                # for these messages -- they were going to be
+                # dropped anyway, we just inspect them first.
+                if self._owner_chat_id is None:
+                    await self._capture_owner_from_pending_updates()
+
+                self._polling_task = asyncio.create_task(self._run_polling())
+                self._connected = True
+
+                await self._broadcast_status()
 
                 logger.info(f"[Telegram] Connected and polling started for @{me.username}")
                 return {
@@ -355,36 +376,116 @@ class TelegramService(ServiceSingleton):
             self._connected = False
             await self._broadcast_status()
 
+    async def _capture_owner_from_pending_updates(self) -> None:
+        """Inspect the bot's pending update queue (24h Telegram retention)
+        for any private message and capture the owner if found. Called
+        from connect() before polling starts -- after polling begins the
+        ``drop_pending_updates=True`` flag throws these away unread.
+
+        Uses the same atomic-write-through invariant as
+        ``_on_message_received``: persist FIRST, set in-memory only on
+        successful persist, so a restart can re-capture cleanly if the
+        DB write fails.
+        """
+        try:
+            # offset=None / 0 returns the queue without advancing the
+            # confirmed offset. allowed_updates=["message"] skips
+            # callback_query / poll / inline_query payloads we don't
+            # care about for owner capture.
+            pending = await self._bot.get_updates(
+                timeout=0,
+                allowed_updates=["message"],
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Telegram] Pre-poll owner-capture peek failed "
+                f"({type(e).__name__}): {e}. Owner capture will fall "
+                f"back to live polling once the user DMs the bot.",
+            )
+            return
+
+        for upd in pending:
+            m = upd.message
+            if not (m and m.chat and m.chat.type == "private" and m.from_user):
+                continue
+            captured_id = m.from_user.id
+            try:
+                from services.plugin.deps import get_auth_service
+                await get_auth_service().store_api_key(
+                    "telegram_owner_chat_id",
+                    str(captured_id),
+                    models=[],
+                )
+            except Exception as persist_err:
+                logger.error(
+                    f"[Telegram] FAILED to persist retroactively-captured "
+                    f"owner {captured_id}: {persist_err}. Workaround: "
+                    f"set TELEGRAM_OWNER_CHAT_ID={captured_id} in .env",
+                    exc_info=True,
+                )
+                return
+            self._owner_chat_id = captured_id
+            logger.info(
+                f"[Telegram] Owner retroactively captured from pending "
+                f"updates: @{m.from_user.username} (ID: {captured_id})"
+            )
+            return
+
     async def _on_message_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             if not update.message:
                 return
             msg = update.message
 
-            # Auto-capture bot owner from first private message
+            # Auto-capture bot owner from first private message.
+            # ATOMIC WRITE-THROUGH: persist to credentials DB FIRST, set
+            # in-memory only on success. The previous order
+            # (in-memory then await persist, with WARNING-level logging
+            # of failures) had a silent failure mode: if the persist
+            # raised, the rest of the process lifetime worked correctly,
+            # then the next restart wiped in-memory and DB had nothing
+            # -- subsequent telegramSend(recipient_type=self) failed
+            # forever with "Bot owner not detected" and no trace of
+            # what went wrong. The new order preserves the invariant
+            # "in-memory has owner => DB has owner" so a restart can
+            # always re-capture from the next inbound private message.
             if (
                 self._owner_chat_id is None
                 and msg.chat.type == "private"
                 and msg.from_user
             ):
-                self._owner_chat_id = msg.from_user.id
-                logger.info(
-                    f"[Telegram] Owner detected: @{msg.from_user.username} "
-                    f"(ID: {msg.from_user.id})"
-                )
+                captured_id = msg.from_user.id
+                persist_ok = False
                 try:
                     from services.plugin.deps import get_auth_service
-                    auth = get_auth_service()
-                    await auth.store_api_key(
+                    await get_auth_service().store_api_key(
                         "telegram_owner_chat_id",
-                        str(msg.from_user.id),
+                        str(captured_id),
                         models=[],
                     )
+                    persist_ok = True
                 except Exception as persist_err:
-                    logger.warning(
-                        f"[Telegram] Failed to persist owner chat_id: {persist_err}"
+                    # ERROR-level so the failure surfaces in default
+                    # uvicorn output, not just DEBUG. Includes the
+                    # captured id so the user can manually set
+                    # TELEGRAM_OWNER_CHAT_ID in .env as an immediate
+                    # workaround. exc_info=True so the underlying
+                    # cause (encryption not initialised, DB locked,
+                    # disk full, ...) is visible.
+                    logger.error(
+                        f"[Telegram] FAILED to persist owner chat_id "
+                        f"{captured_id}: {persist_err}. The bot will not "
+                        f"recover this binding on restart. Workaround: "
+                        f"set TELEGRAM_OWNER_CHAT_ID={captured_id} in .env",
+                        exc_info=True,
                     )
-                await self._broadcast_status()
+                if persist_ok:
+                    self._owner_chat_id = captured_id
+                    logger.info(
+                        f"[Telegram] Owner detected and persisted: "
+                        f"@{msg.from_user.username} (ID: {captured_id})"
+                    )
+                    await self._broadcast_status()
 
             event_data = self._format_message(msg)
             logger.info(

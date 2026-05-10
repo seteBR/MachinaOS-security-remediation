@@ -25,6 +25,8 @@ export interface FieldDef {
   /** Pre-fill value when nothing stored. See ServerFieldDef.default. */
   default?: string;
   required?: boolean;
+  /** Help text shown beneath the input (always visible). */
+  help?: string;
 }
 
 // ============================================================================

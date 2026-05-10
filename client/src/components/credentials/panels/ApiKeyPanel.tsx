@@ -9,6 +9,9 @@ import { CheckCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { ActionButton } from '@/components/ui/action-button';
 import ApiKeyInput from '../../ui/ApiKeyInput';
 import { useCredentialPanel } from '../useCredentialPanel';
 import { ProviderDefaultsSection, LlmUsageSection, ApiUsageSection } from '../sections';
@@ -17,7 +20,12 @@ import type { ProviderConfig } from '../types';
 
 const ApiKeyPanel: React.FC<{ config: ProviderConfig; visible: boolean }> = ({ config, visible }) => {
   const panel = useCredentialPanel(config, visible);
+  // Primary credential field (validate / connect target — bot token,
+  // api key, etc.). Secondary fields (telegram_owner_chat_id,
+  // optional metadata) render below as plain text inputs with their
+  // own save button — they don't go through validate.
   const field = config.fields?.[0];
+  const secondaryFields = (config.fields ?? []).slice(1);
 
   // Single source of truth: panel.values (server-cached query data,
   // includes backend-served catalogue defaults like local-LLM Base URL).
@@ -95,11 +103,79 @@ const ApiKeyPanel: React.FC<{ config: ProviderConfig; visible: boolean }> = ({ c
         </Alert>
       )}
 
+      {/* Secondary fields (e.g. telegram_owner_chat_id). Plain text +
+          shadcn Input + Save ActionButton — bypasses the validate
+          path because these are operator metadata, not credentials
+          to probe upstream. Save writes via the same auth_service
+          path the primary uses (panel.actions.save). */}
+      {secondaryFields.map((sf) => (
+        <SecondaryFieldRow
+          key={sf.key}
+          fieldKey={sf.key}
+          label={sf.label}
+          placeholder={sf.placeholder}
+          help={sf.help}
+          secret={sf.secret}
+          value={panel.values[sf.key] ?? ''}
+          onChange={(v) => panel.form.setFieldValue(sf.key, v)}
+          onSave={() => panel.actions.save(sf.key, panel.values[sf.key] ?? '')}
+          loading={panel.loading === 'save'}
+        />
+      ))}
+
       {config.hasDefaults && <ProviderDefaultsSection providerId={config.id} />}
       {config.hasDefaults && <LlmUsageSection providerId={config.id} providerName={config.name} />}
       {config.usageService && <ApiUsageSection service={config.usageService} serviceName={config.name} />}
     </div>
   );
 };
+
+interface SecondaryFieldRowProps {
+  fieldKey: string;
+  label: string;
+  placeholder?: string;
+  help?: string;
+  secret?: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  loading: boolean;
+}
+
+/** Plain text/password field below the primary credential — for
+ *  operator metadata like telegram_owner_chat_id. shadcn Input + Label
+ *  + ActionButton; controlled by panel.values, saves via
+ *  panel.actions.save which writes through to the credentials DB. */
+const SecondaryFieldRow: React.FC<SecondaryFieldRowProps> = ({
+  fieldKey, label, placeholder, help, secret, value, onChange, onSave, loading,
+}) => (
+  <Card>
+    <CardContent className="flex flex-col gap-2 pt-4">
+      <Label htmlFor={`cred-${fieldKey}`} className="text-sm font-medium">
+        {label}
+      </Label>
+      <div className="flex gap-2">
+        <Input
+          id={`cred-${fieldKey}`}
+          type={secret ? 'password' : 'text'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="flex-1"
+        />
+        <ActionButton
+          intent="save"
+          onClick={onSave}
+          disabled={loading}
+        >
+          Save
+        </ActionButton>
+      </div>
+      {help && (
+        <p className="text-xs text-muted-foreground">{help}</p>
+      )}
+    </CardContent>
+  </Card>
+);
 
 export default ApiKeyPanel;

@@ -52,6 +52,10 @@ export interface ServerFieldDef {
       without typing. */
   default?: string;
   required?: boolean;
+  /** Multi-line description shown under the input (e.g. why this field
+      exists, where to find the value). Different from `placeholder` —
+      this is always visible. */
+  help?: string;
 }
 
 /** Raw status-row descriptor — uses a string `ok_field` instead of a callable. */

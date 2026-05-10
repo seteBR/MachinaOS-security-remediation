@@ -143,6 +143,7 @@ function buildFields(defs: ServerFieldDef[] | undefined): FieldDef[] | undefined
     placeholder: d.placeholder,
     default: d.default,
     required: d.required,
+    help: d.help,
   }));
 }
 
