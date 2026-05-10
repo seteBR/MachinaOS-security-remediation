@@ -9,6 +9,7 @@ import { useNodeStatus } from '../contexts/WebSocketContext';
 import { dracula } from '../styles/theme';
 import { useNodeSpec } from '../lib/nodeSpec';
 import { NodeIcon } from '../assets/icons';
+import { Badge } from '@/components/ui/badge';
 
 // LangGraph phase icons and labels. Colors reference the dracula token
 // constants so a future palette change in tokens.css propagates without
@@ -72,6 +73,15 @@ const AIAgentNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
   const isExecuting = nodeStatus?.status === 'executing';
   const currentPhase = nodeStatus?.data?.phase as string | undefined;
   const phaseConfig = currentPhase ? PHASE_CONFIG[currentPhase] : null;
+  // Live LangGraph supervised-loop counter. Backed by the
+  // `agent_progress` CloudEvents broadcast (services/ai.py emits one
+  // per astream snapshot). `iteration` advances on each agent_node call;
+  // `max_iterations` mirrors LangGraph's recursion_limit
+  // (llm_defaults.json:agent.recursion_limit).
+  const iteration = nodeStatus?.data?.iteration as number | undefined;
+  const maxIterations = nodeStatus?.data?.max_iterations as number | undefined;
+  const showIterationBadge =
+    isExecuting && typeof iteration === 'number' && typeof maxIterations === 'number';
 
   // Validate configuration whenever data changes
   useEffect(() => {
@@ -107,7 +117,10 @@ const AIAgentNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
         padding: theme.spacing.lg,
         paddingLeft: hasLeftLabels ? '72px' : theme.spacing.lg,
         paddingRight: hasRightOutputs ? '72px' : theme.spacing.lg,
-        minWidth: `${width}px`,
+        // Width is fixed (not just min) so long titles like
+        // "PRODUCTIVITY AGENT" wrap inside the bordered card
+        // instead of growing the node and bleeding past the border.
+        width: `${width}px`,
         minHeight: `${height}px`,
         color: theme.colors.text,
         fontSize: theme.fontSize.sm,
@@ -147,6 +160,28 @@ const AIAgentNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
         </>
       )}
 
+      {/* Live LangGraph iteration counter (e.g. "12 / 500"). shadcn
+          Badge primitive with `outline` variant — picks up `--border`
+          and `--foreground` from whichever theme is active. The
+          per-node-type accent rides via the `--node-color` custom
+          property already set on the parent at line ~105 (one of the
+          two grandfathered inline-style channels for canvas nodes per
+          CLAUDE.md). `tabular-nums` keeps "1 / 500" -> "12 / 500" from
+          jittering as digits widen. */}
+      {showIterationBadge && (
+        <Badge
+          variant="outline"
+          title={`Iteration ${iteration} of ${maxIterations} (LangGraph recursion_limit)`}
+          className="absolute top-1 left-1 z-20 tabular-nums pointer-events-none"
+          style={{
+            color: 'var(--node-color)',
+            borderColor: 'var(--node-color)',
+          }}
+        >
+          {iteration} / {maxIterations}
+        </Badge>
+      )}
+
       {/* Parameters gear */}
       <button
         onClick={handleParametersClick}
@@ -168,19 +203,31 @@ const AIAgentNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
         <NodeIcon icon={spec?.icon} className="h-7 w-7 text-3xl" />
       </div>
 
-      {/* Title */}
+      {/* Title — alignSelf:stretch + width:100% forces the flex child
+          to fill the parent's content area (parent is align-items:center
+          which would otherwise size the child to its content). With
+          overflowWrap + wordBreak, long display names like
+          "PRODUCTIVITY AGENT" wrap to multiple lines. */}
       <div className="node-label" style={{
+        alignSelf: 'stretch',
+        width: '100%',
         fontSize: theme.fontSize.base, fontWeight: theme.fontWeight.semibold,
         color: theme.colors.text, lineHeight: '1.2', marginBottom: theme.spacing.xs,
+        overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal',
+        textAlign: 'center',
       }}>{title}</div>
 
       {/* Subtitle. Phase color is JS-driven (PHASE_CONFIG[phase].color) so
           we keep the inline color while still exposing `node-sub` so themes
           can style the resting subtitle. */}
       <div className="node-sub" style={{
+        alignSelf: 'stretch',
+        width: '100%',
         fontSize: theme.fontSize.xs, fontWeight: theme.fontWeight.normal,
         color: isExecuting && phaseConfig ? phaseConfig.color : theme.colors.focus,
         lineHeight: '1.2', marginBottom: theme.spacing.lg, transition: 'color 0.3s ease',
+        overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal',
+        textAlign: 'center',
       }}>{isExecuting && phaseConfig ? phaseConfig.label : subtitle}</div>
 
       {/* Left inputs below the main one (Memory / Task / etc.) */}
