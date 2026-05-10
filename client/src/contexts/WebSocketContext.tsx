@@ -962,6 +962,57 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           break;
         }
 
+        case 'deployment_snapshot': {
+          // CloudEvents v1.0 envelope from broadcaster._send_deployment_snapshot.
+          // Pushed once per WS connect so the FE can reconcile its stale
+          // `deploymentStatus.isRunning=true` after a backend restart that
+          // wiped DeploymentManager._deployments. Empty list is meaningful
+          // and forces a reset — the prior bug was: backend restart wiped
+          // the deployment dict, FE never got a `stopped` broadcast (because
+          // there was nothing to broadcast about), so the Start button
+          // stayed showing "Stop" forever.
+          const envelope = data as WorkflowEvent<{
+            running_workflow_ids?: string[];
+          }> | undefined;
+          const runningIds = envelope?.data?.running_workflow_ids ?? [];
+          const runningSet = new Set(runningIds);
+          const store = useAppStore.getState();
+          const currentId = store.currentWorkflow?.id;
+
+          // Reconcile per-workflow execution state in workflowUIStates.
+          // Anything currently flagged isExecuting=true that isn't in
+          // the snapshot's running set gets cleared (the load-bearing
+          // reset for stale state after backend restart). Anything in
+          // the snapshot gets flagged true.
+          const existingStates = store.workflowUIStates ?? {};
+          for (const [wid, ui] of Object.entries(existingStates)) {
+            if (ui?.isExecuting && !runningSet.has(wid)) {
+              store.setWorkflowExecuting(wid, false);
+            }
+          }
+          for (const wid of runningIds) {
+            store.setWorkflowExecuting(wid, true);
+          }
+
+          // Reconcile the toolbar `deploymentStatus` for the active workflow
+          setDeploymentStatus(prev => {
+            const next: DeploymentStatus = { ...prev };
+            if (currentId && runningSet.has(currentId)) {
+              next.isRunning = true;
+              next.status = 'running';
+              next.workflow_id = currentId;
+            } else if (currentId && !runningSet.has(currentId) && prev.workflow_id === currentId) {
+              // Previously thought current workflow was deployed; backend says no.
+              next.isRunning = false;
+              next.status = 'stopped';
+              next.workflow_id = null;
+              next.activeRuns = 0;
+            }
+            return next;
+          });
+          break;
+        }
+
         case 'deployment_status':
           // Handle deployment status updates (event-driven, no iterations)
           // Per-workflow scoping (n8n pattern): Only apply updates for current workflow

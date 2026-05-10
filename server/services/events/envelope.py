@@ -220,6 +220,33 @@ class WorkflowEvent(BaseModel):
         )
 
     @classmethod
+    def deployment_snapshot(
+        cls,
+        running_workflow_ids: list[str],
+    ) -> "WorkflowEvent":
+        """Push-on-connect snapshot of every currently-running deployment.
+
+        Emitted by ``broadcaster.broadcast_deployment_snapshot()`` to a
+        single WebSocket target right after ``initial_status``. Lets the
+        FE reconcile its local ``deploymentStatus`` / ``runningWorkflows``
+        cache against the backend's source of truth on every (re)connect,
+        instead of carrying stale "isRunning=true" forward through a
+        backend restart that wiped the in-memory deployment dict.
+
+        Distinct from ``workflow_lifecycle("deployment.started")`` —
+        that fires when a deployment STARTS (one-shot edge event).
+        ``deployment.snapshot`` is an idempotent state dump tied to
+        client connect, not to a state transition. Empty list is
+        meaningful: "no deployments are running, drop your stale
+        local state."
+        """
+        return cls(
+            source="machinaos://services/workflow",
+            type="workflow.deployment.snapshot",
+            data={"running_workflow_ids": list(running_workflow_ids)},
+        )
+
+    @classmethod
     def task_completed(
         cls,
         task_id: str,

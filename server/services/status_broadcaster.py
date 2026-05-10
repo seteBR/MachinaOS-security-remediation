@@ -120,6 +120,46 @@ class StatusBroadcaster:
         except Exception as e:
             logger.error(f"[StatusBroadcaster] Failed to send initial status: {e}")
 
+        # Reconcile snapshot — every fresh client gets the
+        # currently-running-deployments truth so a stale FE
+        # `deploymentStatus.isRunning=true` (carried forward through a
+        # backend restart that wiped DeploymentManager._deployments)
+        # gets cleared. CloudEvents-shaped envelope; empty list is
+        # meaningful and triggers FE-side reset.
+        try:
+            await self._send_deployment_snapshot(websocket)
+        except Exception as e:
+            logger.error(f"[StatusBroadcaster] Failed to send deployment snapshot: {e}")
+
+    async def _send_deployment_snapshot(self, websocket: WebSocket) -> None:
+        """Build + send a CloudEvents deployment_snapshot to one client.
+
+        Lazy container resolution because the broadcaster is constructed
+        before WorkflowService and we do not want a circular dependency
+        at module-load time.
+        """
+        try:
+            from core.container import container
+            from services.events import WorkflowEvent
+
+            workflow_service = container.workflow_service()
+            dm = workflow_service._get_deployment_manager()
+            running_ids = dm.get_deployed_workflows()
+        except Exception as e:
+            # Backend startup race or DI not wired yet -- skip the snapshot
+            # rather than fail the connect entirely. The empty-list path
+            # would still be safer than crashing here.
+            logger.debug(
+                f"[StatusBroadcaster] DeploymentManager unavailable for snapshot: {e}",
+            )
+            return
+
+        event = WorkflowEvent.deployment_snapshot(running_ids)
+        await websocket.send_json({
+            "type": "deployment_snapshot",
+            "data": event.model_dump(mode="json"),
+        })
+
     async def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection."""
         async with self._lock:
