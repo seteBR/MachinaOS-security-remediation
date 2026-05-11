@@ -1,3 +1,7 @@
+<img width="1584" height="672" alt="image" src="https://github.com/user-attachments/assets/54be1590-7e08-4b60-9a3d-aadcb3aa44f3" />
+
+
+
 # MachinaOS
 
 <a href="https://www.npmjs.com/package/machinaos" target="_blank"><img src="https://img.shields.io/npm/v/machinaos.svg" alt="npm version"></a>
