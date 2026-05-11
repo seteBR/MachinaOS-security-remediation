@@ -6,7 +6,7 @@
 | **Backend handler** | [`server/services/handlers/todo.py::handle_write_todos`](../../../server/services/handlers/todo.py) (workflow) / `execute_write_todos` (tool) |
 | **Service** | [`server/services/todo_service.py::TodoService`](../../../server/services/todo_service.py) |
 | **Tests** | [`server/tests/nodes/test_ai_tools.py`](../../../server/tests/nodes/test_ai_tools.py) |
-| **Skill (if any)** | [`server/skills/task_agent/write-todos-skill/SKILL.md`](../../../server/skills/task_agent/write-todos-skill/SKILL.md) |
+| **Skill (if any)** | [`server/skills/assistant/write-todos-skill/SKILL.md`](../../../server/skills/assistant/write-todos-skill/SKILL.md) |
 | **Dual-purpose tool** | yes - tool name `write_todos` |
 
 ## Purpose
@@ -134,5 +134,5 @@ flowchart TD
 ## Related
 
 - **Sibling tools**: [`calculatorTool`](./calculatorTool.md), [`currentTimeTool`](./currentTimeTool.md), [`duckduckgoSearch`](./duckduckgoSearch.md), [`taskManager`](./taskManager.md)
-- **Skill using this tool**: [`write-todos-skill/SKILL.md`](../../../server/skills/task_agent/write-todos-skill/SKILL.md)
+- **Skill using this tool**: [`write-todos-skill/SKILL.md`](../../../server/skills/assistant/write-todos-skill/SKILL.md)
 - **Architecture docs**: [Status Broadcaster](../../status_broadcaster.md), [Agent Architecture](../../agent_architecture.md)
