@@ -17,11 +17,20 @@ from machina.commands import daemon
 
 
 def test_detached_kwargs_windows_uses_creationflags():
-    with patch.object(daemon, "IS_WINDOWS", True):
+    # subprocess.DETACHED_PROCESS and CREATE_NEW_PROCESS_GROUP are only
+    # defined on Windows. Patching them in with `create=True` lets the
+    # test cover the Windows branch of `_detached_kwargs` on every CI
+    # runner (POSIX or Windows) without resorting to a skipif that would
+    # leave the branch entirely uncovered on the Linux-only CI matrix.
+    # Real values from windows.h: DETACHED_PROCESS=0x08, GROUP=0x200.
+    fake_detached = 0x00000008
+    fake_new_group = 0x00000200
+    with patch.object(daemon, "IS_WINDOWS", True), \
+         patch.object(subprocess, "DETACHED_PROCESS", fake_detached, create=True), \
+         patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", fake_new_group, create=True):
         kw = daemon._detached_kwargs()
     assert "creationflags" in kw
-    expected = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    assert kw["creationflags"] == expected
+    assert kw["creationflags"] == fake_detached | fake_new_group
     assert "start_new_session" not in kw
 
 
