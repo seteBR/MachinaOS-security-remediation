@@ -11,7 +11,7 @@ Think n8n's visual builder with the agent ergonomics of an SDK — workflows are
 
 ## See It In Action ↓
 
-https://github.com/user-attachments/assets/a30979e0-8066-4412-b466-cc3a70bcf3dd
+https://github.com/user-attachments/assets/5ee81bb3-12cf-4755-8532-7470c6f1d841
 
 ## Full Capabilities ↓
 
