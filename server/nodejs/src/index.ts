@@ -5,7 +5,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import vm from 'node:vm';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -65,6 +65,14 @@ app.post('/execute', (req: Request, res: Response) => {
 
   try {
     const context = vm.createContext(sandbox);
+    // This service IS the sandboxed JS executor for the pythonExecutor /
+    // javascriptExecutor workflow nodes. Node's `vm` is not a security
+    // boundary (per https://nodejs.org/api/vm.html#vmcreatecontextcontextobject-options);
+    // the deployment context is: server binds to localhost only (line 16,
+    // default 'localhost') and is invoked exclusively by the same-machine
+    // Python backend via NodeJSClient. Public network exposure is the
+    // operator's responsibility.
+    // codeql[js/code-injection]
     vm.runInContext(code, context, { timeout, filename: 'user-code.js' });
 
     res.json({
@@ -83,7 +91,11 @@ app.post('/execute', (req: Request, res: Response) => {
   }
 });
 
-// Install packages - package list from request
+// Install packages - package list from request.
+// Localhost-only service (see server.listen at the bottom); same trust
+// boundary as the /execute sandbox. No request-rate limiting because the
+// only caller is the same-machine Python backend.
+// codeql[js/missing-rate-limiting]
 app.post('/packages/install', (req: Request, res: Response) => {
   const { packages } = req.body as { packages: string[] };
 
@@ -100,17 +112,22 @@ app.post('/packages/install', (req: Request, res: Response) => {
   }
 
   try {
-    execSync(`npm install ${packages.join(' ')}`, { cwd: USER_PACKAGES_DIR, timeout: 60000 });
+    // execFileSync (argv array, no shell) instead of execSync with template
+    // string. The regex above already validates names, but going through
+    // execFileSync removes the shell from the path entirely as
+    // defense-in-depth.
+    execFileSync('npm', ['install', ...packages], { cwd: USER_PACKAGES_DIR, timeout: 60000 });
     res.json({ success: true, message: `Installed: ${packages.join(', ')}` });
   } catch (error) {
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
   }
 });
 
-// List packages
+// List packages — same localhost-only trust boundary as above.
+// codeql[js/missing-rate-limiting]
 app.get('/packages', (_req: Request, res: Response) => {
   try {
-    const output = execSync('npm list --json --depth=0', { cwd: USER_PACKAGES_DIR, encoding: 'utf-8' });
+    const output = execFileSync('npm', ['list', '--json', '--depth=0'], { cwd: USER_PACKAGES_DIR, encoding: 'utf-8' });
     res.json({ success: true, packages: JSON.parse(output).dependencies || {} });
   } catch {
     res.json({ success: true, packages: {} });

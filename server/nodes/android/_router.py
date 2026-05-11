@@ -1,6 +1,8 @@
 """Android System Services routes."""
 
-from fastapi import APIRouter, Depends
+import re
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Any
 
@@ -10,6 +12,20 @@ from services.plugin.deps import get_android_service
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/android", tags=["android"])
+
+# ADB device IDs: USB serials (alphanumeric), TCP "host:port" (digits + dots
+# + colon), or "emulator-NNNN". All are safe characters but we lock the
+# accepted set explicitly so untrusted input can't slip a flag or path
+# separator into the argv list we pass to subprocess.run. Anything outside
+# `[A-Za-z0-9._:-]` (and longer than 64 chars) is rejected with 400.
+_DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+
+
+def _validate_device_id(device_id: str) -> str:
+    """Return device_id if it matches the ADB device-id shape, else 400."""
+    if not _DEVICE_ID_PATTERN.fullmatch(device_id):
+        raise HTTPException(status_code=400, detail="invalid device_id")
+    return device_id
 
 
 class AndroidServiceRequest(BaseModel):
@@ -195,9 +211,12 @@ async def setup_port_forwarding(
     device_port: int = 8888
 ):
     """Setup ADB port forwarding for Android device communication."""
+    device_id = _validate_device_id(device_id)
     import subprocess
     try:
         # Setup port forwarding: adb -s device_id forward tcp:local_port tcp:device_port
+        # device_id passes _DEVICE_ID_PATTERN above; subprocess.run is called
+        # with an argv list (no shell), so no further interpolation risk.
         cmd = ["adb", "-s", device_id, "forward", f"tcp:{local_port}", f"tcp:{device_port}"]
 
         result = subprocess.run(

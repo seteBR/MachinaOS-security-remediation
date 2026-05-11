@@ -9,6 +9,12 @@ on:
   pull_request:
     branches: [main]
 
+# Minimum-privilege GITHUB_TOKEN for the implicit calls inside
+# actions (checkout, etc.). Reusable workflows called below declare
+# their own permissions; this one needs read-only at most.
+permissions:
+  contents: read
+
 jobs:
   predeploy:
     uses: ./.github/workflows/predeploy.yml
