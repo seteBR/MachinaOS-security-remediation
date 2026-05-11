@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MachinaOS Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/trohitg/MachinaOS/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/install.sh | bash
 #
 # This script installs MachinaOS and its dependencies:
 # - Node.js 22+ (via brew/apt/dnf/pacman)

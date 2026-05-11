@@ -3,7 +3,7 @@
 <a href="https://www.npmjs.com/package/machinaos" target="_blank"><img src="https://img.shields.io/npm/v/machinaos.svg" alt="npm version"></a>
 <a href="https://opensource.org/licenses/MIT" target="_blank"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 <a href="https://discord.gg/c9pCJ7d8Ce" target="_blank"><img src="https://img.shields.io/discord/1455977012308086895?logo=discord&logoColor=white&label=Discord" alt="Discord"></a>
-<a href="https://deepwiki.com/trohitg/MachinaOS" target="_blank"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+<a href="https://deepwiki.com/zeenie-ai/MachinaOS" target="_blank"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 
 Your own AI assistant that does real work. Drag, drop, and connect AI agents to your email, calendar, messages, phone, and 50+ other services. Runs on your own machine — your data stays with you.
 
@@ -25,7 +25,7 @@ Open http://localhost:3000 and click **Credentials** to connect your first AI pr
 
 ```bash
 npm install -g pnpm
-git clone https://github.com/trohitg/MachinaOS.git
+git clone https://github.com/zeenie-ai/MachinaOS.git
 cd MachinaOS
 pnpm install
 pnpm run dev
@@ -45,13 +45,13 @@ https://github.com/user-attachments/assets/5798fe61-8d26-4d3a-90aa-189bf4eec79f
 
 ## How It Works
 
-[![How MachinaOS Works](docs/diagrams/how-it-works.svg)](https://raw.githubusercontent.com/trohitg/MachinaOS/main/docs/diagrams/how-it-works.svg)
+[![How MachinaOS Works](docs/diagrams/how-it-works.svg)](https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/docs/diagrams/how-it-works.svg)
 
 Pick nodes from the palette, drag them onto a canvas, connect them with lines, give your AI agent some memory and skills, and hit Play. Or **deploy** the workflow so it runs forever in the background — waiting for emails, responding to messages, checking in on a schedule, doing the work you'd rather not.
 
 ## Three Workflows You Get on Day One
 
-[![Default workflows that ship with MachinaOS](docs/diagrams/default-workflows.svg)](https://raw.githubusercontent.com/trohitg/MachinaOS/main/docs/diagrams/default-workflows.svg)
+[![Default workflows that ship with MachinaOS](docs/diagrams/default-workflows.svg)](https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/docs/diagrams/default-workflows.svg)
 
 The first time you open MachinaOS, three example workflows load automatically. Open them on the canvas to see exactly how the pieces fit together, then edit any node and save your own version.
 
@@ -179,7 +179,7 @@ Want to add a node, LLM provider, skill, or integration? One Python file = one n
 - **[docs-internal/](docs-internal/)** — deep-dive architecture docs (execution engine, Temporal, LLM layer, credentials, event system, performance, build pipeline)
 - **[CLAUDE.md](CLAUDE.md)** — comprehensive project memory (great for AI-assisted contributions)
 - **Hosted docs:** https://docs.zeenie.xyz/
-- **DeepWiki:** https://deepwiki.com/trohitg/MachinaOS
+- **DeepWiki:** https://deepwiki.com/zeenie-ai/MachinaOS
 
 ## Community
 

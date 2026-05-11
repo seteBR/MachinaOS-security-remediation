@@ -22,7 +22,7 @@ Internal reference for the GitHub Actions CI/CD pipeline. Covers all workflows, 
                           |  +-- predeploy --+        +--------------------+
                           |  |
                           |  +-- publish-npm ---------> npmjs.org (machina)
-                          |  +-- publish-github-pkgs -> GitHub Packages (@trohitg/machina)
+                          |  +-- publish-github-pkgs -> GitHub Packages (@zeenie-ai/machina)
                           +------------------+
 
   push to docs-MachinaOs/ +------------------+
@@ -239,14 +239,14 @@ Uses `NODE_AUTH_TOKEN` from `secrets.NPM_TOKEN`. Registry URL: `https://registry
 
 ### Job: publish-github-packages
 
-Publishes the scoped `@trohitg/machina` package to GitHub Packages.
+Publishes the scoped `@zeenie-ai/machina` package to GitHub Packages.
 
 Requires `packages: write` permission. Before publishing, an inline Node.js script rewrites `package.json`:
 
 ```javascript
 // Executed at build time to scope the package name:
 const pkg = require('./package.json');
-pkg.name = '@trohitg/machina';
+pkg.name = '@zeenie-ai/machina';
 pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
 require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
 ```
@@ -312,7 +312,7 @@ Uses `MINTLIFY_TOKEN` secret for authentication.
 - **`fail-fast: false` in test-install**: All 6 OS/Node combinations run to completion, giving visibility into platform-specific failures even when one platform fails.
 - **Docker layer caching via GHA**: `cache-from: type=gha` reuses layers across runs, reducing Docker build times.
 - **Scoped `docker-build.yml`**: Prevents full Docker rebuild on every PR -- only triggers when Dockerfile or compose files change.
-- **Dual npm publish**: Unscoped `machina` for public npm, scoped `@trohitg/machina` for GitHub Packages. The scoped name is rewritten at publish time, not in source.
+- **Dual npm publish**: Unscoped `machina` for public npm, scoped `@zeenie-ai/machina` for GitHub Packages. The scoped name is rewritten at publish time, not in source.
 
 ---
 

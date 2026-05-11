@@ -135,7 +135,7 @@ jobs:
         run: pip install uv
 
       - name: Clone repository
-        run: git clone https://github.com/trohitg/MachinaOS.git
+        run: git clone https://github.com/zeenie-ai/MachinaOS.git
 
       - name: Build
         shell: bash
@@ -215,7 +215,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - name: Run install script
-        run: curl -fsSL https://raw.githubusercontent.com/trohitg/MachinaOS/main/install.sh | bash
+        run: curl -fsSL https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/install.sh | bash
 
       - name: Verify installation
         run: |
@@ -228,7 +228,7 @@ jobs:
     steps:
       - name: Run install script
         shell: pwsh
-        run: iwr -useb https://raw.githubusercontent.com/trohitg/MachinaOS/main/install.ps1 | iex
+        run: iwr -useb https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/install.ps1 | iex
 
       - name: Verify installation
         run: |

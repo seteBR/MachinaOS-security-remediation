@@ -1,5 +1,5 @@
 # MachinaOS Installer for Windows
-# Usage: iwr -useb https://raw.githubusercontent.com/trohitg/MachinaOS/main/install.ps1 | iex
+# Usage: iwr -useb https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/install.ps1 | iex
 #
 # This script installs MachinaOS and its dependencies:
 # - Node.js 22+ (via winget/choco)

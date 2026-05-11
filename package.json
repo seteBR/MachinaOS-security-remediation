@@ -18,13 +18,13 @@
   ],
   "author": "Rohit G <trohitg@gmail.com>",
   "license": "MIT",
-  "homepage": "https://github.com/trohitg/MachinaOS#readme",
+  "homepage": "https://github.com/zeenie-ai/MachinaOS#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/trohitg/MachinaOS.git"
+    "url": "git+https://github.com/zeenie-ai/MachinaOS.git"
   },
   "bugs": {
-    "url": "https://github.com/trohitg/MachinaOS/issues"
+    "url": "https://github.com/zeenie-ai/MachinaOS/issues"
   },
   "bin": {
     "machina": "./bin/cli.js"

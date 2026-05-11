@@ -32,7 +32,7 @@ Open http://localhost:3000
 **Prerequisites:** Node.js 22+, Python 3.12+, uv, 
 
 ```bash
-git clone https://github.com/trohitg/MachinaOS.git
+git clone https://github.com/zeenie-ai/MachinaOS.git
 cd MachinaOS
 npm run build
 npm run start
@@ -41,7 +41,7 @@ npm run start
 ### Docker
 
 ```bash
-git clone https://github.com/trohitg/MachinaOS.git
+git clone https://github.com/zeenie-ai/MachinaOS.git
 cd MachinaOS
 npm run docker:up
 ```

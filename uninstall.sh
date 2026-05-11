@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MachinaOS Uninstaller
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/trohitg/MachinaOS/main/uninstall.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/uninstall.sh | bash
 
 set -e
 
