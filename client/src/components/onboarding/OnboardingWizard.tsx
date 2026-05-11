@@ -52,7 +52,6 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onOpenCredentials, 
       title="Welcome Guide"
       maxWidth="95vw"
       maxHeight="95vh"
-      autoHeight
     >
       <div className="flex flex-col px-5 pt-4 pb-3">
         {/* Progress steps */}
