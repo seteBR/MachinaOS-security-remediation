@@ -199,24 +199,6 @@ class RecoverySweeper:
 
         return needs_recovery
 
-    async def cleanup_old_executions(self, max_age_hours: int = 24) -> int:
-        """Clean up completed executions older than max_age.
-
-        Args:
-            max_age_hours: Maximum age in hours
-
-        Returns:
-            Number of executions cleaned up
-        """
-        cleaned = 0
-        max_age_hours * 3600
-        time.time()
-
-        # This would need a scan of all execution keys
-        # For now, we rely on Redis TTL for cleanup
-        logger.info("Cleanup skipped - using Redis TTL",
-                   max_age_hours=max_age_hours)
-
         return cleaned
 
 

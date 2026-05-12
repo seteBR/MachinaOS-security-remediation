@@ -81,6 +81,11 @@ __pycache__/
 nul
 NUL
 
+# Test artifacts — when a test passes a MagicMock to Path(...).mkdir
+# the mock's repr() materialises as a real folder tree. Belt-and-braces
+# guard so future stray runs don't pollute the worktree.
+MagicMock/
+
 # =============================================================================
 # Build artifacts
 # =============================================================================

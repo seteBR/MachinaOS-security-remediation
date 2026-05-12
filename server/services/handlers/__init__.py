@@ -1,21 +1,17 @@
-"""Node handler shims.
+"""Cross-cutting node-handler machinery.
 
-Most handler bodies were inlined into their plugin files during Wave
-11.D / 11.E. What remains here is the cross-cutting machinery:
+Per-plugin handler bodies were inlined into their plugin files during
+Wave 11.D / 11.E and the self-contained plugin folders (Wave 11.H/I)
+absorbed the rest. What remains in this package is the work that
+doesn't belong to any single plugin:
 
-- ``tools.py``        — AI-tool dispatcher + plugin fast-path + Android
-                         toolkit + agent delegation.
-- ``ai.py``           — agent-execution shims (``handle_ai_agent`` etc.)
-                         called by the agent plugins via
-                         ``nodes/agent/_inline.prepare_agent_call``.
-- ``android.py``      — direct Android service execution.
-- ``browser.py``      — agent-browser CLI wrapper.
-- ``claude_code.py``  — Claude Code SDK wrapper.
-- ``deep_agent.py``   — DeepAgents bridge.
-- ``rlm.py``          — RLM agent execution.
-- ``triggers.py``     — generic trigger node handler.
-- ``google_auth.py``  — shared OAuth helper for Google plugins (kept
-                         alive by ``credentials/google.GoogleCredential``).
+- ``tools.py``     — AI-tool dispatcher + plugin fast-path + Android
+                      toolkit + agent delegation.
+- ``triggers.py``  — generic trigger-node handler (cron / event waiters
+                      flow through here regardless of which plugin
+                      registered the trigger).
+- ``todo.py``      — writeTodos execution shim used by every agent's
+                      ``write_todos`` tool call.
 
 The package ``__init__.py`` deliberately stays empty: nothing imports
 from ``services.handlers`` at the package level — every consumer
