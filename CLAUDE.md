@@ -13,10 +13,10 @@ This is a React Flow-based workflow automation platform implementing n8n-inspire
 | **[UI Migration Plan](./docs-internal/ui_migration_plan.md)** | antd → shadcn/ui migration plan + completion log. Waves 1–10 done. Full frontend is schema-driven (backend SSOT); remaining DIY widget registry (ex-Phase 6) is the one deferred item. |
 | **[Node Allowlist](./docs-internal/node_allowlist.md)** | Single-config UI visibility — `server/config/node_allowlist.json` controls which nodes / credential categories / skill folders show in the UI. Five lists with two enforcement tiers (mode-gated allowlist + absolute blocklist). `useNodeAllowlist` hook exposes `isVisible` / `isBlocked` / `isAllowed` / `isCredentialCategoryDisabled` / `isSkillFolderDisabled`. Adding a new disabled domain = single JSON edit, no code change. |
 | **[Theme System](./docs-internal/theme_system.md)** | 10-way visual theme system — 5 utopian (light, dark, renaissance, greek, edo, steampunk, atomic) + 5 dystopian (cyber, wasteland, rot, plague, surveillance) — driven by `<html data-theme>` + per-theme CSS files in `client/src/themes/`. Token taxonomy (surface / fg / border / accent / typography / motion), shadcn HSL-triplet bridge, action role tokens, decorative-layer wrappers (`.app-frame` / `.canvas-host` / `.modal-frame`), per-component decorative ornaments (panel textures + canvas decorations + node pseudo-element overlays + theme-specific keyframes), **canvas-node visual contract via `--node-color` CSS custom property** (no inline `background` / `border` on node components — base.css + per-theme CSS owns visuals; `NodeStyle` helper type at [types/NodeTypes.ts](./client/src/types/NodeTypes.ts) makes the inline custom-prop typecheck-clean), **`--node-pulse-color` separate from `--node-color`** so executing-node glow uses each theme's highest-contrast accent regardless of plugin accent (Cyber neon cyan, Surveillance REC red, Renaissance ultramarine, etc.), **`data-page-hidden` animation pause** (toggled by Dashboard's `visibilitychange` listener; base.css declares `html[data-page-hidden] *, *::before, *::after { animation-play-state: paused !important }` to prevent compositor stall on tab return), **per-theme icon glyph system** (290 SVGs across 29 keys × 10 themes via [themedGlyphs.ts](./client/src/assets/icons/themedGlyphs.ts) + theme-aware [NodeIcon.tsx](./client/src/assets/icons/NodeIcon.tsx)), **per-theme canvas-grid + custom cursors** via `--canvas-grid` / `--cursor-default` slots, **decorative HTML primitives** (`<SvgFilterDefs>` mounting `#ink-blot` / `#noise` / `#crt` filter IDs at app root, `<DropCap>` wrapper for Renaissance ornament rule), **parameter panel migrated to Tailwind tokens** (no `useAppTheme()` reads; section headers carry the display-typography triplet; raw `<Button>` swapped to `<ActionButton intent>`), **per-theme scrollbar webkit rules** in all 10 themes, 9-event WebAudio sound system (10 packs via `--sound-pack` token + `useSound()` hook + global hover delegate + sonner toast monkey-patch + `withSound()` HOC + `Sounds.unlock()` gesture-unlock for AudioContext autoplay-policy compliance), `@media (prefers-reduced-motion: reduce)` accessibility, 30 ms throttle on `type` / `hover`, migration recipe, anti-patterns. Read this before adding a new theme, migrating a component to the new contract, or adding a canvas-node component. |
-| **[Schema Source of Truth RFC](./docs-internal/schema_source_of_truth_rfc.md)** | Backend is SSOT for node schemas, visual metadata, handlers, palette metadata, icons. Plugin pattern: one `BaseNode` subclass in `server/nodes/<group>/<name>.py`. Wire format: `asset:<key>` / `<lib>:<brand>` / URL / emoji. Endpoint: `/api/schemas/nodes/{type}/spec.json`. Live invariant total via `pytest --collect-only`. |
+| **[Schema Source of Truth RFC](./docs-internal/schema_source_of_truth_rfc.md)** | Backend is SSOT for node schemas, visual metadata, handlers, palette metadata, icons. Plugin pattern: one `BaseNode` subclass in `server/nodes/<group>/<plugin>/__init__.py`. Wire format: `asset:<key>` / `<lib>:<brand>` / URL / emoji. Endpoint: `/api/schemas/nodes/{type}/spec.json`. Live invariant total via `pytest --collect-only`. |
 | **[Plugin System (Wave 11)](./docs-internal/plugin_system.md)** | Class-based plugin-first architecture. `BaseNode` / `ActionNode` / `TriggerNode` / `ToolNode` + `@Operation` decorator. Pydantic `Params`/`Output`. Declarative `Routing` DSL + `Connection` facade (Nango pattern). 18 `Credential` subclasses live in each node folder's `_credentials.py` (or inline for single-use). `TaskQueue` constants route to Temporal worker pools. Plugins live across 9 queues (live count via `glob server/nodes/**/__init__.py`); handler bodies fully inlined (`services/handlers/` shrank 12.8K → 1.1K LOC across 16 → 4 files; only cross-cutting orchestration remains: `tools.py` AI-tool dispatch + agent delegation, `google_auth.py`, `triggers.py`). **Wave 11.H added "self-contained plugin folders"** — five generic registries (`ws_handler_registry`, `event_waiter.{register_filter_builder,register_trigger_precheck}`, `status_broadcaster.register_service_refresh`, `node_output_schemas.register_output_schema`) so rich plugins like telegram own their entire surface area without core-services edits. |
-| **[Nodes Cookbook](./server/nodes/README.md)** | 5-minute recipe + folder map + shared helpers (`_base.py` / `_inline.py` per domain) + shared credentials + **self-contained plugin folder pattern (telegram reference)** + contract invariants + common pitfalls. Lives next to the plugin files. |
-| **[Node Creation Guide](./docs-internal/node_creation.md)** | Canonical plugin recipe — one Python file (default), or a self-contained folder for richer plugins (telegram-style). Zero frontend edits, zero core-services edits. Auto-registers via `BaseNode.__init_subclass__` + the five `register_*` hooks. |
+| **[Nodes Cookbook](./server/nodes/README.md)** | 5-minute recipe + folder map + shared helpers (`_base.py` / `_inline.py` per domain) + shared credentials + **canonical folder-per-plugin shape (telegram is the reference implementation)** + contract invariants + common pitfalls. Lives next to the plugin files. |
+| **[Node Creation Guide](./docs-internal/node_creation.md)** | Canonical plugin recipe — one self-contained folder per plugin under `server/nodes/<group>/<plugin>/`, rooted at `__init__.py`. Multi-file split (`_service.py` / `_handlers.py` / etc.) when the plugin owns long-lived state. Zero frontend edits, zero core-services edits. Auto-registers via `BaseNode.__init_subclass__` + the five `register_*` hooks. |
 | **[AI Tool Node Guide](./docs-internal/ai_tool_node_creation.md)** | Detailed guide for creating dedicated AI Agent tool nodes (schemas, handlers, toolkits) |
 | **[Specialized Agent Guide](./docs-internal/specialized_agent_node_creation.md)** | Guide for creating specialized AI agents (Android, Coding, Web, Task, Social, Travel, Tool, Productivity, Payments, Consumer) with full AI configuration |
 | **[Dual-Purpose Tool Guide](./docs-internal/dual_purpose_tool_node_creation.md)** | Guide for nodes that work as both workflow nodes AND AI Agent tools (e.g., whatsappSend) |
@@ -66,26 +66,32 @@ This is a React Flow-based workflow automation platform implementing n8n-inspire
 
 ### 0. Adding a new node — the canonical recipe (Wave 11.H)
 
-**One file is the default; a self-contained folder is the next step up.**
+**Every plugin is a self-contained folder under `server/nodes/<group>/<plugin>/`.**
 Reference implementation: [`server/nodes/telegram/`](./server/nodes/telegram/).
 
-1. **Default — single file.** `server/nodes/<group>/<name>.py` with one
-   `ActionNode` / `TriggerNode` / `ToolNode` subclass. Declare `type`,
-   `display_name`, `group`, `handles`, `Params`, `Output`, `credentials`,
-   `task_queue`, and `@Operation`-decorated methods. Auto-registers via
-   `BaseNode.__init_subclass__` on import. Zero edits anywhere else.
+1. **Create the folder** with one `__init__.py` declaring a
+   `BaseNode` / `ActionNode` / `TriggerNode` / `ToolNode` subclass.
+   Declare `type`, `display_name`, `group`, `handles`, `Params`,
+   `Output`, `credentials`, `task_queue`, and `@Operation`-decorated
+   methods. Auto-registers via `BaseNode.__init_subclass__` on import.
+   Zero edits anywhere else. For single-class plugins, all the logic
+   stays in `__init__.py` — no extra files needed.
    See [server/nodes/README.md](./server/nodes/README.md).
 
-2. **Promote to a self-contained folder** when the plugin owns:
+2. **Split into helper modules** (`_service.py` / `_handlers.py` /
+   `_credentials.py` / `_filters.py` / `_refresh.py` / `_events.py`)
+   only when the plugin owns one or more of:
    - a long-lived stateful object (bot / device / SDK session / subprocess),
    - credentials-modal WebSocket commands beyond Save / Load / Delete,
    - trigger pre-execution checks that need plugin-specific state,
    - a status-refresh callback that runs on WS-client connect.
 
-   Folder shape (telegram is the reference):
+   Multi-file shape (telegram is the reference — one plugin folder
+   containing two node classes, `telegram_send` and `telegram_receive`):
    ```
-   server/nodes/<group>/
+   server/nodes/<group>/<plugin>/
    ├── __init__.py          # imports + register_* calls (zero logic)
+   ├── icon.svg             # co-located plugin icon
    ├── _credentials.py      # <Provider>Credential subclass
    ├── _service.py          # singleton/service lifecycle
    ├── _handlers.py         # WS_HANDLERS dict
@@ -597,7 +603,7 @@ The frontend uses a layered cache + slice-subscription model so cold refreshes a
 
 ### Node System
 Node metadata is SSOT on the backend after Wave 11. Each node is a Python
-plugin at `server/nodes/<category>/<node>.py` that emits a `NodeSpec` via
+plugin at `server/nodes/<category>/<plugin>/__init__.py` that emits a `NodeSpec` via
 the registry. The frontend fetches specs through
 [`client/src/lib/nodeSpec.ts`](./client/src/lib/nodeSpec.ts) and adapts
 them via [`client/src/adapters/nodeSpecToDescription.ts`](./client/src/adapters/nodeSpecToDescription.ts).
@@ -1744,7 +1750,7 @@ All scripts in `scripts/` are cross-platform Node.js (Windows, macOS, Linux, WSL
 See **[Scripts Reference](./docs-internal/SCRIPTS.md)** for full documentation.
 
 ## Current Status
-✅ **Plugin-first architecture (Wave 11)**: every node is one Python file under `server/nodes/<group>/<name>.py`; backend NodeSpec is the SSOT for icon, colour, handles, params, output schema, uiHints. Frontend renders via `useNodeSpec` + `componentKind` dispatch.
+✅ **Plugin-first architecture (Wave 11)**: every plugin is a self-contained folder under `server/nodes/<group>/<plugin>/` rooted at `__init__.py`; backend NodeSpec is the SSOT for icon, colour, handles, params, output schema, uiHints. Frontend renders via `useNodeSpec` + `componentKind` dispatch.
 ✅ **WebSocket-First Architecture**: most frontend-backend RPC goes through WebSocket; live handler set lives in `MESSAGE_HANDLERS` in `server/routers/websocket.py`
 ✅ **Code Editor**: Python, JavaScript, and TypeScript executors with syntax-highlighted editor (react-simple-code-editor + prismjs) and console output
 ✅ **Node.js Executor**: Persistent Node.js server (Express + tsx) for fast JS/TS execution, replacing subprocess spawning
@@ -2478,7 +2484,7 @@ Child broadcasts its own status updates (executing, success, error)
 
 ### Specialized AI Agents
 
-The system ships specialized agent variants — each is one Python file under [`server/nodes/agent/`](./server/nodes/agent/) inheriting `SpecializedAgentBase`. Authoritative list: glob that folder. Per-type display name / subtitle / description live on the plugin class; icon + colour live in [`server/nodes/visuals.json`](./server/nodes/visuals.json). Do not maintain a hand-list of agent types in this doc — it drifts on every plugin add.
+The system ships specialized agent variants — each is a folder under [`server/nodes/agent/`](./server/nodes/agent/) with `__init__.py` declaring a `SpecializedAgentBase` subclass. Authoritative list: glob that folder. Per-type display name / subtitle / description live on the plugin class; icon + colour live in [`server/nodes/visuals.json`](./server/nodes/visuals.json). Do not maintain a hand-list of agent types in this doc — it drifts on every plugin add.
 
 Standard handle topology (declared on `SpecializedAgentBase` via `std_agent_handles()`):
 - **Left**: `input-main` (Input, 30%), `input-memory` (Memory, 55%), `input-task` (Task, 85%)
@@ -2490,7 +2496,7 @@ Standard handle topology (declared on `SpecializedAgentBase` via `std_agent_hand
 `AIAgentNode.tsx` is type-agnostic: it calls `useNodeSpec(type)` and renders whatever handles/icon/color the spec returns — no `AGENT_CONFIGS` map.
 
 ## Architecture Patterns
-- **Plugin-first (Wave 11).** One file per node under [`server/nodes/<group>/<name>.py`](./server/nodes/) subclassing `BaseNode` / `ActionNode` / `TriggerNode` / `ToolNode`. Auto-registers via `__init_subclass__`. See [`docs-internal/plugin_system.md`](./docs-internal/plugin_system.md).
+- **Plugin-first (Wave 11).** One folder per plugin under [`server/nodes/<group>/<plugin>/`](./server/nodes/) rooted at `__init__.py`, subclassing `BaseNode` / `ActionNode` / `TriggerNode` / `ToolNode`. Auto-registers via `__init_subclass__`. See [`docs-internal/plugin_system.md`](./docs-internal/plugin_system.md).
 - **Backend NodeSpec is the SSOT** for icon, colour, handles, params, output schema, uiHints, palette group. Frontend consumes via `useNodeSpec(type)` and adapts the JSON Schema → `INodeTypeDescription` shape through [`adapters/nodeSpecToDescription.ts`](./client/src/adapters/nodeSpecToDescription.ts) (legacy interface kept as a render contract; not a parallel schema system).
 - **Component-driven frontend.** shadcn/ui primitives + Tailwind tokens; canvas nodes are spec-driven (see "Spec-driven component design" above).
 - **State management.** TanStack Query owns server-backed data; Zustand (`useAppStore`, `nodeStatusStore`) owns UI state and slice-subscribed high-frequency push state. Slice-selector reads only — never whole-store destructure (see "Frontend Performance Architecture").
@@ -3349,10 +3355,10 @@ See **[Onboarding Service](./docs-internal/onboarding.md)** for full documentati
 
 ### Adding a new AI provider (post-Wave-11)
 
-A new chat-model provider is **one Python file** under `server/nodes/model/<provider>_chat_model.py`. The plugin auto-registers via `BaseNode.__init_subclass__`; the frontend renders it through `SquareNode` from the emitted NodeSpec without a single TS change.
+A new chat-model provider is **a self-contained folder** under `server/nodes/model/<provider>_chat_model/` with `__init__.py` declaring a `ChatModelBase` subclass. The plugin auto-registers via `BaseNode.__init_subclass__`; the frontend renders it through `SquareNode` from the emitted NodeSpec without a single TS change.
 
 ```python
-# server/nodes/model/openrouter_chat_model.py
+# server/nodes/model/openrouter_chat_model/__init__.py
 class OpenRouterChatModel(ChatModelBase):
     type = "openrouterChatModel"
     metadata = NodeMetadata(
@@ -3866,8 +3872,8 @@ Tool Node (calculatorTool) → (tool output) → AI Agent (input-tools handle)
 The whole workflow:
 
 ```python
-# server/nodes/tool/<name>.py     ← for a tool
-# server/nodes/agent/<name>.py    ← for a specialized agent
+# server/nodes/tool/<plugin>/__init__.py     ← for a tool
+# server/nodes/agent/<plugin>/__init__.py    ← for a specialized agent
 class MyTool(ToolNode):              # or SpecializedAgentBase for an agent
     type = "myTool"
     display_name = "My Tool"
