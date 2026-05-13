@@ -280,12 +280,6 @@
   "teamMonitor": {
     "icon": "📊"
   },
-  "telegramReceive": {
-    "icon": "asset:telegram"
-  },
-  "telegramSend": {
-    "icon": "asset:telegram"
-  },
   "textChunker": {
     "icon": "✂️"
   },
@@ -343,10 +337,6 @@
     "skill": "write-todos-skill"
   },
   "stripeAction": {
-    "icon": "asset:stripe",
     "skill": "stripe-skill"
-  },
-  "stripeReceive": {
-    "icon": "asset:stripe"
   }
 }

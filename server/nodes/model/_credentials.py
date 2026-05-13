@@ -60,17 +60,25 @@ class _LLMApiKey(ApiKeyCredential):
         )
 
 
+# NOTE: ``icon`` is intentionally NOT declared on the LLM credentials
+# below. ``cls.icon`` is documentation-only — nothing reads it at
+# runtime; the catalogue (``server/config/credential_providers.json``
+# ``icon_ref`` field) is the FE-visible source of truth. Each LLM
+# provider's icon_ref uses ``lobehub:<brand>`` (the @lobehub/icons
+# React component). Per RFC F7 cleanup, the stale ``asset:<key>``
+# declarations were dropped — they pointed at frontend SVGs that
+# didn't exist for any LLM provider.
+
+
 class OpenAICredential(_LLMApiKey):
     id = "openai"
     display_name = "OpenAI"
-    icon = "asset:openai"
     docs_url = "https://platform.openai.com/api-keys"
 
 
 class AnthropicCredential(_LLMApiKey):
     id = "anthropic"
     display_name = "Anthropic"
-    icon = "asset:anthropic"
     docs_url = "https://console.anthropic.com/settings/keys"
     # Anthropic uses ``x-api-key`` not Bearer.
     key_name = "x-api-key"
@@ -80,7 +88,6 @@ class AnthropicCredential(_LLMApiKey):
 class GeminiCredential(_LLMApiKey):
     id = "gemini"
     display_name = "Google Gemini"
-    icon = "asset:gemini"
     docs_url = "https://ai.google.dev/gemini-api/docs/api-key"
     key_name = "key"
     key_location = "query"
@@ -89,49 +96,42 @@ class GeminiCredential(_LLMApiKey):
 class OpenRouterCredential(_LLMApiKey):
     id = "openrouter"
     display_name = "OpenRouter"
-    icon = "asset:openrouter"
     docs_url = "https://openrouter.ai/keys"
 
 
 class GroqCredential(_LLMApiKey):
     id = "groq"
     display_name = "Groq"
-    icon = "asset:groq"
     docs_url = "https://console.groq.com/keys"
 
 
 class CerebrasCredential(_LLMApiKey):
     id = "cerebras"
     display_name = "Cerebras"
-    icon = "asset:cerebras"
     docs_url = "https://cloud.cerebras.ai/"
 
 
 class DeepSeekCredential(_LLMApiKey):
     id = "deepseek"
     display_name = "DeepSeek"
-    icon = "asset:deepseek"
     docs_url = "https://platform.deepseek.com/api_keys"
 
 
 class KimiCredential(_LLMApiKey):
     id = "kimi"
     display_name = "Kimi (Moonshot)"
-    icon = "asset:kimi"
     docs_url = "https://platform.moonshot.cn"
 
 
 class MistralCredential(_LLMApiKey):
     id = "mistral"
     display_name = "Mistral AI"
-    icon = "asset:mistral"
     docs_url = "https://console.mistral.ai/api-keys/"
 
 
 class XaiCredential(_LLMApiKey):
     id = "xai"
     display_name = "xAI (Grok)"
-    icon = "asset:xai"
     docs_url = "https://console.x.ai"
 
 

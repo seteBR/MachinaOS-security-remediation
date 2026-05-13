@@ -19,7 +19,6 @@ class SerperCredential(ApiKeyCredential):
     id = "serper"
     display_name = "Serper"
     category = "Search"
-    icon = "asset:google"
     key_name = "X-API-KEY"
     key_location = "header"
     docs_url = "https://serper.dev/api-key"

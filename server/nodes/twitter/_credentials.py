@@ -21,7 +21,6 @@ class TwitterCredential(OAuth2Credential):
     id = "twitter"
     display_name = "Twitter / X"
     category = "Social"
-    icon = "asset:x"
     authorization_url = "https://twitter.com/i/oauth2/authorize"
     token_url = "https://api.twitter.com/2/oauth2/token"
     client_id_api_key = "twitter_client_id"

@@ -19,7 +19,6 @@ class StripeCredential(Credential):
     id = "stripe"
     display_name = "Stripe"
     category = "Payments"
-    icon = "asset:stripe"
     auth = "custom"
     docs_url = "https://stripe.com/docs/cli"
 

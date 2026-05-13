@@ -25,7 +25,6 @@ class GoogleMapsCredential(ApiKeyCredential):
     id = "google_maps"
     display_name = "Google Maps"
     category = "Location"
-    icon = "asset:google_maps"
     key_name = "key"
     key_location = "query"
     docs_url = "https://developers.google.com/maps/documentation"

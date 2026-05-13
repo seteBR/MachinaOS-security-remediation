@@ -32,7 +32,6 @@ class BraveSearchCredential(ApiKeyCredential):
     id = "brave_search"
     display_name = "Brave Search"
     category = "Search"
-    icon = "asset:brave"
     key_name = "X-Subscription-Token"
     key_location = "header"
     docs_url = "https://api.search.brave.com/app/keys"

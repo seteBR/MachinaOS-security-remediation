@@ -26,7 +26,6 @@ class PerplexityCredential(ApiKeyCredential):
     id = "perplexity"
     display_name = "Perplexity"
     category = "Search"
-    icon = "asset:perplexity"
     key_name = "Authorization"
     key_location = "bearer"
     docs_url = "https://docs.perplexity.ai/guides/getting-started"

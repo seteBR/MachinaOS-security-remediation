@@ -22,7 +22,6 @@ class GoogleCredential(OAuth2Credential):
     id = "google"
     display_name = "Google Workspace"
     category = "Productivity"
-    icon = "asset:google"
     authorization_url = "https://accounts.google.com/o/oauth2/auth"
     token_url = "https://oauth2.googleapis.com/token"
     client_id_api_key = "google_client_id"
