@@ -25,7 +25,6 @@
     "color": "#FF6B35"
   },
   "apifyActor": {
-    "icon": "asset:apify",
     "color": "#ff79c6",
     "skill": "apify-skill"
   },
@@ -59,12 +58,10 @@
     "color": "#50fa7b"
   },
   "braveSearch": {
-    "icon": "asset:brave",
     "color": "#FB542B",
     "skill": "brave-search-skill"
   },
   "browser": {
-    "icon": "asset:chrome",
     "color": "#ff79c6",
     "skill": "browser-skill"
   },
@@ -86,11 +83,9 @@
     "color": "#8be9fd"
   },
   "chatHistory": {
-    "icon": "asset:chat",
     "color": "#8be9fd"
   },
   "chatSend": {
-    "icon": "asset:chat",
     "color": "#8be9fd"
   },
   "chatTrigger": {
@@ -148,20 +143,16 @@
     "color": "#bd93f9"
   },
   "duckduckgoSearch": {
-    "icon": "asset:duckduckgo",
     "color": "#f1fa8c",
     "skill": "duckduckgo-search-skill"
   },
   "emailRead": {
-    "icon": "asset:read",
     "color": "#8be9fd"
   },
   "emailReceive": {
-    "icon": "asset:receive",
     "color": "#8be9fd"
   },
   "emailSend": {
-    "icon": "asset:send",
     "color": "#8be9fd"
   },
   "embeddingGenerator": {
@@ -215,36 +206,29 @@
     "skill": "nearby-places-skill"
   },
   "googleCalendar": {
-    "icon": "asset:calendar",
     "color": "#4285F4",
     "skill": "google-calendar-skill"
   },
   "googleContacts": {
-    "icon": "asset:contacts",
     "color": "#4285F4",
     "skill": "google-contacts-skill"
   },
   "googleDrive": {
-    "icon": "asset:drive",
     "color": "#0F9D58",
     "skill": "google-drive-skill"
   },
   "googleGmail": {
-    "icon": "asset:gmail",
     "color": "#EA4335",
     "skill": "google-gmail-skill"
   },
   "googleGmailReceive": {
-    "icon": "asset:gmail",
     "color": "#EA4335"
   },
   "googleSheets": {
-    "icon": "asset:sheets",
     "color": "#0F9D58",
     "skill": "google-sheets-skill"
   },
   "googleTasks": {
-    "icon": "asset:tasks",
     "color": "#4285F4",
     "skill": "google-tasks-skill"
   },
@@ -262,7 +246,6 @@
     "color": "#bd93f9"
   },
   "javascriptExecutor": {
-    "icon": "asset:javascript",
     "skill": "javascript-skill",
     "color": "#ffb86c"
   },
@@ -321,7 +304,6 @@
     "color": "#50fa7b"
   },
   "perplexitySearch": {
-    "icon": "asset:perplexity",
     "color": "#ff79c6",
     "skill": "perplexity-search-skill"
   },
@@ -348,7 +330,6 @@
     "color": "#ffb86c"
   },
   "pythonExecutor": {
-    "icon": "asset:python",
     "skill": "python-skill",
     "color": "#ffb86c"
   },
@@ -362,7 +343,6 @@
     "color": "#50fa7b"
   },
   "serperSearch": {
-    "icon": "asset:google",
     "color": "#ff79c6",
     "skill": "serper-search-skill"
   },
@@ -376,11 +356,9 @@
     "color": "#f1fa8c"
   },
   "socialReceive": {
-    "icon": "asset:social",
     "color": "#bd93f9"
   },
   "socialSend": {
-    "icon": "asset:social",
     "color": "#bd93f9"
   },
   "social_agent": {
@@ -442,26 +420,21 @@
     "color": "#ffb86c"
   },
   "twitterReceive": {
-    "icon": "asset:x",
     "color": "#1DA1F2"
   },
   "twitterSearch": {
-    "icon": "asset:x",
     "color": "#1DA1F2",
     "skill": "twitter-search-skill"
   },
   "twitterSend": {
-    "icon": "asset:x",
     "color": "#1DA1F2",
     "skill": "twitter-send-skill"
   },
   "twitterUser": {
-    "icon": "asset:x",
     "color": "#1DA1F2",
     "skill": "twitter-user-skill"
   },
   "typescriptExecutor": {
-    "icon": "asset:typescript",
     "color": "#ffb86c"
   },
   "vectorStore": {
