@@ -5,7 +5,7 @@
 
 This guide provides a comprehensive walkthrough for integrating new external services (like Google Workspace, Slack, Notion, etc.) into MachinaOs. It covers OAuth authentication, database models, API handlers, frontend nodes, and AI Agent tool integration.
 
-> **Wave 6 update (April 2026):** the **Frontend Node Definitions** step (#4 below) has shrunk dramatically. Parameter schemas, validation, conditional visibility, and dynamic-option dispatch now live on the backend via Pydantic + the NodeSpec contract. The legacy frontend `nodeDefinitions/*.ts` `properties` arrays are still active until Phase 3e flips `VITE_NODESPEC_BACKEND` ON, but new integrations should follow the [Wave 6 recommended recipe](./node_creation.md#wave-6-recommended-recipe-backend-first) in the node creation guide so they ship through the new path automatically.
+> **Backend-first is canonical (post-Wave-6 / Wave-11).** Parameter schemas, validation, conditional visibility, dynamic-option dispatch, icons, and colors all live on the backend. The legacy frontend `nodeDefinitions/*.ts` files no longer exist. Follow the [canonical plugin recipe](./node_creation.md) — every node is one Python file (or self-contained folder) under `server/nodes/<group>/<plugin>/`. The frontend reads `NodeSpec` via [`client/src/lib/nodeSpec.ts`](../client/src/lib/nodeSpec.ts) and adapts via [`adapters/nodeSpecToDescription.ts`](../client/src/adapters/nodeSpecToDescription.ts). Credential icons are also backend-served via `GET /api/schemas/credentials/{provider}/icon` (F7); plugin icons via `GET /api/schemas/nodes/{type}/icon` (Phase 6 / RFC §6.5).
 
 ## Overview
 

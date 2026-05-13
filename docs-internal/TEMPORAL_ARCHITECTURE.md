@@ -278,20 +278,33 @@ Per-queue defaults (concurrency caps in `services/temporal/worker.py:TemporalWor
 When `TEMPORAL_AGENT_WORKFLOW_ENABLED=true` and the node type is in the migrating set (`aiAgent` / `chatAgent` / 12 specialized agents / 2 team leads), the orchestrator schedules `AgentWorkflow` as a child workflow instead of an activity. Inside the workflow:
 
 ```
-AgentWorkflow.run(payload):
+AgentWorkflow.run(context):
+  0. execute_activity("agent.prepare_payload.v1")
+       resolves the DB-backed payload (provider / model / api_key /
+       tool schemas / memory / system_message / compaction threshold)
+       from the canvas context. Temporal workflows must be deterministic,
+       so DB lookups + edge walking + tool schema build live in this
+       activity rather than the workflow body.
   loop until "final" or max_iterations:
-    1. execute_activity("agent.execute_llm_step.v1") -> {kind, content|calls}
-    2. if kind == "tool_calls":
+    1. execute_activity("agent.broadcast_progress.v1")
+         emits CloudEvents-shaped `agent_progress` for the canvas badge
+         (one per turn, `type="com.machinaos.agent.progress"`).
+    2. execute_activity("agent.execute_llm_step.v1") -> {kind, content|calls}
+    3. if kind == "tool_calls":
          for each call:
            execute_activity(f"node.{tool_node_type}.v{version}")
          append tool_results to messages
-    3. execute_activity("agent.persist_turn.v1")  # append memory per turn
-    4. if token_total >= compaction_threshold:
+    4. execute_activity("agent.persist_turn.v1")  # append memory per turn
+         emits CloudEvents `node_parameters_updated` via the broadcaster
+         wrapper (`source_hint="agent"`).
+    5. if token_total >= compaction_threshold:
          execute_activity("agent.compact_memory.v1")
          replace messages with summary
 ```
 
 Each LLM step is one activity, each tool call is one per-type activity (the same activities F4.A registered). Failures of tool activities surface as error messages back to the LLM (matching today's LangGraph behaviour); the agent loop continues.
+
+**Broadcasts inside the loop** wrap `WorkflowEvent` (CloudEvents v1.0) per RFC §6.4: `agent_progress` events (`com.machinaos.agent.progress`) and `node_parameters_updated` events (`com.machinaos.node.parameters.updated`) flow through the `StatusBroadcaster.broadcast_agent_progress` and `StatusBroadcaster.broadcast_node_parameters_updated` wrappers respectively. The latter is reused by the legacy `routers/websocket.py:handle_save_node_parameters` (user-source) and `services/cli_agent/service.py:_persist_memory` (cli-source) — all three emission sites share the same envelope, distinguished by `source_hint` (`"user"` / `"cli"` / `"agent"`).
 
 `deep_agent`, `rlm_agent`, `claude_code_agent` are NOT migrated — their internal session state (`deepagents` package / RLM REPL / Claude CLI `--resume` with stable `cwd`) requires single-process continuity and would break across activity boundaries.
 

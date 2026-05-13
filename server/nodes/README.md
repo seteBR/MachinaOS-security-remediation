@@ -43,10 +43,16 @@ class AcmeOutput(BaseModel):
     count: int = 0
 
 
-# 4. The node. (Icon + color are NOT declared here — add an entry
-#    {"acmeSearch": {"icon": "asset:acme", "color": "#abcdef"}} to
-#    server/nodes/visuals.json instead. BaseNode resolves both via
-#    the central handler at server/nodes/_visuals.py.)
+# 4. The node. (Icon + color are NOT declared on the class.
+#    Icon: drop `icon.svg` into THIS plugin folder. For per-node-type
+#       icons in multi-node folders (telegram / whatsapp / stripe),
+#       use `icon_<nodeType>.svg`. The resolver picks per-node first,
+#       falling back to shared `icon.svg`. Emoji / `lobehub:<brand>`
+#       entries live in `server/nodes/visuals.json` for plugins
+#       without a co-located SVG.
+#    Color: create `meta.json` with `{"color": "#abcdef"}` in this folder.
+#    BaseNode._metadata_dict resolves both at registration time via the
+#    central handler at server/nodes/_visuals.py.)
 class AcmeSearchNode(ActionNode):
     type = "acmeSearch"
     display_name = "Acme Search"

@@ -50,15 +50,21 @@ workflow.execute(workflow_id, workflow_data)
 
 ### 1. Temporal Distributed (primary production mode)
 
-When `TEMPORAL_ENABLED=true` and the Temporal server is reachable, every workflow node executes as an independent Temporal activity on the `machina-tasks` task queue.
+When `TEMPORAL_ENABLED=true` and the Temporal server is reachable, every workflow node executes through Temporal. Three dispatch paths coexist (gated by settings flags shipped in F4):
+
+| Path | Trigger | Behavior |
+|---|---|---|
+| **Legacy single activity** (`execute_node_activity`) | Default | Every node routes through one dispatcher; WS round-trip back to FastAPI. Stable since Wave 11. |
+| **Per-type activity** (`node.{type}.v{version}`) | `TEMPORAL_PER_TYPE_DISPATCH=true` (F4.A, commit `8261b05`) | Each plugin gets its own `@activity.defn` via `BaseNode.as_activity()`. Per-plugin retry / timeout / heartbeat configs apply. Direct call to `workflow_service.execute_node()` (no WS round-trip; worker shares FastAPI process). |
+| **Agent-as-child-workflow** (`AgentWorkflow`) | `TEMPORAL_AGENT_WORKFLOW_ENABLED=true` (F4.B, commits `a4d009e` + `0459131`) | 15 migrating agent types (aiAgent / chatAgent / 12 specialized / 2 team leads) run as Temporal child workflows. LLM steps + tool calls become activities. `deep_agent` / `rlm_agent` / `claude_code_agent` stay single-activity (externalised session state). |
 
 - Per-node retries (3 attempts by default) and per-node timeouts (10 min default)
 - Horizontal scaling via worker pool
-- Connection pooling via shared `aiohttp` session for WebSocket-based node execution
+- Connection pooling via shared `aiohttp` session for WebSocket-based node execution (legacy path only — per-type and AgentWorkflow paths call workflow_service in-process)
 - Pure orchestrator in `services/temporal/workflow.py` using `asyncio.wait(FIRST_COMPLETED)` so dependent nodes start immediately when their specific dependency completes
-- Class-based activities in `services/temporal/activities.py` with lifecycle hooks
+- Class-based activities in `services/temporal/activities.py` (legacy) + `services/temporal/agent_activities.py` (5 F4.B activities: `execute_llm_step`, `persist_turn`, `compact_memory`, `prepare_payload`, `broadcast_progress`)
 
-See [TEMPORAL_ARCHITECTURE.md](TEMPORAL_ARCHITECTURE.md) for full details.
+See [TEMPORAL_ARCHITECTURE.md](TEMPORAL_ARCHITECTURE.md) for the full matrix + canonical pseudo-code.
 
 ### 2. Parallel Local (Redis)
 

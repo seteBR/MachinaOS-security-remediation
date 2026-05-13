@@ -64,8 +64,12 @@ class MyOutput(BaseModel):
 class MyNode(ActionNode):
     type = "myNode"
     display_name = "My Node"
-    icon = "asset:my"
-    color = "#abcdef"
+    # Icon + color: drop `icon.svg` into this plugin folder + create
+    # `meta.json` with `{"color": "#abcdef"}`. For multi-node folders
+    # (one folder, multiple node classes — telegram / whatsapp / stripe),
+    # use `icon_<nodeType>.svg` for per-node-type icons; the resolver
+    # picks per-node first, falling back to shared `icon.svg`. emoji /
+    # lobehub:<brand> live in `visuals.json` for icon-only entries.
     group = ("search", "tool")
     description = "Brief description for palette + AI tool."
     component_kind = "square"

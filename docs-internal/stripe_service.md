@@ -244,7 +244,10 @@ class StripeCredential(Credential):
     id = "stripe"
     display_name = "Stripe"
     category = "Payments"
-    icon = "asset:stripe"
+    # Icon resolved per-plugin via nodes/stripe/icon.svg (Phase 9 +
+    # F7 closure). Credential brand icon lives at
+    # server/credentials/icons/stripe.svg and is served by
+    # GET /api/schemas/credentials/stripe/icon (F7).
     auth = "custom"
     docs_url = "https://stripe.com/docs/cli"
 

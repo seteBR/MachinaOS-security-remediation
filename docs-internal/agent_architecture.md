@@ -710,6 +710,17 @@ registry['rlm_agent'] = partial(handle_rlm_agent, ai_service=self.ai_service, da
 registry['claude_code_agent'] = partial(handle_claude_code_agent, ...)
 ```
 
+### Temporal dispatch routing (post-F4)
+
+Two settings flags route agent execution through different Temporal paths (see [TEMPORAL_ARCHITECTURE.md](TEMPORAL_ARCHITECTURE.md) for the full matrix):
+
+| Flag | Off (default) | On |
+|---|---|---|
+| `TEMPORAL_PER_TYPE_DISPATCH` | Every node routes through the legacy `execute_node_activity` single dispatcher (WS round-trip to the FastAPI handler). | Each node routes through its per-type activity `node.{type}.v{version}` registered via `BaseNode.as_activity()`. Per-plugin retry / timeout / heartbeat configs apply. |
+| `TEMPORAL_AGENT_WORKFLOW_ENABLED` | All 15 specialized + 2 base agents (`aiAgent` / `chatAgent`) run inside `execute_node_activity` (LangGraph loop in-activity). | The 15 migrating agent types become Temporal **child workflows** (`AgentWorkflow`). LLM steps + tool calls become activities; `agent.prepare_payload.v1` resolves the DB-backed payload as the workflow's first step. `deep_agent` / `rlm_agent` / `claude_code_agent` stay on the F4.A per-type activity path (externalised session state). |
+
+Today both flags default to `false`; the wiring is shipped (F4.A at `8261b05`, F4.B infrastructure at `a4d009e`, per-agent dispatch at `0459131`) but production rollout awaits canary verification on a Temporal dev cluster.
+
 **Team leads** (`orchestrator_agent`, `ai_employee`) use the same `handle_chat_agent` routing but add an `input-teammates` handle. Connected agents become `delegate_to_<type>` tools automatically via `_collect_teammate_connections()`. See [agent_teams.md](agent_teams.md).
 
 ### RLM Agent Pattern

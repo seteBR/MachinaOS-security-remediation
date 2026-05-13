@@ -592,25 +592,36 @@ The frontend uses a layered cache + slice-subscription model so cold refreshes a
 Following the plugin authoring RFC §6.5 / §6.6, icons and colors live co-located in the plugin folder; `visuals.json` is the fallback registry for emoji / library icons and the skill reverse-map.
 
 **Icon resolution** (`BaseNode._metadata_dict` → `services/plugin/base.py`):
-1. **Per-plugin `icon.svg`** in the plugin folder. If present, `_metadata_dict` emits the URL `/api/schemas/nodes/{type}/icon` (backend-served via `GET /api/schemas/nodes/{type}/icon`). 27 plugins ship this today.
-2. Fallback: **`visuals.json` `icon`** field — emoji (`"🤖"`), `lobehub:<brand>`, or `asset:<key>` for plugins without a co-located icon.svg (telegram / whatsapp / stripe + emoji-only plugins).
+1. **Per-node-type icon** — `<plugin_folder>/icon_<nodeType>.svg`. Lets multi-node-per-plugin folders serve distinct icons per node type (whatsapp has `icon_whatsappSend.svg` / `icon_whatsappReceive.svg` / `icon_whatsappDb.svg` in one shared folder).
+2. **Shared plugin icon** — `<plugin_folder>/icon.svg`. The standard Phase 9 contract; one icon for the whole folder (telegram / stripe / browser / search / google / etc.).
+3. Fallback: **`visuals.json` `icon`** field — emoji (`"🤖"`) or `lobehub:<brand>`. Post-F1/F7 there are **zero `asset:<key>` entries** in visuals.json.
+
+When tier 1 or 2 hits, `_metadata_dict` emits the URL `/api/schemas/nodes/{type}/icon`. The endpoint serves the SVG with `Content-Type: image/svg+xml` and a long cache header.
+
+**Credential icon resolution** (F7 — `Credential.get_icon_path` → `services/plugin/credential.py`):
+1. **Central catalogue** — `server/credentials/icons/<provider>.svg` (10 brand icons today).
+2. **Co-located fallback** — `<credential_class_folder>/credential_<id>.svg` (none today; available for plugin-scoped credentials).
+3. Endpoint `GET /api/schemas/credentials/{provider}/icon` serves the SVG; `credential_providers.json` `icon_ref` entries use the URL form for the 10 migrated providers.
 
 **Color resolution** (F2 — per-plugin `meta.json`):
 1. **Per-plugin `meta.json`** in the plugin folder — `{"color": "#xxxxxx"}`. 113 plugin folders ship this today (mirrors icon co-location).
 2. Fallback: **`visuals.json` `color`** field. Only legacy entries that haven't been migrated rely on this; post-F2 visuals.json has zero `color` fields.
 
 **Files:**
-- [server/nodes/visuals.json](./server/nodes/visuals.json) — fallback registry. Post-F1/F2 shape: `{nodeType: {icon?, skill?}}` (107 entries, no color, no `asset:<key>` for plugins with icon.svg).
-- [server/nodes/_visuals.py](./server/nodes/_visuals.py) — `get_icon`, `get_color`, `get_plugin_icon_path`, **`get_plugin_meta(node_type, key)`** (F2 resolver).
-- [server/nodes/&lt;group&gt;/&lt;plugin&gt;/icon.svg](./server/nodes/) — co-located plugin icon (Phase 9 / RFC §6.5).
+- [server/nodes/visuals.json](./server/nodes/visuals.json) — fallback registry. Post-F1/F2/F7 shape: `{nodeType: {icon?, skill?}}` (103 entries — **zero color fields, zero `asset:<key>` values**; only emoji + `lobehub:<brand>` icons + skill reverse-map remain).
+- [server/nodes/_visuals.py](./server/nodes/_visuals.py) — `get_icon`, `get_color`, `get_plugin_icon_path` (per-node-type tier + shared fallback), **`get_plugin_meta(node_type, key)`** (F2 resolver).
+- [server/nodes/&lt;group&gt;/&lt;plugin&gt;/icon.svg](./server/nodes/) — shared plugin icon (Phase 9 / RFC §6.5).
+- [server/nodes/&lt;group&gt;/&lt;plugin&gt;/icon_&lt;nodeType&gt;.svg](./server/nodes/whatsapp/) — per-node-type icon (post-F7 closure; whatsapp uses 3).
 - [server/nodes/&lt;group&gt;/&lt;plugin&gt;/meta.json](./server/nodes/) — co-located plugin color (F2 / RFC §6.6).
+- [server/credentials/icons/&lt;provider&gt;.svg](./server/credentials/icons/) — credential brand icons (F7).
 
 **Wire format** (frontend resolver at [client/src/assets/icons/index.ts](./client/src/assets/icons/index.ts)):
 - `/api/schemas/nodes/<type>/icon` — backend-served plugin icon (prefixed with `API_CONFIG.PYTHON_BASE_URL` in dev)
-- `asset:<key>` — bundled SVG keyed by filename without `.svg` (auto-indexed via `import.meta.glob`)
+- `/api/schemas/credentials/<provider>/icon` — backend-served credential icon (F7)
 - `<lib>:<brand>` — NPM icon package, e.g. `lobehub:Claude`
 - `data:` / URL passthrough — inline SVG or remote
 - plain emoji / short text — rendered as-is
+- `asset:<key>` — dead defensive code in the resolver. No `asset:<key>` values exist in visuals.json or `credential_providers.json` after F7 closure; the bundled `client/src/assets/icons/` directory was reduced to the resolver + `themedGlyphs.ts` (30 SVGs + 7 group barrels deleted at commit `f2366db`).
 
 **Latent Phase 6 bug fix (commit `95249a1`):** `BaseNode.__init_subclass__` previously called `_metadata_dict()` BEFORE `register_node_class(cls)`, so `get_plugin_icon_path` couldn't resolve the plugin via `get_node_class()`. The URL emission silently fell through to `visuals.json`'s `asset:<key>`. Swapping the two register calls activates the URL path as intended.
 
@@ -1738,8 +1749,8 @@ python -m services.temporal.worker
 - `services/temporal/workflow.py` - MachinaWorkflow orchestrator (FIRST_COMPLETED pattern, `_resolve_activity` dispatch)
 - `services/temporal/activities.py` - Legacy `execute_node_activity` (WebSocket round-trip path)
 - `services/temporal/plugin_activities.py` - `collect_plugin_activities` → per-type activities for F4.A
-- `services/temporal/agent_workflow.py` - `AgentWorkflow` child workflow for F4.B agent loops
-- `services/temporal/agent_activities.py` - F4.B activities: `agent.execute_llm_step.v1`, `agent.persist_turn.v1`, `agent.compact_memory.v1`
+- `services/temporal/agent_workflow.py` - `AgentWorkflow` child workflow for F4.B agent loops; its first step calls `agent.prepare_payload.v1` to resolve the DB-backed payload, then loops LLM steps + tool dispatch + per-turn persist + compaction
+- `services/temporal/agent_activities.py` - F4.B activities (5 total): `agent.execute_llm_step.v1`, `agent.persist_turn.v1`, `agent.compact_memory.v1`, `agent.prepare_payload.v1`, `agent.broadcast_progress.v1` (the last emits CloudEvents-shaped `agent_progress` per LLM turn)
 - `services/temporal/worker.py` - TemporalWorkerManager (registers MachinaWorkflow + AgentWorkflow + activities) + `run_standalone_worker()` + `TemporalWorkerPool` (multi-queue, future enhancement)
 - `services/temporal/executor.py` - TemporalExecutor interface matching WorkflowExecutor
 - `services/temporal/client.py` - Client wrapper with runtime heartbeat disabled

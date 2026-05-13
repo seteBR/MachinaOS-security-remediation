@@ -524,6 +524,14 @@ runs (Closes I-6).** Three coupled mechanisms:
    simpleMemory parameter panel refetches the moment the run
    completes — mirrors the manual save broadcast in
    [`routers/websocket.py:handle_save_node_parameters`](../server/routers/websocket.py).
+   Post-commit `7c9e873`, all three emission sites (Claude CLI
+   `_persist_memory`, parameter-panel save, F4.B AgentWorkflow
+   per-turn) wrap [`WorkflowEvent.node_parameters_updated`](../server/services/events/envelope.py)
+   (CloudEvents v1.0, `type="com.machinaos.node.parameters.updated"`)
+   via the shared
+   [`StatusBroadcaster.broadcast_node_parameters_updated`](../server/services/status_broadcaster.py)
+   wrapper. `data.source` (`"user"` / `"cli"` / `"agent"`) marks the
+   origin; locked by `tests/test_cloudevents_node_parameters.py`.
 
 5. **Parallel-batch guard.** `len(tasks) > 1` with memory wired raises
    `NodeUserError` at handler entry — concurrent `--resume <UUID>`

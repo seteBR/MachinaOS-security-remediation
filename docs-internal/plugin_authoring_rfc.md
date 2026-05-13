@@ -120,7 +120,7 @@ A new plugin in group `X` checks `nodes/X/_base.py` for a domain base first; inh
 
 **Two factory tiers — plugin-specific factories live in the plugin folder.**
 
-- **Cross-cutting factories** stay in `server/services/events/envelope.py`. These are parametrized by plugin name and serve any plugin: `credential`, `oauth_completed`, `connection_status`, `agent_progress`, `task_completed`, `workflow_lifecycle`, `deployment_snapshot`, `team_event`.
+- **Cross-cutting factories** stay in `server/services/events/envelope.py`. These are parametrized by plugin name and serve any plugin: `credential`, `oauth_completed`, `connection_status`, `agent_progress`, `task_completed`, `workflow_lifecycle`, `deployment_snapshot`, `team_event`, **`node_parameters_updated`** (added post-RFC at `7c9e873` — replaces 3 legacy raw-dict emission sites: parameter-panel save, Claude CLI memory bridge, AgentWorkflow per-turn memory; distinguished by `source_hint`).
 - **Plugin-specific factories** live in the plugin folder's `_events.py`. The plugin alone owns its event types, data payloads, and broadcaster wrappers. Examples: `telegram_message_received`, `stripe_payment_succeeded`, `whatsapp_group_invite`. Today these are mixed into central `envelope.py` (`WorkflowEvent.message(plugin, direction, data)` is parametrized but lives centrally); a migration step (Phase 5b) moves the plugin-specific ones out.
 
 **Plugin event author rule** (canonical four-step pattern for a new plugin-owned event type):
@@ -205,7 +205,7 @@ A factory is **cross-cutting** if either (a) its `type` is the same shape across
 - Simplify `_metadata_dict` lines 206-207: `icon = get_icon(cls.type)`, `color = get_color(cls.type)`.
 - Remove docstring sentence about the optional override (lines 199-203).
 
-Audit confirmed: 0 of 122 plugins set these attributes; `visuals.json` covers 100% of types. Branch is dead. `_metadata_dict` then computes icon as the API URL `f"/api/schemas/nodes/{cls.type}/icon"` when an `icon.svg` exists in the plugin folder, falling back to `get_icon(cls.type)` from `visuals.json` for emoji/library entries.
+Audit confirmed at RFC time: 0 of 122 plugins set the dead class-attr `icon`/`color`. Post-Phase-8 plugin count: 113 plugin folders (live count via `glob server/nodes/**/__init__.py`). `_metadata_dict` resolves icon in three tiers (RFC §6.5 + F7 closure): per-node-type `<plugin>/icon_<nodeType>.svg` → shared `<plugin>/icon.svg` → `visuals.json` emoji / `lobehub:<brand>`. The asset:&lt;key&gt; fallback that originally lived in tier 3 is dead post-F7 — visuals.json carries zero `asset:` entries. Color resolves via per-plugin `meta.json` (F2) → `visuals.json` legacy fallback (currently empty — all 117 plugins ship `meta.json`).
 
 ### 6.7 Doc rewrites — what changes where
 

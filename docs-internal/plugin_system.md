@@ -47,8 +47,10 @@ class ExampleOutput(BaseModel):
 class ExampleSearchNode(ActionNode):
     type = "exampleSearch"
     display_name = "Example Search"
-    icon = "asset:example"
-    color = "#abcdef"
+    # Icon + color are NOT declared on the class. Drop `icon.svg` into
+    # the plugin folder; create `meta.json` with `{"color": "#abcdef"}`.
+    # `_metadata_dict` resolves both at registration time via the
+    # central handler in server/nodes/_visuals.py.
     group = ("search", "tool")
     description = "Example search via external API"
     component_kind = "square"
