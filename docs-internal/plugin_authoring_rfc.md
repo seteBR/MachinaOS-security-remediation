@@ -167,11 +167,14 @@ A new plugin in group `X` checks `nodes/X/_base.py` for a domain base first; inh
 
 **Definition — plugin-specific vs cross-cutting:**
 
-A factory is **plugin-specific** if its `type` string names a single plugin (`com.machinaos.telegram.message.received`, `com.machinaos.stripe.payment.succeeded`, `com.machinaos.whatsapp.group.joined`). These move to `_events.py` in the plugin folder.
+A factory is **plugin-specific** if its `type` string names a single plugin AND its payload shape differs from peers in the same domain (`com.machinaos.telegram.message.received` carries `chat_id`; `com.machinaos.whatsapp.message.received` carries `phone_number` + `group_jid`). These belong in `_events.py` in the plugin folder.
 
-A factory is **cross-cutting** if its `type` follows a shape parameterized by plugin name and uses identical payload structure across plugins: `credential.<action>` (every plugin with credentials), `oauth.completed` (every OAuth plugin), `agent.progress` (every agent), `task.completed` (every delegated task), `workflow.<stage>` (workflow lifecycle), `deployment.snapshot` (deployment state). These stay in central `envelope.py`.
+A factory is **cross-cutting** if either (a) its `type` is the same shape across plugins and the payload is identical, OR (b) its construction is invoked from a single centralized helper that fans out per plugin: `credential.<action>` (every plugin with credentials), `oauth.completed` (every OAuth plugin), `agent.progress` (every agent), `task.completed` (every delegated task), `workflow.<stage>` (workflow lifecycle), `deployment.snapshot` (deployment state), `connection_status` (single `_emit_connection_typed` helper in `StatusBroadcaster` fans out to every plugin status method). These stay in central `envelope.py`.
 
-The current `WorkflowEvent.message(plugin, direction, data)` and `WorkflowEvent.connection_status(plugin, ...)` factories are borderline — they're parameterized but each plugin emits its own type-string variant (`telegram.message.received`, `whatsapp.message.received`). Phase 5b moves these into per-plugin `_events.py` files because each plugin's message payload differs (Telegram messages have chat_id; WhatsApp messages have phone_number + group_jid) — the central parametrized factory was lossy.
+**Phase 5b audit outcome:**
+- `WorkflowEvent.message(plugin, direction, data)` — **removed** in Phase 5b. Zero callers in the codebase; it was speculative. Plugins that later need to emit message envelopes add a typed factory in their own `_events.py`.
+- `WorkflowEvent.connection_status(plugin, ...)` — **kept** in central `envelope.py`. Single call site (`StatusBroadcaster._emit_connection_typed`); the parametrization is genuinely shared. Moving per-plugin would duplicate the broadcast helper across plugins with no payload divergence.
+- `nodes/stripe/_source.py` hand-constructs `WorkflowEvent(...)` directly. Stripe webhook events keep their producer-side type (`stripe.charge.succeeded` — no `com.machinaos.` prefix since MachinaOs isn't the producer). Already in the plugin folder. No move needed.
 
 ### 6.5 Icon and media handling — backend owns, frontend consumes
 

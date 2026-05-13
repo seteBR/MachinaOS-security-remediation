@@ -154,27 +154,11 @@ class WorkflowEvent(BaseModel):
             data=dict(data) if data else {"identifier": identifier},
         )
 
-    @classmethod
-    def message(
-        cls,
-        plugin: str,
-        direction: Literal["sent", "received"],
-        data: Mapping[str, Any],
-    ) -> "WorkflowEvent":
-        """Plugin-emitted message event (whatsapp / telegram / email
-        send + receive). ``subject`` defaults to the chat / sender id
-        in the payload (cast to str — Telegram uses numeric chat ids),
-        falling back to None."""
-        payload = dict(data)
-        raw_subject = (
-            payload.get("chat_id") or payload.get("from_id") or payload.get("sender")
-        )
-        return cls(
-            source=f"machinaos://nodes/{plugin}",
-            type=f"{_TYPE_PREFIX}{plugin}.message.{direction}",
-            subject=str(raw_subject) if raw_subject is not None else None,
-            data=payload,
-        )
+    # ``WorkflowEvent.message(...)`` previously lived here as a
+    # parameterized factory but had zero callers. Plugin-specific
+    # message events belong in ``server/nodes/<plugin>/_events.py``
+    # (see RFC §6.4) since each plugin's message payload diverges
+    # (telegram: chat_id; whatsapp: phone_number + group_jid; ...).
 
     @classmethod
     def team_event(

@@ -435,12 +435,13 @@ class TestPluginsUseTypedEventFactories:
     """Wave 11.I, milestone Q (locked in U).
 
     Plugins must construct :class:`WorkflowEvent` directly via the
-    typed factory classmethods (``WorkflowEvent.credential(...)``,
-    ``WorkflowEvent.message(...)``, etc.) -- not via the
-    ``WorkflowEvent.from_legacy(event_type, data)`` shim. The shim
-    exists so :func:`event_waiter.dispatch` can still accept the legacy
-    ``(str, dict)`` form at the framework boundary; lifting it inside
-    plugin code defeats the purpose.
+    typed factory classmethods on ``WorkflowEvent`` (cross-cutting:
+    ``credential``, ``connection_status``, ``oauth_completed``, ...) or
+    via plugin-local typed factories in ``_events.py`` (plugin-specific
+    payloads) -- not via the ``WorkflowEvent.from_legacy(event_type,
+    data)`` shim. The shim exists so :func:`event_waiter.dispatch` can
+    still accept the legacy ``(str, dict)`` form at the framework
+    boundary; lifting it inside plugin code defeats the purpose.
     """
 
     @pytest.mark.parametrize("plugin", _MIGRATED_PLUGINS)
