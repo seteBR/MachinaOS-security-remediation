@@ -120,8 +120,6 @@ class BaseNode:
     version: ClassVar[int] = 1
     display_name: ClassVar[str] = ""
     subtitle: ClassVar[str] = ""
-    icon: ClassVar[str] = ""
-    color: ClassVar[str] = ""
     group: ClassVar[Sequence[str]] = ()
     description: ClassVar[str] = ""
     handles: ClassVar[Sequence[Dict[str, Any]]] = ()
@@ -198,13 +196,11 @@ class BaseNode:
 
         ``icon`` and ``color`` are sourced from
         ``server/nodes/visuals.json`` via the central handler — node
-        plugins don't declare them on the class. A subclass MAY still
-        override by setting the class attribute, in which case the
-        explicit value wins.
+        plugins don't declare them on the class.
         """
         from nodes._visuals import get_icon, get_color
-        icon = cls.icon or get_icon(cls.type)
-        color = cls.color or get_color(cls.type)
+        icon = get_icon(cls.type)
+        color = get_color(cls.type)
         meta: Dict[str, Any] = {
             "displayName": cls.display_name or cls.type,
             "icon": icon,
