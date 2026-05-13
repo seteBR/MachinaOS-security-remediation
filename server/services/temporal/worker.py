@@ -101,21 +101,37 @@ class TemporalWorkerManager:
             # Create activity instance with shared session
             self._activities = NodeExecutionActivities(self._session)
 
-            # MachinaWorkflow.run() schedules every node via the single
-            # ``"execute_node_activity"`` name (see services/temporal/workflow.py).
-            # The Wave 11.F per-plugin activities (``node.{type}.v{version}``)
-            # added a ~1.6s registration cost at every worker startup but were
-            # never scheduled by the orchestrator — pure dead code on the hot
-            # path. Removed. If per-node task-queue dispatch is revived, gate
-            # behind a Settings flag and wire it into the orchestrator first.
+            # F4.A: register per-type activities alongside the legacy
+            # `execute_node_activity` dispatcher. The orchestrator at
+            # workflow.py:_resolve_activity picks one of the two paths per node
+            # based on the temporal_per_type_dispatch flag; both must be served
+            # by the worker. Per-type activities register WITHOUT a task_queue
+            # filter (cls.task_queue is the *declared* preference; the single
+            # worker actually polls self.task_queue regardless). When
+            # TemporalWorkerPool is wired (future enhancement), per-queue
+            # filtering will move there. Registration cost: ~1.6s startup;
+            # zero runtime cost when the flag is off (orchestrator routes to
+            # execute_node_activity, per-type entries sit idle).
+            from services.temporal.plugin_activities import collect_plugin_activities
+
+            per_type = collect_plugin_activities()  # no queue filter; all plugins
             self._worker = Worker(
                 self.client,
                 task_queue=self.task_queue,
                 workflows=[MachinaWorkflow],
-                activities=[self._activities.execute_node_activity],
+                activities=[
+                    self._activities.execute_node_activity,
+                    *per_type,
+                ],
                 # Allow concurrent activity execution for parallel branches
                 max_concurrent_activities=self.pool_size,
                 max_concurrent_workflow_tasks=10,
+            )
+            logger.info(
+                "Registered Temporal activities",
+                legacy=1,
+                per_type=len(per_type),
+                task_queue=self.task_queue,
             )
             span.set_attribute("task_queue", self.task_queue)
             span.set_attribute("pool_size", self.pool_size)

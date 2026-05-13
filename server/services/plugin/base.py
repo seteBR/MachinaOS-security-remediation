@@ -446,8 +446,16 @@ class BaseNode:
     @classmethod
     def as_activity(cls):
         """Wrap this node as a ``@activity.defn`` callable for Temporal
-        worker registration (11.F). Uses a stable activity name:
+        worker registration (F4.A). Stable activity name:
         ``node.{type}.v{version}``.
+
+        Accepts the same ``context`` dict shape as the legacy
+        ``execute_node_activity`` so the orchestrator can swap by name
+        without reshaping the payload. Delegates to
+        ``workflow_service.execute_node(...)`` — same execution pipeline
+        the WebSocket path uses — so status broadcasts, parameter
+        fetching, NodeContext build, and error handling all match. The
+        Temporal worker shares the FastAPI process, so direct DI works.
 
         Returns the decorated async function; the worker collects these
         into ``activities=[...]``.
@@ -457,17 +465,107 @@ class BaseNode:
         activity_name = f"node.{cls.type}.v{cls.version}"
 
         @activity.defn(name=activity_name)
-        async def _node_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
-            # Temporal lives in another process — rebuild NodeContext.
-            context_dict = payload.get("context", {})
-            instance = cls()
-            ctx = NodeContext.from_legacy(
-                node_id=payload["node_id"],
-                node_type=cls.type,
-                context=context_dict,
-                connection_factory=_make_connection_factory(cls, context_dict),
+        async def _node_activity(context: Dict[str, Any]) -> Dict[str, Any]:
+            from datetime import datetime
+            from core.container import container
+
+            node_id = context["node_id"]
+            workflow_id = context.get("workflow_id")
+            broadcaster = container.status_broadcaster()
+
+            # Pre-executed trigger nodes — return cached output without dispatching.
+            if context.get("pre_executed"):
+                activity.logger.debug(f"Node {node_id} pre-executed; passthrough")
+                result = {
+                    "success": True,
+                    "node_id": node_id,
+                    "node_type": cls.type,
+                    "result": context.get("trigger_output", {}),
+                    "pre_executed": True,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                await broadcaster.update_node_status(
+                    node_id, "success", result, workflow_id=workflow_id,
+                )
+                return result
+
+            # Disabled nodes — skip.
+            node_data = context.get("node_data", {})
+            if node_data.get("disabled"):
+                activity.logger.debug(f"Node {node_id} disabled; skipping")
+                result = {
+                    "success": True,
+                    "node_id": node_id,
+                    "node_type": cls.type,
+                    "skipped": True,
+                    "reason": "disabled",
+                    "timestamp": datetime.now().isoformat(),
+                }
+                await broadcaster.update_node_status(
+                    node_id, "skipped", {"disabled": True}, workflow_id=workflow_id,
+                )
+                return result
+
+            # Broadcast executing — UI cyan-glow.
+            await broadcaster.update_node_status(
+                node_id, "executing", {"node_type": cls.type}, workflow_id=workflow_id,
             )
-            return await instance.execute(payload["node_id"], payload["parameters"], ctx)
+
+            try:
+                # Heartbeat the long-running side of the pipeline.
+                activity.heartbeat(f"Executing {cls.type}: {node_id}")
+
+                # Delegate to the same pipeline the WS handler uses. Parameters
+                # are read from DB inside execute_node (handler-specific). The
+                # legacy execute_node_activity does this via a WS roundtrip;
+                # per-type activities skip the loopback because the worker
+                # shares the FastAPI process.
+                workflow_service = container.workflow_service()
+                result = await workflow_service.execute_node(
+                    node_id=node_id,
+                    node_type=cls.type,
+                    parameters=node_data,
+                    nodes=context.get("nodes", []),
+                    edges=context.get("edges", []),
+                    session_id=context.get("session_id", "default"),
+                    workflow_id=workflow_id,
+                    outputs=context.get("inputs", {}),
+                )
+
+                result["node_id"] = node_id
+                result["node_type"] = cls.type
+                result["timestamp"] = datetime.now().isoformat()
+
+                if result.get("success"):
+                    activity.logger.info(f"Node {node_id} succeeded")
+                    await broadcaster.update_node_status(
+                        node_id, "success", result.get("result", {}),
+                        workflow_id=workflow_id,
+                    )
+                    await broadcaster.update_node_output(
+                        node_id, result.get("result", {}), workflow_id=workflow_id,
+                    )
+                else:
+                    activity.logger.warning(
+                        f"Node {node_id} failed: {result.get('error')}"
+                    )
+                    await broadcaster.update_node_status(
+                        node_id, "error",
+                        {"error": result.get("error")},
+                        workflow_id=workflow_id,
+                    )
+
+                activity.heartbeat(f"Node {node_id} completed")
+                return result
+
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {e}"
+                activity.logger.error(f"Node {node_id} crashed: {error_msg}")
+                await broadcaster.update_node_status(
+                    node_id, "error", {"error": error_msg},
+                    workflow_id=workflow_id,
+                )
+                raise
 
         return _node_activity
 

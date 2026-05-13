@@ -172,18 +172,28 @@ class MachinaWorkflow:
                     "trigger_output": node.get("_trigger_output"),
                 }
 
-                # Schedule activity by name (for class-based activities)
-                # The activity is registered as NodeExecutionActivities.execute_node_activity
-                handle = workflow.start_activity(
-                    "execute_node_activity",
+                # F4.A: per-type dispatch when the plugin class is registered
+                # AND the settings flag is on. Frozen-dict lookup is deterministic
+                # so it's safe inside the workflow (Temporal Workflow Definition
+                # determinism contract). Falls back to the legacy single activity
+                # name for any node type without a class registration.
+                activity_name, activity_queue = self._resolve_activity(node_type)
+                start_kwargs: Dict[str, Any] = dict(
                     args=[context],
                     start_to_close_timeout=timedelta(minutes=10),
                     heartbeat_timeout=timedelta(minutes=2),
                     retry_policy=retry_policy,
                 )
+                if activity_queue is not None:
+                    start_kwargs["task_queue"] = activity_queue
+
+                handle = workflow.start_activity(activity_name, **start_kwargs)
                 running[node_id] = handle
 
-                workflow.logger.info(f"Scheduled activity for node: {node_id}")
+                workflow.logger.info(
+                    f"Scheduled activity for node: {node_id} "
+                    f"(activity={activity_name}, queue={activity_queue or 'default'})"
+                )
 
             # Exit if nothing running and nothing ready
             if not running:
@@ -237,6 +247,42 @@ class MachinaWorkflow:
             if dep_id in outputs:
                 inputs[dep_id] = outputs[dep_id].get("result", {})
         return inputs
+
+    def _resolve_activity(self, node_type: str) -> tuple[str, str | None]:
+        """Resolve (activity_name, task_queue) for a node type.
+
+        F4.A: when ``settings.temporal_per_type_dispatch`` is on AND the
+        plugin class is registered, returns
+        ``("node.{type}.v{version}", None)`` so the activity is scheduled
+        by per-type name but stays on the workflow's default task queue.
+        The default queue is what ``TemporalWorkerManager`` polls today;
+        per-queue routing (``cls.task_queue``) becomes meaningful only
+        once ``TemporalWorkerPool`` is wired with one worker per queue
+        — until then, returning ``cls.task_queue`` would schedule the
+        activity to a queue no worker polls and the workflow would hang.
+
+        Falls back to ``("execute_node_activity", None)`` when:
+          - the flag is off (preserves pre-F4.A behavior exactly), OR
+          - the node type isn't registered as a BaseNode subclass
+            (covers legacy types still on the metadata-only path).
+
+        Determinism: lookups go through frozen module-level dicts
+        (``_NODE_CLASS_REGISTRY``, ``Settings``) — no I/O. Safe inside
+        ``MachinaWorkflow.run`` per the workflow-definition contract.
+        Imports are inside the method to keep the workflow module's
+        top-level import set minimal and to avoid import-cycle drift.
+        """
+        from core.config import Settings
+        from services.node_registry import get_node_class
+
+        if not Settings().temporal_per_type_dispatch:
+            return "execute_node_activity", None
+
+        cls = get_node_class(node_type)
+        if cls is None:
+            return "execute_node_activity", None
+
+        return f"node.{cls.type}.v{cls.version}", None
 
     async def _wait_any_complete(self, running: Dict[str, Any]) -> tuple:
         """Wait for any activity to complete, return (node_id, result).

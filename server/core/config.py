@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     temporal_server_address: str = Field(default="localhost:7233", env="TEMPORAL_SERVER_ADDRESS")
     temporal_namespace: str = Field(default="default", env="TEMPORAL_NAMESPACE")
     temporal_task_queue: str = Field(default="machina-tasks", env="TEMPORAL_TASK_QUEUE")
+    # F4.A: per-type activity dispatch. When True, MachinaWorkflow.run() schedules
+    # `node.{type}.v{version}` per plugin (with task_queue=cls.task_queue) instead
+    # of the single `execute_node_activity` legacy name. Workers register per-type
+    # activities alongside the legacy one. Default off so existing deployments
+    # behave identically; flip via TEMPORAL_PER_TYPE_DISPATCH=true.
+    temporal_per_type_dispatch: bool = Field(default=False, env="TEMPORAL_PER_TYPE_DISPATCH")
 
     # API Keys (all optional, injected at runtime)
     google_maps_api_key: Optional[str] = Field(default=None, env="GOOGLE_MAPS_API_KEY")
