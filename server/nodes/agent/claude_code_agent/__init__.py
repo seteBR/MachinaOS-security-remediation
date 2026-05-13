@@ -17,7 +17,6 @@ and passed to ``run_batch()`` so the MCP server can scope its responses.
 from __future__ import annotations
 
 import time
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
@@ -170,48 +169,29 @@ class ClaudeCodeAgentNode(ActionNode):
         # Memory bridge: claude maintains its own session JSONL on disk
         # under `<CLAUDE_CONFIG_DIR>/projects/<cwd-encoded>/<UUID>.jsonl`.
         # The project_key is derived from cwd (`[^a-zA-Z0-9.-] -> -`),
-        # so memory continuity needs (a) a STABLE cwd across runs and
-        # (b) the right session_id passed on argv.
-        #
-        # (a) is handled by AICliService passing memory_bound=True so
+        # so memory continuity needs only a STABLE cwd across runs.
+        # That's handled by AICliService passing memory_bound=True so
         # AICliSession spawns under repo_root instead of an ephemeral
         # worktree — see `services/cli_agent/session.py:cwd()`.
         #
-        # (b) splits on whether claude has run for this memory before:
+        # Continuity flag: when memory is wired, we set
+        # ``continue_session=True`` on the task spec. The argv-builder
+        # emits ``--continue`` and claude auto-loads the most recent
+        # conversation under the cwd (per code.claude.com/docs/en/
+        # cli-reference). No UUID round-trip through the memory node's
+        # params required — claude tracks its own sessions on disk and
+        # the auto-find-latest is the cleaner primitive than the
+        # pre-cutover UUID5-pre-mint + `--session-id <UUID5>` dance.
         #
-        #   - First run (no last_session_id): pass `--session-id <UUID5>`
-        #     where UUID5 is deterministically derived from
-        #     (memory_node_id, simpleMemory.session_id). Claude creates
-        #     the session at exactly that UUID, writes its JSONL to a
-        #     predictable location. _persist_memory saves the same
-        #     UUID as last_session_id after success.
-        #
-        #   - Subsequent runs: pass `--resume <last_session_id>`.
-        #     Claude finds its own JSONL and continues.
-        #
-        # Stale-`last_session_id` self-healing: if `--resume` fails with
-        # "No conversation found", `_persist_memory` clears the stale
-        # UUID; the next run falls into the first-run branch and
-        # recovers automatically.
-        resume_session_id: Optional[str] = None
-        first_run_session_uuid: Optional[str] = None
+        # First run: ``--continue`` with no prior session under the cwd
+        # is a benign no-op; claude starts fresh. Subsequent runs find
+        # and continue the prior JSONL.
+        continue_session = bool(memory_data)
         if memory_data:
-            last = memory_data.get("last_session_id") or None
-            if last:
-                resume_session_id = last
-            else:
-                raw = memory_data.get("session_id") or memory_data["node_id"]
-                name = f"{memory_data['node_id']}:{raw}"
-                first_run_session_uuid = str(
-                    uuid.uuid5(uuid.NAMESPACE_OID, name)
-                )
             logger.info(
-                "[Claude Code memory] memory_node=%s last_session_id=%s "
-                "-> %s",
+                "[Claude Code memory] memory_node=%s -> --continue "
+                "(claude auto-finds latest session under cwd)",
                 memory_data.get("node_id"),
-                last,
-                f"--resume {resume_session_id}" if resume_session_id
-                else f"--session-id {first_run_session_uuid} (first run)",
             )
 
         tasks = list(params.tasks)
@@ -237,11 +217,8 @@ class ClaudeCodeAgentNode(ActionNode):
                 "prompt": prompt,
                 "model": params.model,
                 "system_prompt": params.system_prompt,
+                "continue_session": continue_session,
             }
-            if resume_session_id:
-                spec_kwargs["resume_session_id"] = resume_session_id
-            elif first_run_session_uuid:
-                spec_kwargs["session_id"] = first_run_session_uuid
             tasks = [ClaudeTaskSpec(**spec_kwargs)]
         else:
             # Apply node-level defaults to tasks that don't override.
@@ -251,11 +228,14 @@ class ClaudeCodeAgentNode(ActionNode):
                     changed["model"] = params.model
                 if not t.system_prompt and params.system_prompt:
                     changed["system_prompt"] = params.system_prompt
-                if not t.session_id and not t.resume_session_id:
-                    if resume_session_id:
-                        changed["resume_session_id"] = resume_session_id
-                    elif first_run_session_uuid:
-                        changed["session_id"] = first_run_session_uuid
+                # Only auto-enable --continue when memory is wired AND
+                # the task didn't explicitly opt in/out or pick a UUID.
+                if (
+                    continue_session
+                    and not t.continue_session
+                    and not t.resume_session_id
+                ):
+                    changed["continue_session"] = True
                 if changed:
                     tasks[i] = t.model_copy(update=changed)
 

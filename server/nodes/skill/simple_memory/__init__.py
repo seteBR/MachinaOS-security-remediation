@@ -73,10 +73,11 @@ class SimpleMemoryParams(BaseModel):
         title="Last Claude Session ID",
         description=(
             "Internal: the session UUID claude returned on the most "
-            "recent successful run. Drives `--resume <UUID>` on the "
-            "next spawn so claude finds and continues its own JSONL "
-            "transcript on disk. Hidden from the UI; clearing the "
-            "memory wipes this too."
+            "recent successful run. Display-only — `claude_code_agent` "
+            "no longer reads this field. Continuity is driven by "
+            "`--continue` so claude tracks its own latest session per "
+            "cwd. Kept for back-compat + diagnostic display; clearing "
+            "the memory wipes it."
         ),
         json_schema_extra={"hidden": True},
     )

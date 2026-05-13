@@ -411,16 +411,6 @@ class ClaudeSessionPool:
                 project_dir, exc,
             )
 
-        # Snapshot existing JSONL files BEFORE spawn so we can pick out
-        # the new one claude creates.
-        try:
-            baseline_files = {
-                p.name for p in project_dir.iterdir()
-                if p.suffix == ".jsonl"
-            }
-        except OSError:
-            baseline_files = set()
-
         # Build argv WITHOUT the prompt — we'll write the first turn's
         # prompt to the PTY in `send_turn` so the spawn-to-ready path
         # is the same as the post-/clear path.
@@ -435,12 +425,14 @@ class ClaudeSessionPool:
 
         # Spawn via the cross-platform PTY transport.
         transport = get_pty_transport()
+        spawn_time = time.monotonic()
         pty_handle = await transport.spawn(argv, cwd=cwd, env=env)
 
-        # Wait for the JSONL file to appear (claude writes the
-        # system/init event almost immediately on startup).
-        jsonl_path = await self._wait_for_new_jsonl(
-            project_dir, baseline_files,
+        # Locate the JSONL claude is using. Works uniformly for fresh
+        # spawns (new file appears) and ``--continue`` spawns (existing
+        # file's mtime updates as claude appends a system/init event).
+        jsonl_path = await self._wait_for_session_jsonl(
+            project_dir, spawn_time,
         )
         session_uuid = session_uuid_from_jsonl_path(jsonl_path) or ""
 
@@ -632,31 +624,37 @@ class ClaudeSessionPool:
             )
             await session.jsonl_watcher.start()
 
-    async def _wait_for_new_jsonl(
-        self, project_dir: Path, baseline: set[str],
+    async def _wait_for_session_jsonl(
+        self, project_dir: Path, spawn_time: float,
     ) -> Path:
-        """Mirror of ``AICliSession._wait_for_new_jsonl``. Local copy so
-        the pool doesn't depend on a private method of the session
-        class."""
-        deadline = time.monotonic() + _CLEAR_JSONL_TIMEOUT
+        """Find the JSONL claude is using post-spawn via mtime.
+
+        Works for both fresh-spawn (claude creates a new file) and
+        ``--continue`` (claude appends an init event to the most
+        recent existing file, updating its mtime). Picks the newest
+        ``.jsonl`` whose mtime is at least ``spawn_time - 1s`` (grace
+        for clock skew + filesystem mtime resolution).
+        """
+        deadline = spawn_time + _CLEAR_JSONL_TIMEOUT
+        mtime_floor = spawn_time - 1.0
         while time.monotonic() < deadline:
             try:
-                current = {
-                    p.name for p in project_dir.iterdir()
+                jsonls = [
+                    p for p in project_dir.iterdir()
                     if p.suffix == ".jsonl"
-                }
+                ]
             except OSError:
-                current = set()
-            new_names = current - baseline
-            if new_names:
-                candidates = [project_dir / n for n in new_names]
+                jsonls = []
+            if jsonls:
                 try:
-                    return max(candidates, key=lambda p: p.stat().st_mtime)
+                    newest = max(jsonls, key=lambda p: p.stat().st_mtime)
+                    if newest.stat().st_mtime >= mtime_floor:
+                        return newest
                 except OSError:
-                    return candidates[0]
+                    pass
             await asyncio.sleep(0.1)
         raise TimeoutError(
-            f"No session JSONL appeared under {project_dir} within "
+            f"No session JSONL touched under {project_dir} within "
             f"{_CLEAR_JSONL_TIMEOUT}s"
         )
 

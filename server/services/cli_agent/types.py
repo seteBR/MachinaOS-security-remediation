@@ -65,12 +65,26 @@ class ClaudeTaskSpec(BaseAICliTaskSpec):
     session_id: Optional[str] = Field(
         default=None,
         description="Start a named session. Pair with `resume_session_id` "
-                    "to chain conversations.",
+                    "to chain conversations. Note: silently dropped in "
+                    "interactive mode (claude assigns its own UUID); "
+                    "kept for back-compat.",
     )
     resume_session_id: Optional[str] = Field(
         default=None,
-        description="Resume from a prior session_id (returned in a previous "
-                    "task's `result` event).",
+        description="Resume from a specific prior session UUID. Mutually "
+                    "exclusive with `continue_session`. Generally unset by "
+                    "claude_code_agent — set `continue_session=True` for "
+                    "memory-bound runs and let claude find its own latest.",
+    )
+    continue_session: bool = Field(
+        default=False,
+        description="Emit `--continue` so claude auto-loads the most "
+                    "recent conversation under the current cwd (per "
+                    "code.claude.com/docs/en/cli-reference). The cleaner "
+                    "alternative to passing a specific UUID via "
+                    "`resume_session_id` — claude handles session "
+                    "tracking itself, no UUID round-trip through the "
+                    "memory node's params required.",
     )
     max_turns: Optional[int] = Field(
         default=None, ge=1,

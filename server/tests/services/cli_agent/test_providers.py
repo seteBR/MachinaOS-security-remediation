@@ -121,6 +121,40 @@ class TestClaudeArgv:
         assert "--resume" in argv
         assert "prior-sess" in argv
         assert "--session-id" not in argv
+        # `--continue` is mutually exclusive with `--resume`; explicit
+        # UUID wins.
+        assert "--continue" not in argv
+
+    def test_continue_flag_emitted(self, claude_provider):
+        """``continue_session=True`` produces ``--continue`` — the
+        cleaner default for memory-bound runs (claude auto-finds the
+        latest conversation under cwd, no UUID round-trip)."""
+        task = ClaudeTaskSpec(prompt="x", continue_session=True)
+        argv = claude_provider.interactive_argv(task, defaults={})
+        assert "--continue" in argv
+        assert "--resume" not in argv
+        assert "--session-id" not in argv
+
+    def test_resume_wins_over_continue(self, claude_provider):
+        """If both are set (caller bug), explicit ``--resume`` wins —
+        matches the argv-builder's mutually-exclusive guard."""
+        task = ClaudeTaskSpec(
+            prompt="x",
+            resume_session_id="prior",
+            continue_session=True,
+        )
+        argv = claude_provider.interactive_argv(task, defaults={})
+        assert "--resume" in argv
+        assert "--continue" not in argv
+
+    def test_no_continuity_flag_by_default(self, claude_provider):
+        """Fresh task with no continuity hint → no flag. Claude assigns
+        a new session UUID."""
+        task = ClaudeTaskSpec(prompt="x")
+        argv = claude_provider.interactive_argv(task, defaults={})
+        assert "--resume" not in argv
+        assert "--continue" not in argv
+        assert "--session-id" not in argv
 
     def test_system_prompt_propagates(self, claude_provider):
         task = ClaudeTaskSpec(prompt="x", system_prompt="be concise")

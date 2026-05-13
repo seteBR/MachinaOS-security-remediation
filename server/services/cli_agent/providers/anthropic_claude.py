@@ -172,13 +172,26 @@ class AnthropicClaudeProvider:
         )
         argv += ["--model", model]
 
-        # Resume — no `--session-id` in interactive mode. First-run
-        # claude assigns its own UUID, which the JsonlDirWatcher
-        # discovers from the new file appearing under
-        # `<CLAUDE_CONFIG_DIR>/projects/<project_key>/` and which
-        # `_persist_memory` saves into `simpleMemory.last_session_id`.
+        # Session continuity. Three valid states, mutually exclusive:
+        #   - ``resume_session_id`` set → ``--resume <UUID>`` (explicit;
+        #     used by ``--fork-session`` UI + any caller that already
+        #     knows the exact UUID).
+        #   - ``continue_session=True`` → ``--continue`` (claude
+        #     auto-loads the latest conversation under the current
+        #     cwd, per code.claude.com/docs/en/cli-reference). The
+        #     cleaner default for memory-bound runs because it avoids
+        #     ferrying a UUID through the memory node's params — claude
+        #     tracks its own sessions on disk under
+        #     ``<CLAUDE_CONFIG_DIR>/projects/<project_key>/`` and
+        #     ``--continue`` picks the newest.
+        #   - Neither → no flag (fresh session; claude assigns a new
+        #     UUID which the post-spawn JSONL locator discovers).
+        # ``--session-id`` is intentionally NOT emitted in interactive
+        # mode — the CLI rejects it.
         if task.resume_session_id:
             argv += ["--resume", task.resume_session_id]
+        elif task.continue_session:
+            argv += ["--continue"]
 
         # Allowed tools — built-in defaults plus every workflow tool we
         # exposed via the per-batch FastMCP bridge. Same shape as the

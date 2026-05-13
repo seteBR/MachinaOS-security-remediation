@@ -72,7 +72,11 @@ _FIRST_RUN_JSONL_TIMEOUT = 5.0
 class AICliSession(BaseProcessSupervisor):
     """One CLI subprocess for one task."""
 
-    pipe_streams = True
+    # ``pipe_streams`` was the parent's flag for whether ``_do_start``
+    # should pipe stdout/stderr through ``drain_stream`` loggers. We
+    # override ``_do_start`` entirely (PTY-based spawn) so it's
+    # irrelevant — left as False to match reality.
+    pipe_streams = False
     terminate_grace_seconds = 5.0
     graceful_shutdown = sys.platform == "win32"
 
@@ -126,7 +130,6 @@ class AICliSession(BaseProcessSupervisor):
 
         # Streaming state
         self._events: List[Dict[str, Any]] = []
-        self._stderr_lines: List[str] = []  # populated only on PTY error envelopes
         self._exit_code: Optional[int] = None
         self._lockfile_path: Optional[Path] = None
 
@@ -375,26 +378,19 @@ class AICliSession(BaseProcessSupervisor):
             )
 
         resume_uuid = getattr(self._task, "resume_session_id", None)
-        baseline_files: set[str] = set()
         if resume_uuid:
             # Resume runs: known location. Claude opens this file and
             # appends to it on each turn.
             self._session_jsonl_path = project_dir / f"{resume_uuid}.jsonl"
-        else:
-            # First-run: snapshot the dir BEFORE spawn so we can
-            # identify the new file claude creates afterwards.
-            try:
-                baseline_files = {
-                    p.name for p in project_dir.iterdir()
-                    if p.suffix == ".jsonl"
-                }
-            except OSError:
-                pass
+        # Else: post-spawn we'll discover the file via mtime — works
+        # uniformly for fresh-spawn (claude creates new) and
+        # --continue (claude appends to existing).
 
         # Spawn via the cross-platform PTY transport. The PtyHandle
         # owns the subprocess; `self._proc` stays `None` for
         # BaseProcessSupervisor-compat — `is_running` / `_do_stop` are
         # overridden below to consult `self._pty_handle` instead.
+        spawn_time = time.monotonic()
         transport = get_pty_transport()
         argv = self.argv()
         try:
@@ -414,12 +410,16 @@ class AICliSession(BaseProcessSupervisor):
             self._branch, self.cwd(),
         )
 
-        # Resolve the JSONL path. For first-run we wait for claude to
-        # create the file; for resume the path is already known.
+        # Resolve the JSONL path. For known-UUID `--resume` runs the
+        # path is already known; otherwise (fresh OR `--continue`)
+        # discover via mtime — claude either creates a new file (fresh)
+        # or updates the latest existing file's mtime by appending an
+        # init event (--continue). Either way "newest .jsonl with
+        # mtime >= spawn_time - grace" is the right file.
         if self._session_jsonl_path is None:
             try:
-                self._session_jsonl_path = await self._wait_for_new_jsonl(
-                    project_dir, baseline_files,
+                self._session_jsonl_path = await self._wait_for_session_jsonl(
+                    project_dir, spawn_time,
                 )
             except TimeoutError as exc:
                 # Surface a clean error envelope rather than letting the
@@ -463,39 +463,41 @@ class AICliSession(BaseProcessSupervisor):
         project_key = _PROJECT_KEY_RE.sub("-", str(cwd))
         return Path(MACHINA_CLAUDE_DIR) / "projects" / project_key
 
-    async def _wait_for_new_jsonl(
-        self, project_dir: Path, baseline: set[str],
+    async def _wait_for_session_jsonl(
+        self, project_dir: Path, spawn_time: float,
     ) -> Path:
-        """Poll ``project_dir`` for a new ``.jsonl`` file that wasn't
-        present in ``baseline``. Used on first-run spawns when we don't
-        know the UUID claude will assign. If multiple new files appear
-        (a race we don't expect), pick the newest by mtime.
+        """Find the JSONL claude is using post-spawn via mtime.
 
-        Raises :class:`TimeoutError` after :data:`_FIRST_RUN_JSONL_TIMEOUT`
-        seconds — surfaces as a clean spawn failure rather than a
-        silently dead session.
+        Works for both fresh-spawn (claude creates a new file) and
+        ``--continue`` (claude appends an init event to the most
+        recent existing file, updating its mtime). Picks the newest
+        ``.jsonl`` whose mtime is at least ``spawn_time - 1s``
+        (1s grace for clock skew + mtime resolution).
+
+        Raises :class:`TimeoutError` after
+        :data:`_FIRST_RUN_JSONL_TIMEOUT` seconds — surfaces as a
+        clean spawn failure rather than a silently dead session.
         """
-        deadline = time.monotonic() + _FIRST_RUN_JSONL_TIMEOUT
+        deadline = spawn_time + _FIRST_RUN_JSONL_TIMEOUT
+        mtime_floor = spawn_time - 1.0  # grace for clock skew
         while time.monotonic() < deadline:
             try:
-                current_files = {
-                    p.name for p in project_dir.iterdir()
+                jsonls = [
+                    p for p in project_dir.iterdir()
                     if p.suffix == ".jsonl"
-                }
+                ]
             except OSError:
-                current_files = set()
-            new_names = current_files - baseline
-            if new_names:
-                candidates = [project_dir / n for n in new_names]
-                # Pick newest by mtime — tolerates a stale baseline race
-                # where an unrelated session was deleted concurrently.
+                jsonls = []
+            if jsonls:
                 try:
-                    return max(candidates, key=lambda p: p.stat().st_mtime)
+                    newest = max(jsonls, key=lambda p: p.stat().st_mtime)
+                    if newest.stat().st_mtime >= mtime_floor:
+                        return newest
                 except OSError:
-                    return candidates[0]
+                    pass
             await asyncio.sleep(0.1)
         raise TimeoutError(
-            f"No session JSONL appeared under {project_dir} within "
+            f"No session JSONL touched under {project_dir} within "
             f"{_FIRST_RUN_JSONL_TIMEOUT}s — claude may have failed to "
             f"start or the CLAUDE_CONFIG_DIR is misconfigured."
         )
@@ -799,9 +801,13 @@ class AICliSession(BaseProcessSupervisor):
         success: bool,
         error: Optional[str] = None,
     ) -> SessionResult:
+        # PTY merges stdout + stderr onto one stream; we never read it
+        # (the JSONL on disk is the protocol surface). Pass empty
+        # stderr — the provider's event_to_session_result reconstructs
+        # error context from JSONL `result.subtype == "error"` events.
         provider_result = self._provider.event_to_session_result(
             self._events,
-            "\n".join(self._stderr_lines),
+            "",
             self._exit_code if self._exit_code is not None else -1,
         )
 
