@@ -33,7 +33,7 @@ Three problems compound today:
 ## 4. Non-goals
 
 - No new pytest invariants beyond what already exists.
-- No wiring of per-node Temporal activity dispatch in `temporal/workflow.py` (Wave 11.F gap — separate sprint).
+- ~~No wiring of per-node Temporal activity dispatch in `temporal/workflow.py` (Wave 11.F gap — separate sprint).~~ **Shipped post-RFC as F4.A (commit `8261b05`).**
 - No capability-mixin implementation (mention as future direction only).
 - No entry-point-based third-party plugin loading.
 - No edits to `themedGlyphs.ts` (UI chrome, not plugin media).
@@ -101,7 +101,10 @@ A new plugin in group `X` checks `nodes/X/_base.py` for a domain base first; inh
 - The activity's WebSocket read loop calls `activity.heartbeat()` every 30s (`activities.py:220-242`). Long-running plugins (DeepAgent, browser automation) survive past the 2-min `heartbeat_timeout`.
 - `Worker.graceful_shutdown_timeout = timedelta(seconds=30)` — explicit shutdown window honoring SIGTERM (`worker.py`).
 
-**Documented gap:** per-node activity dispatch (Wave 11.F intent) is partially wired. `as_activity()` registers per-type activities but `temporal/workflow.py:177-183` still schedules the legacy `"execute_node_activity"` name. Functionally equivalent today (one activity dispatches by `node_type`); migration tracked separately.
+**Status (F4):** per-node activity dispatch shipped behind a settings flag:
+
+- **F4.A** (commit `8261b05`, `TEMPORAL_PER_TYPE_DISPATCH`): orchestrator resolves `node.{type}.v{version}` per plugin via the registry; `BaseNode.as_activity()` returns a full pipeline-replacement activity that calls `workflow_service.execute_node()` in-process (skipping the legacy WS round-trip). All per-type activities register alongside the legacy `execute_node_activity` so flag-off is byte-identical. Per-queue routing (`cls.task_queue`) waits for `TemporalWorkerPool` to be wired in `main.py`.
+- **F4.B** (commit `a4d009e`, `TEMPORAL_AGENT_WORKFLOW_ENABLED`): `AgentWorkflow` Temporal child workflow + 3 activities (`agent.execute_llm_step.v1`, `agent.persist_turn.v1`, `agent.compact_memory.v1`). When enabled, the orchestrator schedules `AgentWorkflow` for the 15 migrating agent types instead of an activity; tool calls inside the loop become per-type activities. `deep_agent` / `rlm_agent` / `claude_code_agent` stay single-activity (externalised loops). Per-agent orchestrator-dispatch wiring lands in a follow-up commit.
 
 ### 6.4 CloudEvents broadcast contract
 
@@ -290,11 +293,11 @@ Per-batch verification: `pytest tests/test_node_spec.py -x && pytest tests/test_
 
 ## 10. Open questions
 
-None blocking. Three follow-ups deferred:
+None blocking. Status of the three original follow-ups:
 
-1. Migrate node colors from `visuals.json` to per-plugin `meta.json` (matches icon co-location for color).
-2. Capability mixins (`RequiresOAuth`, `SupportsStreaming`) per Prefect's pattern.
-3. Per-node Temporal activity dispatch in `temporal/workflow.py` (Wave 11.F gap).
+1. ✅ **Migrate node colors from `visuals.json` to per-plugin `meta.json`** — Shipped (F2, commits `796d365` + `637de1e`). 113 plugin folders ship `meta.json`. Resolver: `get_plugin_meta(type, 'color')` falls through to `get_color()` for legacy entries.
+2. **Capability mixins** (`RequiresOAuth`, `SupportsStreaming`) — Still deferred (F3).
+3. ✅ **Per-node Temporal activity dispatch + AgentWorkflow** — Shipped behind flags (F4.A `8261b05` + F4.B infra `a4d009e`). Per-agent orchestrator wiring for the 15 migrating types is a separate follow-up commit.
 
 ## 11. Verification
 

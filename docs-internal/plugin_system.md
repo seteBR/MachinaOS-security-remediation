@@ -401,41 +401,91 @@ response = await ai_service.execute_chat_agent(ctx.node_id, **kwargs)
 auto-prompt fallback + team-lead teammate injection. Plugin-specific
 logic stays in the `execute_op` method.
 
-### Temporal per-node activities (Wave 11.F)
+### Temporal per-node activities (Wave 11.F → F4.A wiring)
 
 Every `BaseNode` subclass exposes `cls.as_activity()`, a Temporal
 `@activity.defn`-decorated callable with name
-`node.{type}.v{version}`. Collect them for worker registration:
+`node.{type}.v{version}`. As of F4.A (commit `8261b05`) these
+activities are **wired into the orchestrator** behind
+`TEMPORAL_PER_TYPE_DISPATCH` (default off):
+
+- Flag OFF: orchestrator schedules legacy `execute_node_activity`
+  (status quo since Wave 11; WS round-trip back to FastAPI).
+- Flag ON: orchestrator schedules `f"node.{cls.type}.v{cls.version}"`.
+  The per-type activity body runs the full pipeline (broadcast +
+  pre-executed / disabled checks + parameter fetch + `instance.execute()`)
+  via `workflow_service.execute_node()` — **no WebSocket round-trip**
+  because the worker shares the FastAPI process.
+
+`TemporalWorkerManager._worker` registers BOTH the legacy activity AND
+every per-type activity (~1.6s startup cost). Per-queue routing
+(`task_queue=cls.task_queue`) waits for `TemporalWorkerPool` to be
+wired in `main.py`; the orchestrator currently passes `task_queue=None`
+so per-type activities still poll the single default queue.
 
 ```python
-from services.temporal.plugin_activities import (
-    collect_plugin_activities,
-    distinct_task_queues,
-)
+# Worker collection patterns (both supported).
 
-# Single-queue workers:
-activities = collect_plugin_activities(task_queue="ai-heavy")
-worker = Worker(client, task_queue="ai-heavy", activities=activities, ...)
+# All per-type activities (no queue filter; what TemporalWorkerManager uses today):
+from services.temporal.plugin_activities import collect_plugin_activities
+activities = collect_plugin_activities()
 
-# Multi-queue pool (one worker per queue):
+# Filter by declared queue (for future TemporalWorkerPool):
+ai_heavy = collect_plugin_activities(task_queue="ai-heavy")
+worker = Worker(client, task_queue="ai-heavy", activities=ai_heavy, ...)
+
+# Multi-queue pool (future enhancement — class exists, not started yet):
 from services.temporal.worker import TemporalWorkerPool
 pool = TemporalWorkerPool(client)  # defaults to all declared queues
 await pool.start()
 ```
 
-Queue distribution (current state):
+### Temporal agent workflows (F4.B)
 
-| Queue | Plugins | Default concurrency |
+`TEMPORAL_AGENT_WORKFLOW_ENABLED` (default off, commit `a4d009e`)
+flips agent dispatch from activity to **child workflow**. The
+`AgentWorkflow` class in `services/temporal/agent_workflow.py` orchestrates the agent loop:
+
+```
+AgentWorkflow.run(payload):
+  loop until "final" or max_iterations:
+    1. execute_activity("agent.execute_llm_step.v1") -> kind + content/calls
+    2. if kind == "tool_calls":
+         for each call: execute_activity(f"node.{tool_type}.v{version}")
+    3. execute_activity("agent.persist_turn.v1")   # append memory per turn
+    4. if compaction threshold: execute_activity("agent.compact_memory.v1")
+```
+
+Three new activities (`agent.execute_llm_step.v1`,
+`agent.persist_turn.v1`, `agent.compact_memory.v1`) registered
+alongside the per-type activities.
+
+**Agents that migrate** (15): `aiAgent`, `chatAgent`, 12 specialized
+agents (`android_agent`, `coding_agent`, `web_agent`, `task_agent`,
+`social_agent`, `travel_agent`, `tool_agent`, `productivity_agent`,
+`payments_agent`, `consumer_agent`, `autonomous_agent`), 2 team
+leads (`orchestrator_agent`, `ai_employee`).
+
+**Agents that stay as single activities** (3): `deep_agent`,
+`rlm_agent`, `claude_code_agent`. Their internal session state
+(deepagents package / RLM REPL / Claude CLI `--resume` with stable
+`cwd`) requires single-process continuity that would break across
+activity boundaries.
+
+Queue distribution (live count via
+`distinct_task_queues()` and `len(_NODE_CLASS_REGISTRY)`):
+
+| Queue | Use case | Default concurrency |
 |---|---|---|
-| `ai-heavy` | 28 | 4 |
-| `rest-api` | 21 | 50 |
-| `machina-default` | 25 | 20 |
-| `android` | 16 | 10 |
-| `messaging` | 7 | 20 |
-| `triggers-event` | 5 | 100 |
-| `triggers-poll` | 4 | 100 |
-| `code-exec` | 3 | 10 |
-| `browser` | 2 | 4 |
+| `ai-heavy` | LLM agent loops | 4 |
+| `rest-api` | Lightweight HTTP / Google / Twitter | 50 |
+| `machina-default` | Catch-all | 20 |
+| `android` | ADB / relay ops | 10 |
+| `messaging` | WhatsApp / Telegram | 20 |
+| `triggers-event` | Push-based triggers | 100 |
+| `triggers-poll` | Polling triggers (Gmail, etc.) | 100 |
+| `code-exec` | Python / JS / TS sandboxes | 10 |
+| `browser` | Playwright / agent-browser | 4 |
 
 Env overrides: `TEMPORAL_<QUEUE>_CONCURRENCY` (e.g.
 `TEMPORAL_AI_HEAVY_CONCURRENCY=8`).
@@ -732,7 +782,14 @@ All Wave 10 invariants in `test_node_spec.py` still run; Wave 11 invariants in `
 - Wave 11.D.11 — Auto-populate trigger registries.
 - Wave 11.D.12 — Fast-path contract invariants.
 - Wave 11.D.13 — Sunset empty bulk files + dead dispatch.
-- Wave 11.F — Per-plugin Temporal activities + worker pools.
+- Wave 11.F — Per-plugin Temporal activities (`BaseNode.as_activity()`)
+  + `TemporalWorkerPool` class.
+- F4.A — Orchestrator wired to per-type dispatch behind
+  `TEMPORAL_PER_TYPE_DISPATCH` flag (commit `8261b05`). Closes the
+  Wave 11.F orchestrator gap.
+- F4.B — `AgentWorkflow` child workflow + 3 agent activities behind
+  `TEMPORAL_AGENT_WORKFLOW_ENABLED` flag (commit `a4d009e`). Tool
+  calls inside AI agents become per-type activities.
 - Wave 11.E — Declarative credentials: 18 `Credential` subclasses
   (GoogleCredential + GoogleMapsCredential + TwitterCredential +
   TelegramCredential + ApifyCredential + 10 LLM providers + 3 inline

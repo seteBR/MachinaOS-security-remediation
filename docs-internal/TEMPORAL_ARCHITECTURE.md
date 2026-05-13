@@ -2,7 +2,15 @@
 
 ## Overview
 
-Each workflow node executes as an **independent Temporal activity** with its own isolated context, enabling horizontal scaling across distributed workers.
+Each workflow node executes as a **Temporal activity** with its own isolated context, enabling horizontal scaling across distributed workers. The orchestrator dispatches in one of three ways depending on settings flags:
+
+| Dispatch | Trigger | Use case |
+|---|---|---|
+| **Legacy single activity** (`execute_node_activity`) | Default | Every node routed through one dispatcher activity. WebSocket round-trip back to the FastAPI server. Stable since Wave 11. |
+| **Per-type activity** (`node.{type}.v{version}`) | `TEMPORAL_PER_TYPE_DISPATCH=true` | Each plugin gets its own `@activity.defn`. Per-plugin retry / timeout / heartbeat configs apply. Worker pool can later specialise per `cls.task_queue` (browser / code-exec / ai-heavy / ...). Shipped in F4.A (commit `8261b05`). |
+| **Agent-as-child-workflow** (`AgentWorkflow`) | `TEMPORAL_AGENT_WORKFLOW_ENABLED=true` | AI Agents (aiAgent, chatAgent, 12 specialized agents, 2 team leads) run as Temporal child workflows. Each LLM turn = activity; each tool call = per-type activity. Mirrors Temporal's AI Cookbook canonical pattern. F4.B infrastructure shipped (commit `a4d009e`); per-agent migrations follow. |
+
+`deep_agent`, `rlm_agent`, `claude_code_agent` are intentionally excluded from AgentWorkflow — their externalised loops (deepagents package / RLM REPL / Claude CLI `--resume`) require single-process state continuity.
 
 ## System Architecture
 
@@ -14,27 +22,30 @@ Each workflow node executes as an **independent Temporal activity** with its own
   |  Workflow: MachinaWorkflow (orchestrator only)                |
   |  - Parses graph structure from React Flow                     |
   |  - Filters config nodes (tools, memory, services)             |
-  |  - Schedules node activities (FIRST_COMPLETED pattern)        |
+  |  - Resolves activity per node (legacy / per-type / agent-wf)  |
+  |  - Schedules activities (FIRST_COMPLETED pattern)             |
   |  - Collects results and routes outputs to dependent nodes     |
   +---------------------------------------------------------------+
                                   |
-          Activity Queue (distributed to workers)
-    +--------+  +--------+  +--------+  +--------+
-    | Node A |  | Node B |  | Node C |  | Node D |
-    +--------+  +--------+  +--------+  +--------+
-         |          |           |           |
-         v          v           v           v
-  +----------+  +----------+  +----------+  +----------+
-  | Worker 1 |  | Worker 2 |  | Worker 3 |  | Worker N |
-  | aiAgent  |  | timer    |  | console  |  | http     |
-  +----------+  +----------+  +----------+  +----------+
-         |          |           |           |
-         +----------+-----------+-----------+
+          Activity / child-workflow scheduling
+    +--------+  +--------+  +--------+  +----------------+
+    | Node A |  | Node B |  | Node C |  | AgentWorkflow  |  (F4.B child wf)
+    +--------+  +--------+  +--------+  +----------------+
+         |          |           |              |
+         v          v           v              v
+  +----------+  +----------+  +----------+  +-----------------------+
+  | Worker 1 |  | Worker 2 |  | Worker 3 |  | LLM step + tool steps |
+  | aiAgent  |  | timer    |  | console  |  | (per-type activities) |
+  +----------+  +----------+  +----------+  +-----------------------+
+         |          |           |              |
+         +----------+-----------+--------------+
                            |
-                           v WebSocket
+                           v
+                   In-process call (F4.A) OR
+                   WebSocket round-trip (legacy)
                    +----------------+
                    | MachinaOs      |
-                   | /ws/internal   |
+                   | workflow_svc   |
                    +----------------+
 ```
 
@@ -125,11 +136,19 @@ while True:
             completed.add(node_id)
             continue
 
-        handle = workflow.start_activity(
-            "execute_node_activity",
+        # F4.A: resolve to per-type name + queue when the flag is on,
+        # else fall back to the legacy single dispatcher.
+        activity_name, activity_queue = self._resolve_activity(node_type)
+        start_kwargs = dict(
             args=[context],
             start_to_close_timeout=timedelta(minutes=10),
+            heartbeat_timeout=timedelta(minutes=2),
+            retry_policy=retry_policy,
         )
+        if activity_queue is not None:
+            start_kwargs["task_queue"] = activity_queue
+
+        handle = workflow.start_activity(activity_name, **start_kwargs)
         running[node_id] = handle
 
     if not running:
@@ -140,43 +159,37 @@ while True:
     outputs[done_id] = result
 ```
 
-### 3. Activity Executes Node via WebSocket
+### 3. Activity executes the node
+
+**Legacy path** (`execute_node_activity`): The activity round-trips through the local WebSocket back to FastAPI, which dispatches to the plugin handler. This was the only path before F4.A.
+
+**Per-type path** (`node.{type}.v{version}`, F4.A): The activity body lives on the plugin class via `BaseNode.as_activity()` and calls `workflow_service.execute_node(...)` **directly** — no WebSocket round-trip. Same DI container (the worker shares the FastAPI process), same broadcasting + parameter-fetch pipeline. Each plugin class declares its own `start_to_close_timeout` / `retry_policy` / `heartbeat_timeout` so they're applied at activity definition time. See `server/services/plugin/base.py:as_activity`.
 
 ```python
-@activity.defn
-async def execute_node_activity(self, context: Dict) -> Dict:
-    node_id = context["node_id"]
-    node_type = context["node_type"]
+# F4.A per-type activity body (server/services/plugin/base.py)
+@activity.defn(name=f"node.{cls.type}.v{cls.version}")
+async def _node_activity(context: Dict[str, Any]) -> Dict[str, Any]:
+    # ... pre_executed / disabled checks ...
+    broadcaster = container.status_broadcaster()
+    await broadcaster.update_node_status(node_id, "executing", ..., workflow_id=...)
 
-    # Execute via WebSocket to MachinaOs
-    async with self.session.ws_connect(
-        self.ws_url,
-        heartbeat=30,
-        receive_timeout=540,  # 9 min, fits within start_to_close_timeout=10min
-    ) as ws:
-        await ws.send_json({
-            "type": "execute_node",
-            "node_id": node_id,
-            "node_type": node_type,
-            "parameters": context["node_data"],
-            ...
-        })
-
-        # Wait for matching response, heartbeat on every non-matching broadcast
-        async for msg in ws:
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                response = json.loads(msg.data)
-                if response.get("request_id") == request_id:
-                    return response
-                # Broadcasts (status updates, tool glow) are natural heartbeat points
-                activity.heartbeat(f"Waiting for {node_id}")
+    workflow_service = container.workflow_service()
+    result = await workflow_service.execute_node(
+        node_id=node_id, node_type=cls.type,
+        parameters=node_data,
+        nodes=context.get("nodes", []), edges=context.get("edges", []),
+        session_id=context.get("session_id", "default"),
+        workflow_id=workflow_id,
+        outputs=context.get("inputs", {}),
+    )
+    # ... broadcast success/error, return result ...
 ```
 
 **Heartbeat strategy (critical for long-running activities):**
 
-The 2-minute `heartbeat_timeout` would kill DeepAgent or browser activities that routinely run 5-10 minutes. The fix: `activity.heartbeat()` fires on every non-matching WebSocket message inside the read loop. Since the server broadcasts status updates, tool glow events, and progress messages continuously during execution, these broadcasts serve as natural heartbeat points -- the activity stays alive for as long as *anything* is happening on the WebSocket.
+The 2-minute `heartbeat_timeout` would kill DeepAgent or browser activities that routinely run 5-10 minutes. Both dispatch paths emit `activity.heartbeat()` at progress points — legacy on every non-matching WebSocket message, per-type at the start of each pipeline stage.
 
-Start/end heartbeats alone are not enough. Without per-message heartbeats, any operation longer than 2 minutes triggers `TIMEOUT_TYPE_HEARTBEAT` and Temporal retries (or fails) the activity.
+In the legacy path the server broadcasts status updates, tool-glow events, and progress messages continuously during execution, so the WS-read-loop heartbeats keep the activity alive for as long as anything is happening. Start/end heartbeats alone are not enough — any operation longer than 2 minutes would trigger `TIMEOUT_TYPE_HEARTBEAT` and Temporal would retry (or fail) the activity.
 
 ## Connection Pooling
 
@@ -229,19 +242,60 @@ Add more workers = handle more concurrent nodes
 
 ### Specialized Worker Pools (Future)
 
-```
-Queue: machina-tasks-cpu     Queue: machina-tasks-gpu
-         |                             |
-    +----+----+                   +----+----+
-    v         v                   v         v
-+-------+ +-------+           +-------+ +-------+
-|CPU    | |CPU    |           |GPU    | |GPU    |
-|Worker | |Worker |           |Worker | |Worker |
-|timer  | |http   |           |aiAgent| |aiAgent|
-+-------+ +-------+           +-------+ +-------+
+F4.A laid the infrastructure (per-type dispatch with `task_queue=cls.task_queue` on `BaseNode`) but the single `TemporalWorkerManager` still polls one queue. Wiring `TemporalWorkerPool` in `main.py` is the deferred follow-up:
 
-Route AI nodes to GPU workers, light nodes to CPU workers
 ```
+Queue: rest-api         Queue: ai-heavy         Queue: code-exec
+     |                       |                       |
++----+----+             +----+----+             +----+----+
+| Worker  |             | Worker  |             | Worker  |
+| gmail   |             | aiAgent |             | python  |
+| brave   |             | chatA   |             | js exec |
+| twitter |             | deepA   |             | ts exec |
++---------+             +---------+             +---------+
+
+Plugin classes already declare cls.task_queue. When the pool wires
+in, `MachinaWorkflow._resolve_activity` starts returning
+(activity_name, cls.task_queue) instead of (activity_name, None).
+```
+
+Per-queue defaults (concurrency caps in `services/temporal/worker.py:TemporalWorkerPool.DEFAULT_CONCURRENCY`):
+
+| Queue | Default concurrency | Use case |
+|---|---|---|
+| `machina-default` | 20 | Catch-all |
+| `rest-api` | 50 | Lightweight HTTP calls |
+| `ai-heavy` | 4 | LLM agent loops |
+| `code-exec` | 10 | Python / JS / TS sandboxes |
+| `triggers-poll` | 100 | Gmail polling, etc. |
+| `triggers-event` | 100 | Event-waiter triggers |
+| `android` | 10 | ADB / relay ops |
+| `browser` | 4 | Playwright / agent-browser |
+| `messaging` | 20 | WhatsApp / Telegram |
+
+### Agent-as-child-workflow (F4.B)
+
+When `TEMPORAL_AGENT_WORKFLOW_ENABLED=true` and the node type is in the migrating set (`aiAgent` / `chatAgent` / 12 specialized agents / 2 team leads), the orchestrator schedules `AgentWorkflow` as a child workflow instead of an activity. Inside the workflow:
+
+```
+AgentWorkflow.run(payload):
+  loop until "final" or max_iterations:
+    1. execute_activity("agent.execute_llm_step.v1") -> {kind, content|calls}
+    2. if kind == "tool_calls":
+         for each call:
+           execute_activity(f"node.{tool_node_type}.v{version}")
+         append tool_results to messages
+    3. execute_activity("agent.persist_turn.v1")  # append memory per turn
+    4. if token_total >= compaction_threshold:
+         execute_activity("agent.compact_memory.v1")
+         replace messages with summary
+```
+
+Each LLM step is one activity, each tool call is one per-type activity (the same activities F4.A registered). Failures of tool activities surface as error messages back to the LLM (matching today's LangGraph behaviour); the agent loop continues.
+
+`deep_agent`, `rlm_agent`, `claude_code_agent` are NOT migrated — their internal session state (`deepagents` package / RLM REPL / Claude CLI `--resume` with stable `cwd`) requires single-process continuity and would break across activity boundaries.
+
+References: [Temporal AI Cookbook](https://docs.temporal.io/ai-cookbook), [`temporal-community/temporal-ai-agent`](https://github.com/temporal-community/temporal-ai-agent), [`temporalio.contrib.openai_agents`](https://github.com/temporalio/sdk-python/tree/main/temporalio/contrib/openai_agents).
 
 ## Config Node Filtering
 
@@ -252,17 +306,17 @@ Certain nodes provide configuration rather than executing:
 CONFIG_HANDLES = {"input-tools", "input-memory", "input-model", "input-skill", "input-task", "input-teammates"}
 
 # Trigger node types - event listeners, never scheduled as blocking activities
+# Authoritative list: server/constants.py WORKFLOW_TRIGGER_TYPES (frozenset).
 TRIGGER_NODE_TYPES = frozenset([
-    "start", "cronScheduler", "webhookTrigger", "whatsappReceive",
-    "workflowTrigger", "chatTrigger", "taskTrigger",
+    "webhookTrigger", "whatsappReceive", "workflowTrigger",
+    "chatTrigger", "taskTrigger",
     "twitterReceive", "googleGmailReceive", "telegramReceive",
+    "emailReceive",
 ])
 
-# Android service types (connect to androidTool)
-ANDROID_SERVICE_TYPES = {
-    "batteryMonitor", "locationService", "deviceState",
-    "systemInfo", "appList", "appLauncher",
-}
+# Android service types (connect to androidTool) -- authoritative list
+# in server/constants.py ANDROID_SERVICE_NODE_TYPES (16 entries since
+# Wave 11.I).
 ```
 
 Config nodes are:

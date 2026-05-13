@@ -587,13 +587,43 @@ The frontend uses a layered cache + slice-subscription model so cold refreshes a
 - Applies to `SquareNode`, `AIAgentNode`, `TriggerNode`, `GenericNode`, `ToolkitNode`, `StartNode`, `TeamMonitorNode`. Add new node components the same way.
 - Reference: https://reactflow.dev/learn/advanced-use/performance
 
-### Icon + color — central `visuals.json` registry, single source of truth
-- Every node's icon and color live in [server/nodes/visuals.json](./server/nodes/visuals.json) — `{nodeType: {icon, color, skill?}}`. The `skill` field optionally points at the teaching skill folder (reverse map for the "teach this node" case).
-- The handler at [server/nodes/_visuals.py](./server/nodes/_visuals.py) exposes `get_icon(node_type)` / `get_color(node_type)`. `BaseNode._metadata_dict` consults it at registration time. Node plugin classes do **not** declare `icon = ...` or `color = ...` themselves (a subclass MAY override by setting the class attr — explicit value wins).
-- Wire format (used by the frontend resolver at [client/src/assets/icons/index.ts](./client/src/assets/icons/index.ts)): `asset:<key>` (filesystem SVG, keyed by filename without `.svg`, auto-indexed via `import.meta.glob`), `<lib>:<brand>` (NPM icon package, e.g. `lobehub:Claude`), `data:` / URL passthrough, or plain emoji.
-- Frontend renders via the single `<NodeIcon icon className />` primitive in [client/src/assets/icons/NodeIcon.tsx](./client/src/assets/icons/NodeIcon.tsx). It dispatches lib-component / `<img>` / text branches and **does not apply parent color** — that would mono-tint lobehub `.Color` brand SVGs (their paths use `currentColor`). Sites that want a tinted backdrop set `style={{ color: brandColor }}` on the parent + `bg-tint-soft` / `border-tint`.
-- SKILL.md icon/color is resolved by `SkillLoader._parse_skill_metadata` from the first node in `allowed-tools` via the same handler. Skills with a node target carry no inline icon/color. **Orphan skills** (personality, memory operators, autonomous patterns — no node target) keep inline `metadata.icon` and `metadata.color` since the resolver returns nothing for them.
-- **Do not** ship inline data URIs from the backend, do not maintain frontend override tables, do not declare `icon`/`color` on a node class (use visuals.json), do not declare them in SKILL.md when the skill targets a node.
+### Icon + color — per-plugin folder + visuals.json fallback (post-RFC F1 + F2)
+
+Following the plugin authoring RFC §6.5 / §6.6, icons and colors live co-located in the plugin folder; `visuals.json` is the fallback registry for emoji / library icons and the skill reverse-map.
+
+**Icon resolution** (`BaseNode._metadata_dict` → `services/plugin/base.py`):
+1. **Per-plugin `icon.svg`** in the plugin folder. If present, `_metadata_dict` emits the URL `/api/schemas/nodes/{type}/icon` (backend-served via `GET /api/schemas/nodes/{type}/icon`). 27 plugins ship this today.
+2. Fallback: **`visuals.json` `icon`** field — emoji (`"🤖"`), `lobehub:<brand>`, or `asset:<key>` for plugins without a co-located icon.svg (telegram / whatsapp / stripe + emoji-only plugins).
+
+**Color resolution** (F2 — per-plugin `meta.json`):
+1. **Per-plugin `meta.json`** in the plugin folder — `{"color": "#xxxxxx"}`. 113 plugin folders ship this today (mirrors icon co-location).
+2. Fallback: **`visuals.json` `color`** field. Only legacy entries that haven't been migrated rely on this; post-F2 visuals.json has zero `color` fields.
+
+**Files:**
+- [server/nodes/visuals.json](./server/nodes/visuals.json) — fallback registry. Post-F1/F2 shape: `{nodeType: {icon?, skill?}}` (107 entries, no color, no `asset:<key>` for plugins with icon.svg).
+- [server/nodes/_visuals.py](./server/nodes/_visuals.py) — `get_icon`, `get_color`, `get_plugin_icon_path`, **`get_plugin_meta(node_type, key)`** (F2 resolver).
+- [server/nodes/&lt;group&gt;/&lt;plugin&gt;/icon.svg](./server/nodes/) — co-located plugin icon (Phase 9 / RFC §6.5).
+- [server/nodes/&lt;group&gt;/&lt;plugin&gt;/meta.json](./server/nodes/) — co-located plugin color (F2 / RFC §6.6).
+
+**Wire format** (frontend resolver at [client/src/assets/icons/index.ts](./client/src/assets/icons/index.ts)):
+- `/api/schemas/nodes/<type>/icon` — backend-served plugin icon (prefixed with `API_CONFIG.PYTHON_BASE_URL` in dev)
+- `asset:<key>` — bundled SVG keyed by filename without `.svg` (auto-indexed via `import.meta.glob`)
+- `<lib>:<brand>` — NPM icon package, e.g. `lobehub:Claude`
+- `data:` / URL passthrough — inline SVG or remote
+- plain emoji / short text — rendered as-is
+
+**Latent Phase 6 bug fix (commit `95249a1`):** `BaseNode.__init_subclass__` previously called `_metadata_dict()` BEFORE `register_node_class(cls)`, so `get_plugin_icon_path` couldn't resolve the plugin via `get_node_class()`. The URL emission silently fell through to `visuals.json`'s `asset:<key>`. Swapping the two register calls activates the URL path as intended.
+
+**Frontend rendering:**
+- Single `<NodeIcon icon className />` primitive at [client/src/assets/icons/NodeIcon.tsx](./client/src/assets/icons/NodeIcon.tsx) dispatches lib-component / `<img>` / text branches.
+- Does **not** apply parent `color` — would mono-tint lobehub `.Color` brand SVGs whose paths use `currentColor`. Sites that want a tinted backdrop set `style={{ color: brandColor }}` on the parent + `bg-tint-soft` / `border-tint`.
+- SKILL.md icon/color resolves via `SkillLoader._parse_skill_metadata` from the first node in `allowed-tools` using the same handler chain. Orphan skills (personality, memory operators, autonomous patterns — no node target) keep inline `metadata.icon` and `metadata.color`.
+
+**Do not:**
+- Ship inline data URIs from the backend.
+- Maintain frontend override tables.
+- Declare `icon`/`color` on a node class (use icon.svg + meta.json, or visuals.json for fallback cases).
+- Declare them in SKILL.md when the skill targets a node.
 
 ## Key Files & Components
 
@@ -1629,18 +1659,26 @@ server/nodes/document/
 
 Workflows execute via Temporal for durability and horizontal scaling. Temporal is an always-on service (like WhatsApp) started unconditionally by `npm run start` and `npm run dev`.
 
-**Architecture**: Each workflow node executes as an independent Temporal activity:
+**Architecture**: Three dispatch paths, gated by settings flags (see [docs-internal/TEMPORAL_ARCHITECTURE.md](./docs-internal/TEMPORAL_ARCHITECTURE.md)):
+
+| Path | Trigger | Behavior |
+|---|---|---|
+| Legacy single activity (`execute_node_activity`) | Default | Every node routed through one dispatcher; WebSocket round-trip back to FastAPI. |
+| Per-type activity (`node.{type}.v{version}`) | `TEMPORAL_PER_TYPE_DISPATCH=true` (F4.A, commit `8261b05`) | Each plugin gets its own `@activity.defn` via `BaseNode.as_activity()`. Per-plugin retry/timeout/heartbeat configs apply. Direct call to `workflow_service.execute_node()` (no WS round-trip; worker shares FastAPI process). Foundation for future `TemporalWorkerPool` per-queue routing. |
+| Agent-as-child-workflow (`AgentWorkflow`) | `TEMPORAL_AGENT_WORKFLOW_ENABLED=true` (F4.B infra, commit `a4d009e`) | aiAgent / chatAgent / 12 specialized agents / 2 team leads become Temporal child workflows. LLM step = activity. Tool calls = per-type activities. `deep_agent` / `rlm_agent` / `claude_code_agent` keep single-activity execution (externalised loops). |
+
 - **Per-node retry** - Failed nodes retry independently (up to 3 attempts)
 - **Per-node timeout** - Long AI nodes don't block short nodes (10 min default)
 - **Horizontal scaling** - Activities distributed across worker pool
-- **Connection pooling** - Shared aiohttp session for WebSocket execution
-- **Activity heartbeats** - `activity.heartbeat()` fires on every non-matching WebSocket broadcast inside the read loop (`services/temporal/activities.py`), keeping long-running DeepAgent/browser operations alive. Without this, the 2-min `heartbeat_timeout` would kill activities that normally run 5-10 minutes. Connection config: `heartbeat=30`, `receive_timeout=540`.
+- **Activity heartbeats** - Legacy path: `activity.heartbeat()` on every non-matching WebSocket broadcast in the read loop (`services/temporal/activities.py`). Per-type path: heartbeats at pipeline-stage boundaries inside `BaseNode.as_activity()`. Both keep long-running DeepAgent/browser operations alive past the 2-min `heartbeat_timeout`.
 
 **Configuration** (`.env`):
 ```env
 TEMPORAL_SERVER_ADDRESS=localhost:7233
 TEMPORAL_NAMESPACE=default
 TEMPORAL_TASK_QUEUE=machina-tasks
+TEMPORAL_PER_TYPE_DISPATCH=false        # F4.A flag (default off)
+TEMPORAL_AGENT_WORKFLOW_ENABLED=false   # F4.B flag (default off)
 ```
 
 **Temporal Server** (`temporal-server` global CLI):
@@ -1697,11 +1735,15 @@ python -m services.temporal.worker
 - Android service nodes and skill nodes filtered by type
 
 **Key Files**:
-- `services/temporal/workflow.py` - MachinaWorkflow orchestrator (FIRST_COMPLETED pattern)
-- `services/temporal/activities.py` - Class-based activities with aiohttp pooling + per-message heartbeats in WebSocket read loop
-- `services/temporal/worker.py` - TemporalWorkerManager + `run_standalone_worker()`
+- `services/temporal/workflow.py` - MachinaWorkflow orchestrator (FIRST_COMPLETED pattern, `_resolve_activity` dispatch)
+- `services/temporal/activities.py` - Legacy `execute_node_activity` (WebSocket round-trip path)
+- `services/temporal/plugin_activities.py` - `collect_plugin_activities` → per-type activities for F4.A
+- `services/temporal/agent_workflow.py` - `AgentWorkflow` child workflow for F4.B agent loops
+- `services/temporal/agent_activities.py` - F4.B activities: `agent.execute_llm_step.v1`, `agent.persist_turn.v1`, `agent.compact_memory.v1`
+- `services/temporal/worker.py` - TemporalWorkerManager (registers MachinaWorkflow + AgentWorkflow + activities) + `run_standalone_worker()` + `TemporalWorkerPool` (multi-queue, future enhancement)
 - `services/temporal/executor.py` - TemporalExecutor interface matching WorkflowExecutor
 - `services/temporal/client.py` - Client wrapper with runtime heartbeat disabled
+- `services/plugin/base.py::BaseNode.as_activity()` - Per-type activity body for F4.A (mirrors the legacy pipeline)
 
 **Runtime Configuration**: Worker heartbeating is disabled via `Runtime(worker_heartbeat_interval=None)` to avoid warnings on older Temporal server versions.
 
@@ -2360,7 +2402,7 @@ const createNodeTypes = () => {
 };
 ```
 
-The dispatch keys off `spec.componentKind` (a backend-declared string), never `spec.type`. Specialized agent visuals (icon, color, handles, subtitle, width, height) all come from the spec. Icons + colours live in [`server/nodes/visuals.json`](./server/nodes/visuals.json) — not in the frontend component.
+The dispatch keys off `spec.componentKind` (a backend-declared string), never `spec.type`. Specialized agent visuals (icon, color, handles, subtitle, width, height) all come from the spec. Icons live as `icon.svg` in the plugin folder (served via `/api/schemas/nodes/<type>/icon`); colors live as `meta.json` in the plugin folder (post-F2). [`server/nodes/visuals.json`](./server/nodes/visuals.json) is the fallback registry for emoji / `lobehub:<brand>` icons + the skill reverse-map.
 
 ### AI Agent vs Zeenie
 
@@ -2484,7 +2526,7 @@ Child broadcasts its own status updates (executing, success, error)
 
 ### Specialized AI Agents
 
-The system ships specialized agent variants — each is a folder under [`server/nodes/agent/`](./server/nodes/agent/) with `__init__.py` declaring a `SpecializedAgentBase` subclass. Authoritative list: glob that folder. Per-type display name / subtitle / description live on the plugin class; icon + colour live in [`server/nodes/visuals.json`](./server/nodes/visuals.json). Do not maintain a hand-list of agent types in this doc — it drifts on every plugin add.
+The system ships specialized agent variants — each is a folder under [`server/nodes/agent/`](./server/nodes/agent/) with `__init__.py` declaring a `SpecializedAgentBase` subclass. Authoritative list: glob that folder. Per-type display name / subtitle / description live on the plugin class; icon comes from `<plugin>/icon.svg` (or visuals.json emoji fallback); color comes from `<plugin>/meta.json` (post-F2). Do not maintain a hand-list of agent types in this doc — it drifts on every plugin add.
 
 Standard handle topology (declared on `SpecializedAgentBase` via `std_agent_handles()`):
 - **Left**: `input-main` (Input, 30%), `input-memory` (Memory, 55%), `input-task` (Task, 85%)
@@ -3885,7 +3927,7 @@ class MyTool(ToolNode):              # or SpecializedAgentBase for an agent
     async def run(self, ctx, params): ...
 ```
 
-`BaseNode.__init_subclass__` registers the class into `NODE_METADATA`, `_DIRECT_MODELS`, `NODE_OUTPUT_SCHEMAS`, `_HANDLER_REGISTRY`, and `_NODE_CLASS_REGISTRY` on import. NodeSpec emits at `GET /api/schemas/nodes/<type>/spec.json`. The frontend auto-discovers via `useNodeSpec` + `componentKind` dispatch (see "Spec-driven component design" above). Icon + colour go in [`server/nodes/visuals.json`](./server/nodes/visuals.json).
+`BaseNode.__init_subclass__` registers the class into `_NODE_CLASS_REGISTRY` (first), then into `NODE_METADATA`, `_DIRECT_MODELS`, `NODE_OUTPUT_SCHEMAS`, and `_HANDLER_REGISTRY` on import. The class-registry-first order matters: `_metadata_dict` calls `get_plugin_icon_path(cls.type)` which goes through `get_node_class()`. NodeSpec emits at `GET /api/schemas/nodes/<type>/spec.json`. The frontend auto-discovers via `useNodeSpec` + `componentKind` dispatch (see "Spec-driven component design" above). Icon goes in `<plugin>/icon.svg` (or `visuals.json` for emoji / library brand); color goes in `<plugin>/meta.json` (or `visuals.json` legacy fallback).
 
 **Cross-cutting edits that are still required (small):**
 - New specialized agent: add the agent's `type` string to the delegation-check tuple in [`server/services/handlers/tools.py:execute_tool()`](./server/services/handlers/tools.py) (~line 224) so the parent agent's `delegate_to_*` tool finds it. Also update `AI_AGENT_TYPES` frozenset in [`server/constants.py`](./server/constants.py) — used for legacy delegation checks. Both are flagged as tech debt; see "remaining tribal arrays" note.
