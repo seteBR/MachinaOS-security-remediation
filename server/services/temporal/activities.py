@@ -316,3 +316,59 @@ async def create_shared_session(pool_size: int = 100) -> aiohttp.ClientSession:
     )
     logger.info(f"Created shared session with pool_size={pool_size}")
     return session
+
+
+# ---------------------------------------------------------------------------
+# Wave 12 A8: emit_event_activity
+#
+# Thin Temporal-activity wrapper around ``services.events.dispatch.emit``.
+# Used by ``PollingTriggerWorkflow`` (Phase C2) when a poll cycle produces
+# new items — the workflow can't directly do I/O (the dispatch helper
+# uses asyncio + a network round-trip to Temporal Visibility), so it
+# offloads to this activity.
+#
+# Activity scheduling timeouts (``start_to_close_timeout``, retry policy,
+# heartbeat) are set by the CALLING workflow at scheduling time —
+# ``workflow.execute_activity(emit_event_activity, ...,
+# start_to_close_timeout=timedelta(seconds=2))``. Defaults are not
+# hardcoded here.
+
+@activity.defn
+async def emit_event_activity(event_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Re-enter :func:`services.events.dispatch.emit` from a workflow context.
+
+    Args:
+        event_payload: The serialised :class:`WorkflowEvent` (output of
+            ``event.model_dump(mode="json")``). The activity reconstructs
+            the envelope and routes it through the dispatch helper.
+
+    Returns:
+        Status dict:
+            {
+              "delivered": True | False,    # whether dispatch completed
+              "event_id": str,
+              "event_type": str,
+            }
+    """
+    from services.events.envelope import WorkflowEvent
+    from services.events.dispatch import emit
+
+    try:
+        event = WorkflowEvent.model_validate(event_payload)
+    except Exception as exc:  # noqa: BLE001
+        activity.logger.warning(
+            f"emit_event_activity: envelope rejected: {exc}"
+        )
+        return {
+            "delivered": False,
+            "event_id": event_payload.get("id", "?"),
+            "event_type": event_payload.get("type", "?"),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    await emit(event)
+    return {
+        "delivered": True,
+        "event_id": event.id,
+        "event_type": event.type,
+    }

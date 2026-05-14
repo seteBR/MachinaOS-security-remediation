@@ -69,6 +69,67 @@ class Settings(BaseSettings):
     temporal_agent_workflow_enabled: bool = Field(
         default=False, env="TEMPORAL_AGENT_WORKFLOW_ENABLED",
     )
+    # Wave 12 A3: SIGTERM grace window for Temporal workers. Activities
+    # mid-flight finish (or hand back to the server for retry) instead of
+    # being killed mid-call. Default 30s matches the polling-trigger
+    # heartbeat interval — a worker drain completes within one polling
+    # cycle. Tune via env when SIGTERM-to-restart latency matters.
+    temporal_graceful_shutdown_seconds: int = Field(
+        default=30, env="TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS", ge=1,
+    )
+    # Wave 12 A6: feature flag for the Temporal-native event dispatch
+    # path (services/events/dispatch.py:emit). Default off in Phase A
+    # so the new dispatch + Signal-based consumer fan-out activates only
+    # for opt-in dogfooding before Phase B migrates plugin callsites.
+    # Phase A acceptance criterion is enabling this flag on a single
+    # canary callsite (e.g. whatsappReceive).
+    event_framework_enabled: bool = Field(
+        default=False, env="EVENT_FRAMEWORK_ENABLED",
+    )
+
+    # Persistence backend for the supervised Temporal cluster.
+    # 'sqlite' (dev default) — single ServiceSpec runs `temporal api`.
+    # 'postgres' (prod)     — pgserver + temporal-server binary with
+    #                          YAML config managed by services/temporal/.
+    temporal_backend: Literal["sqlite", "postgres"] = Field(
+        default="sqlite", env="TEMPORAL_BACKEND",
+    )
+    # Internal Temporal service gRPC ports — exposed for the YAML config
+    # renderer and the runtime's readiness probe. Defaults match the
+    # ports Temporal documents at https://docs.temporal.io/references/configuration
+    temporal_frontend_grpc_port: int = Field(
+        default=7233, env="TEMPORAL_FRONTEND_GRPC_PORT", ge=1024, le=65535,
+    )
+    temporal_matching_grpc_port: int = Field(
+        default=7235, env="TEMPORAL_MATCHING_GRPC_PORT", ge=1024, le=65535,
+    )
+    temporal_history_grpc_port: int = Field(
+        default=7234, env="TEMPORAL_HISTORY_GRPC_PORT", ge=1024, le=65535,
+    )
+    temporal_worker_grpc_port: int = Field(
+        default=7239, env="TEMPORAL_WORKER_GRPC_PORT", ge=1024, le=65535,
+    )
+    temporal_bind_local_only: bool = Field(
+        default=True, env="TEMPORAL_BIND_LOCAL_ONLY",
+    )
+    temporal_num_history_shards: int = Field(
+        default=4, env="TEMPORAL_NUM_HISTORY_SHARDS", ge=1, le=4096,
+    )
+    temporal_default_max_conns: int = Field(
+        default=20, env="TEMPORAL_DEFAULT_MAX_CONNS", ge=1, le=500,
+    )
+    temporal_visibility_max_conns: int = Field(
+        default=4, env="TEMPORAL_VISIBILITY_MAX_CONNS", ge=1, le=500,
+    )
+    temporal_max_conn_lifetime: str = Field(
+        default="1h", env="TEMPORAL_MAX_CONN_LIFETIME",
+    )
+    temporal_binary_version: str = Field(
+        default="1.31.0", env="TEMPORAL_BINARY_VERSION",
+    )
+    temporal_postgres_dsn: Optional[str] = Field(
+        default=None, env="TEMPORAL_POSTGRES_DSN",
+    )
 
     # API Keys (all optional, injected at runtime)
     google_maps_api_key: Optional[str] = Field(default=None, env="GOOGLE_MAPS_API_KEY")

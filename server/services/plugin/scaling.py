@@ -51,6 +51,13 @@ class RetryPolicy:
         "ValidationError",
         "PermissionDeniedError",
         "InvalidParametersError",
+        # Wave 12 A2: NodeUserError is the canonical "user-correctable
+        # failure" exception (missing input, missing credential, API
+        # rejected the payload). Retrying it just burns attempts since
+        # the underlying input won't fix itself. Plugins that raise
+        # NodeUserError fail fast; the framework surfaces the message
+        # to the user / agent loop without traceback noise.
+        "NodeUserError",
     ))
 
     def to_temporal(self):

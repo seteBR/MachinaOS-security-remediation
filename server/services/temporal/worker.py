@@ -16,6 +16,7 @@ References:
 """
 
 import asyncio
+from datetime import timedelta
 from typing import Optional
 
 import aiohttp
@@ -33,6 +34,18 @@ from .activities import (
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+
+def _graceful_shutdown_timeout() -> timedelta:
+    """Wave 12 A3: SIGTERM grace window for Temporal workers.
+
+    Read from ``Settings.temporal_graceful_shutdown_seconds`` at the
+    moment each Worker is instantiated (rather than module load) so
+    test fixtures + env reloads pick up overrides.
+    """
+    from core.config import Settings
+
+    return timedelta(seconds=Settings().temporal_graceful_shutdown_seconds)
 
 
 def create_runtime() -> Runtime:
@@ -136,6 +149,7 @@ class TemporalWorkerManager:
                 # Allow concurrent activity execution for parallel branches
                 max_concurrent_activities=self.pool_size,
                 max_concurrent_workflow_tasks=10,
+                graceful_shutdown_timeout=_graceful_shutdown_timeout(),
             )
             logger.info(
                 "Registered Temporal activities",
@@ -273,6 +287,7 @@ class TemporalWorkerPool:
                 activities=activities,
                 max_concurrent_activities=concurrency,
                 max_concurrent_workflow_tasks=10,
+                graceful_shutdown_timeout=_graceful_shutdown_timeout(),
             )
             task = asyncio.create_task(worker.run(), name=f"worker-{queue}")
             self._workers.append(worker)
@@ -356,6 +371,7 @@ async def run_standalone_worker(
             activities=[activities.execute_node_activity],  # Pass bound method
             max_concurrent_activities=pool_size,
             max_concurrent_workflow_tasks=10,
+            graceful_shutdown_timeout=_graceful_shutdown_timeout(),
         )
 
         logger.info("Worker running. Press Ctrl+C to stop.")
@@ -394,6 +410,7 @@ async def create_worker(
         activities=[activities.execute_node_activity],  # Pass bound method
         max_concurrent_activities=100,
         max_concurrent_workflow_tasks=10,
+        graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN_TIMEOUT,
     )
 
 

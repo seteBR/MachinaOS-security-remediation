@@ -71,6 +71,20 @@ class TemporalClientWrapper:
                 self._client = client
                 print(f"[Temporal] Connected to {self.server_address}", flush=True)
                 logger.info("Connected to Temporal server")
+                # Wave 12 A4: idempotently register the event-framework
+                # Search Attributes. Failure here is non-fatal — the
+                # framework still works without them, dispatch.emit just
+                # falls back to broadcast-only routing instead of
+                # signalling consumers.
+                try:
+                    from services.temporal.search_attributes import (
+                        register_search_attributes,
+                    )
+                    await register_search_attributes(self._client, self.namespace)
+                except Exception as sa_exc:  # noqa: BLE001 — non-fatal
+                    logger.warning(
+                        f"Search-attribute registration failed (non-fatal): {sa_exc}"
+                    )
                 return self._client
             except Exception as e:
                 print(f"[Temporal] Connection attempt {attempt}/{retries} failed: {e}", flush=True)

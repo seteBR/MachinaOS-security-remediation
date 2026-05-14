@@ -79,7 +79,74 @@ class MachinaWorkflow:
     - Per-node retry policies
     - Config node filtering (tools, memory, services)
     - Multi-tenant support via tenant_id in context
+    - Wave 12 A7: event-framework signal handler — receives Temporal
+      Signals from ``services/events/dispatch.py:emit`` and parks
+      pending events in ``_matched_events`` for trigger nodes to
+      consume via ``workflow.wait_condition(_has_event_matching, ...)``.
+      Per-run dedup via ``_seen_event_ids`` (reconstructed
+      deterministically from Event History on replay).
     """
+
+    def __init__(self) -> None:
+        # Wave 12 A7: per-run event-framework state. Populated by the
+        # ``on_event`` signal handler; consumed by Phase C1's
+        # ``wait_condition`` predicate in the trigger-waiter rewrite.
+        # Today these stay empty unless the event-framework feature
+        # flag is on AND a producer signals this workflow.
+        self._seen_event_ids: Set[str] = set()
+        self._matched_events: List[Dict[str, Any]] = []
+
+    @workflow.signal
+    async def on_event(self, event_payload: Dict[str, Any]) -> None:
+        """Wave 12 A7: receive an event from ``services.events.dispatch.emit``.
+
+        Drops duplicates by ``event.id`` (per-run dedup — the set is
+        reconstructed deterministically from Event History on replay).
+        Matching events are queued for the workflow body to consume via
+        :meth:`_has_event_matching` in a ``wait_condition`` (wired in
+        Phase C1).
+        """
+        event_id = event_payload.get("id")
+        if not event_id:
+            workflow.logger.warning(
+                "on_event: skipping malformed envelope without 'id'"
+            )
+            return
+        if event_id in self._seen_event_ids:
+            workflow.logger.debug(
+                f"on_event: dedup hit for event.id={event_id}"
+            )
+            return
+        self._seen_event_ids.add(event_id)
+        self._matched_events.append(event_payload)
+        workflow.logger.info(
+            f"on_event: queued event.id={event_id} "
+            f"type={event_payload.get('type', '?')} "
+            f"(matched={len(self._matched_events)})"
+        )
+
+    def _has_event_matching(self, predicate=None) -> bool:
+        """Wave 12 A7: ``wait_condition`` predicate for trigger nodes.
+
+        Returns True when at least one queued event matches the optional
+        ``predicate(event_payload) -> bool``. Defaults to "any event
+        queued" — most trigger nodes filter further by inspecting the
+        envelope after pop.
+
+        Used by Phase C1's trigger-waiter rewrite to replace the
+        in-process ``asyncio.Future`` waiter:
+
+            await workflow.wait_condition(
+                lambda: self._has_event_matching(my_filter),
+                timeout=...,
+            )
+            event = self._pop_matching_event(my_filter)
+        """
+        if not self._matched_events:
+            return False
+        if predicate is None:
+            return True
+        return any(predicate(e) for e in self._matched_events)
 
     @workflow.run
     async def run(self, workflow_data: Dict[str, Any]) -> Dict[str, Any]:

@@ -130,6 +130,70 @@ class TestScalingKnobs:
             )
 
 
+class TestStartToCloseTimeoutOverridesAreCommented:
+    """Wave 12 — A1: any plugin that overrides ``start_to_close_timeout``
+    away from its kind-base default must carry an inline comment in the
+    class body explaining why.
+
+    Today every plugin inherits the kind-base default (``ActionNode``=10m,
+    ``TriggerNode``=24h, ``ToolNode``=10m). The kind-defaults are the
+    declared intent at the kind-base level; per-plugin overrides are the
+    exception, not the norm. When an override does ship, the comment
+    forces the author to justify the deviation (and gives the next reader
+    the reason without git-blame archaeology).
+
+    Why introspect with ``inspect.getsource`` rather than just check
+    equality against the kind-default: equality alone can't catch the
+    case where a future plugin author copies the literal kind-default
+    value into their class body (silently restating intent — still
+    needs a comment so reviewers know the override is deliberate).
+    """
+
+    _OVERRIDE_PATTERN = "start_to_close_timeout"
+
+    def test_overrides_have_inline_comment(self):
+        import inspect
+
+        for cls in _all_plugin_classes():
+            # Only flag plugins that LITERALLY set the attribute in their
+            # own class body (not inherited from kind-base). The class-dict
+            # check is the cheapest signal — if it's not in __dict__, it's
+            # inherited and there's nothing to comment.
+            if self._OVERRIDE_PATTERN not in cls.__dict__:
+                continue
+            try:
+                src = inspect.getsource(cls)
+            except (OSError, TypeError):
+                # Skip if source unavailable (e.g. dynamically-created class
+                # in a test fixture).
+                continue
+            # Find the override line and check the same-line comment OR the
+            # immediately-preceding line is a comment.
+            lines = src.splitlines()
+            override_idx = None
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith(self._OVERRIDE_PATTERN) and "=" in stripped:
+                    override_idx = i
+                    break
+            if override_idx is None:
+                # Defensive: __dict__ said it's there but source parsing
+                # missed it (e.g. multi-line attribute assignment). Skip
+                # rather than false-positive.
+                continue
+            override_line = lines[override_idx]
+            has_inline_comment = "#" in override_line.split("=", 1)[1]
+            has_preceding_comment = (
+                override_idx > 0 and lines[override_idx - 1].strip().startswith("#")
+            )
+            assert has_inline_comment or has_preceding_comment, (
+                f"{cls.__qualname__} overrides start_to_close_timeout away "
+                f"from the kind-base default but has no explanatory comment. "
+                f"Add a comment on the same line or directly above explaining "
+                f"why this plugin needs a non-default timeout."
+            )
+
+
 class TestToolSchemaGeneration:
     """ToolNode.Params must produce LLM-compatible JSON schema."""
 

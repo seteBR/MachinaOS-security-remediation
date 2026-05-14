@@ -1,0 +1,146 @@
+# Event Framework (Wave 12)
+
+Temporal-native event-routing layer for MachinaOs. Implements RFC sections
+6.3 (Temporal worker contract) + 6.4 (CloudEvents broadcast contract) from
+[plugin_authoring_rfc.md](./plugin_authoring_rfc.md).
+
+This doc is the operator + plugin-author reference. The design rationale +
+phase plan lives in `~/.claude/plans/properly-fix-the-tech-dreamy-tarjan.md`.
+
+## What this framework does
+
+Every inbound event (HTTP webhook, Telegram message, Gmail poll result,
+task completion, …) becomes a Temporal Signal delivered to whichever
+running workflows are waiting on that event type. Routing happens via
+the Temporal Visibility API — workflows tag themselves with custom
+Search Attributes at start, and the dispatch helper queries
+`ListWorkflows(query="EventType='X' AND ExecutionStatus='Running'")`
+to find consumers.
+
+Why Temporal: durability, replay safety, server-side dedup
+(`WorkflowIDReusePolicy`), and zero custom infrastructure. The framework
+adds ~300 LOC on top of Temporal primitives rather than reinventing an
+EventBus + event_log + DLQ table.
+
+## Architecture
+
+```
+Inbound source (FastAPI process)
+       ↓
+services/events/dispatch.py:emit(event: WorkflowEvent)
+       ├─→ Temporal Visibility query: workflows where EventType=event.type
+       ├─→ Signal each matching workflow
+       └─→ status_broadcaster.broadcast() — direct in-process WS fan-out
+```
+
+Worker is embedded in the FastAPI process (`main.py:211-292`
+`TemporalWorkerManager.start()` runs as `asyncio.create_task()`). Activities
+and the WebSocket connection pool share memory + event loop, so the fan-out
+to FE clients is a direct in-process call — no Redis Streams hop required.
+
+## Search Attributes setup
+
+The framework requires 6 custom Search Attributes on the Temporal
+namespace. Registration is **idempotent + automatic on Temporal client
+connect** (`services/temporal/client.py:TemporalClientWrapper.connect`):
+
+| Attribute | Type | Used for |
+|---|---|---|
+| `EventType` | KEYWORD | Visibility query — find consumers by CloudEvents type |
+| `EventSource` | KEYWORD | Routing when same type arrives from multiple sources |
+| `EventWorkflowId` | KEYWORD | Scope events to a MachinaOs workflow_id |
+| `TriggerNodeId` | KEYWORD | Per-trigger event-history queries |
+| `EventTriggerKind` | KEYWORD | Coarse classification (webhook / polling / …) |
+| `EventReceivedAt` | DATETIME | Time-range queries |
+
+Declarations live in
+[`services/temporal/search_attributes.py:EVENT_SEARCH_ATTRIBUTES`](../server/services/temporal/search_attributes.py).
+Single source of truth — add an entry to that list and registration
+picks it up next connect.
+
+### Manual registration (if needed)
+
+If the auto-registration on connect fails (e.g. permissions on a managed
+Temporal Cloud namespace), register manually via the Temporal CLI:
+
+```bash
+temporal operator search-attribute create \
+  --namespace default \
+  --name EventType \
+  --type Keyword
+# ... repeat for the other 5 attributes
+```
+
+### Verification
+
+```bash
+temporal operator search-attribute list --namespace default
+```
+
+Should show the 6 framework attributes alongside Temporal's built-in
+default attributes (`WorkflowType`, `WorkflowId`, `ExecutionStatus`, …).
+
+## Temporal contract for plugin authors
+
+| Class attribute | Purpose | Default |
+|---|---|---|
+| `start_to_close_timeout` | Per-attempt budget (one activity execution) | Kind-base default: ActionNode=10m, TriggerNode=24h, ToolNode=10m |
+| `retry_policy: RetryPolicy` | Backoff + max attempts + non-retryable error types | `DEFAULT_RETRY` — 3 attempts, 1-60s exponential. `NodeUserError` is auto-non-retryable. |
+| `heartbeat_timeout` | Max idle between `activity.heartbeat()` calls | 2 minutes |
+| `task_queue` | Worker pool routing | `TaskQueue.DEFAULT` |
+
+Override only when the kind-base default doesn't fit; an inline comment
+explaining why is required (enforced by
+`tests/test_plugin_contract.py::TestStartToCloseTimeoutOverridesAreCommented`).
+
+### Worker graceful shutdown
+
+Workers honor SIGTERM with a configurable grace window
+(`Settings.temporal_graceful_shutdown_seconds`, default 30s, override via
+env `TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS`). Activities mid-flight finish
+or hand back to the server for retry instead of being killed mid-call.
+
+## CloudEvents envelope
+
+Every server→FE broadcast wraps `WorkflowEvent` (CloudEvents v1.0;
+`services/events/envelope.py`). Spec-compliant ID, source, type, time,
+plus MachinaOs extension attributes (`workflow_id`, `trigger_node_id`,
+`correlation_id` — kept in snake_case per the documented internal-naming
+rationale at `envelope.py:4-12`).
+
+Wire shape: `{"type": "<legacy_wire_key>", "data": <WorkflowEvent JSON>}`.
+The outer `type` is what FE switches on; the inner envelope is what
+parses for spec-compliant routing + dataschema lookup.
+
+### Plugin-owned event factories
+
+Plugin-specific events (e.g. `com.machinaos.telegram.message.received`)
+live in `nodes/<plugin>/_events.py`. Cross-cutting factories
+(`credential`, `oauth_completed`, `agent_progress`, `task_completed`,
+`workflow_lifecycle`, `deployment_snapshot`, `team_event`,
+`node_parameters_updated`) stay in `services/events/envelope.py`.
+
+See RFC §6.4 for the classification rule + the canonical
+`telegram/_events.py` example.
+
+## Verification
+
+Each Phase-A milestone has a verification command:
+
+| Phase | Check |
+|---|---|
+| A1 | `pytest tests/test_plugin_contract.py::TestStartToCloseTimeoutOverridesAreCommented` |
+| A2 | `python -c "from services.plugin.scaling import RetryPolicy; assert 'NodeUserError' in RetryPolicy().non_retryable_error_types"` |
+| A3 | `python -c "from core.config import Settings; print(Settings().temporal_graceful_shutdown_seconds)"` |
+| A4 | After Temporal connect: `temporal operator search-attribute list \| grep -E 'EventType\|EventSource\|EventWorkflowId\|TriggerNodeId\|EventTriggerKind\|EventReceivedAt'` — all 6 lines |
+
+Full test surface lands in Phase A9. Phase B (plugin `_events.py`
+modules) + Phase C (Temporal trigger-waiter migration) + Phase D
+(admin handlers + DLQ) build on this foundation.
+
+## References
+
+- Plan: `~/.claude/plans/properly-fix-the-tech-dreamy-tarjan.md`
+- RFC: [`plugin_authoring_rfc.md`](./plugin_authoring_rfc.md)
+- Temporal: [Search Attributes](https://docs.temporal.io/search-attribute) · [Signals](https://docs.temporal.io/develop/python/message-passing) · [Schedules](https://docs.temporal.io/develop/python/schedules) · [Retry Policies](https://docs.temporal.io/encyclopedia/retry-policies)
+- CloudEvents: [v1.0 spec](https://github.com/cloudevents/spec/blob/main/cloudevents/spec.md)
