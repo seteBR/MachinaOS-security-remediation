@@ -37,27 +37,27 @@ async def refresh_android_status(broadcaster: "StatusBroadcaster") -> None:
 
 
 async def _auto_reconnect_body(broadcaster: "StatusBroadcaster", span) -> None:
+    # Single source of truth for android status emission — owns both
+    # the cache update + the dual-emit (legacy raw + typed sibling).
+    from ._events import broadcast_android_status
+
     try:
         # Already connected? Refresh the cached snapshot and stop.
         from ._relay.manager import get_current_relay_client
 
         existing = get_current_relay_client()
         if existing and existing.is_connected():
-            broadcaster._status["android"] = {
-                "connected": True,
-                "paired": existing.is_paired(),
-                "device_id": existing.paired_device_id,
-                "device_name": existing.paired_device_name,
-                "connected_devices": list(existing.get_connected_devices()),
-                "connection_type": "relay",
-                "qr_data": existing.qr_data,
-                "session_token": existing.session_token,
-            }
+            await broadcast_android_status(
+                connected=True,
+                paired=existing.is_paired(),
+                device_id=existing.paired_device_id,
+                device_name=existing.paired_device_name,
+                connected_devices=list(existing.get_connected_devices()),
+                connection_type="relay",
+                qr_data=existing.qr_data,
+                session_token=existing.session_token,
+            )
             logger.debug("[StatusBroadcaster] Android relay already connected")
-            await broadcaster.broadcast({
-                "type": "android_status",
-                "data": broadcaster._status["android"],
-            })
             span.set_attribute("path", "already_connected")
             return
 
@@ -98,20 +98,16 @@ async def _auto_reconnect_body(broadcaster: "StatusBroadcaster", span) -> None:
             # The relay server creates a new session on each connect, so
             # pairing may be lost -- mirror whatever the new client
             # reports.
-            broadcaster._status["android"] = {
-                "connected": True,
-                "paired": client.is_paired(),
-                "device_id": client.paired_device_id,
-                "device_name": client.paired_device_name,
-                "connected_devices": list(client.get_connected_devices()),
-                "connection_type": "relay",
-                "qr_data": client.qr_data,
-                "session_token": client.session_token,
-            }
-            await broadcaster.broadcast({
-                "type": "android_status",
-                "data": broadcaster._status["android"],
-            })
+            await broadcast_android_status(
+                connected=True,
+                paired=client.is_paired(),
+                device_id=client.paired_device_id,
+                device_name=client.paired_device_name,
+                connected_devices=list(client.get_connected_devices()),
+                connection_type="relay",
+                qr_data=client.qr_data,
+                session_token=client.session_token,
+            )
             span.set_attribute("reconnect_ok", True)
         else:
             span.set_attribute("reconnect_ok", False)

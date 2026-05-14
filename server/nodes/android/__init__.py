@@ -17,6 +17,7 @@ from services.ws_handler_registry import (
 )
 
 from . import _router
+from ._events import broadcast_android_status  # noqa: F401 — re-export
 from ._handlers import WS_HANDLERS
 from ._option_loaders import load_service_actions
 from ._refresh import refresh_android_status

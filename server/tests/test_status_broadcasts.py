@@ -77,7 +77,8 @@ _TELEMETRY_CARVE_OUT: FrozenSet[str] = frozenset({
 # envelope is a frontend change too. Migration is per-plugin, not
 # included in milestone U scope.
 _LEGACY_RAW_DICT_BROADCASTS: FrozenSet[str] = frozenset({
-    "update_android_status",   # FE: AndroidStatusPanel reads `android_status` wire-frame
+    # Wave 12 B1: ``update_android_status`` retired; moved to
+    # ``nodes/android/_events.py:broadcast_android_status``.
     "update_whatsapp_status",  # FE: WhatsAppStatusPanel reads `whatsapp_status` wire-frame
     "update_telegram_status",  # FE: TelegramStatusPanel reads `telegram_status` wire-frame
 })

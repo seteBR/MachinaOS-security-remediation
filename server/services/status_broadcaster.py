@@ -578,44 +578,13 @@ class StatusBroadcaster:
             "data": event.model_dump(mode="json"),
         })
 
-    async def update_android_status(
-        self,
-        connected: bool,
-        paired: bool = False,
-        device_id: Optional[str] = None,
-        device_name: Optional[str] = None,
-        connected_devices: Optional[List[str]] = None,
-        connection_type: Optional[str] = None,
-        qr_data: Optional[str] = None,
-        session_token: Optional[str] = None
-    ):
-        """Update Android relay connection status and broadcast.
-
-        Emits both the legacy ``android_status`` raw frame (FE
-        back-compat) and a CloudEvents-typed sibling via
-        :meth:`_emit_connection_typed` (Wave 11.I, X4).
-        """
-        self._status["android"] = {
-            "connected": connected,
-            "paired": paired,
-            "device_id": device_id,
-            "device_name": device_name,
-            "connected_devices": connected_devices or [],
-            "connection_type": connection_type,
-            "qr_data": qr_data,
-            "session_token": session_token
-        }
-
-        await self.broadcast({
-            "type": "android_status",
-            "data": self._status["android"]
-        })
-        await self._emit_connection_typed(
-            plugin="android",
-            connected=connected,
-            subject=device_id,
-            data=self._status["android"],
-        )
+    # Wave 12 B1: ``update_android_status`` MOVED to
+    # ``nodes/android/_events.py:broadcast_android_status``. Plugin
+    # owns its broadcast shape + the dual-emit (legacy raw +
+    # typed CloudEvents sibling). Status cache still lives in
+    # ``self._status["android"]`` — the plugin's wrapper mutates it
+    # so ``get_android_status()`` + the WS-connect initial-status
+    # snapshot keep working unchanged.
 
     # =========================================================================
     # Status updates -- per-service refresh bodies live in their plugin
