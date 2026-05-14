@@ -331,21 +331,44 @@ const DashboardContent: React.FC = () => {
   // requestAnimationFrame on resume defers the unpause until after the
   // first input is ready to dispatch (one frame's delay, imperceptible).
   useEffect(() => {
-    const handleVisibility = () => {
-      const root = document.documentElement;
-      if (document.hidden) {
+    const root = document.documentElement;
+    // Wave 33+: visibilitychange alone misses window-minimize on Windows
+    // and "switch app" on macOS — neither always fires the Page
+    // Visibility API event. window.blur / window.focus do fire in those
+    // cases, so we drive the same flag off both signals. The flag
+    // toggles based on whichever signal indicates "not interactive":
+    // either the tab is hidden OR the window has lost focus.
+    let blurred = false;
+    const setHidden = (hidden: boolean) => {
+      if (hidden) {
         root.setAttribute('data-page-hidden', '');
       } else {
-        // Defer unpause to the next frame so the browser has a chance
-        // to clear the input queue before animations resume their
-        // composite work.
+        // Double rAF so the browser has two frames to clear the input
+        // dispatch queue before composite resumes — first click after
+        // return is then guaranteed to land before paused-frame flush.
         requestAnimationFrame(() => {
-          root.removeAttribute('data-page-hidden');
+          requestAnimationFrame(() => {
+            // Only remove if the page is genuinely active again — a fast
+            // tab switch could fire blur+focus in tight succession and
+            // we'd otherwise race the second rAF.
+            if (!document.hidden && !blurred) {
+              root.removeAttribute('data-page-hidden');
+            }
+          });
         });
       }
     };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
+    const onVisibility = () => setHidden(document.hidden || blurred);
+    const onBlur = () => { blurred = true; setHidden(true); };
+    const onFocus = () => { blurred = false; setHidden(document.hidden); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   // Context menu state for node right-click
