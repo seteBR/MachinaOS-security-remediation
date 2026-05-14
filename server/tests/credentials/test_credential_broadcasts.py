@@ -218,3 +218,99 @@ class TestAuthServiceDbCanonicalInvariant:
             "refresh_token. Use get_oauth_refresh_token() helper that "
             "always reads from the encrypted DB."
         )
+
+
+class TestCredentialRuntimeFailureBroadcast:
+    """Runtime credential failures (workflow tries to use a credential that
+    isn't configured) must surface to connected clients via a CloudEvents
+    broadcast. Without this the user fixes the credential but the
+    Credentials modal keeps showing it as missing until they reconnect.
+
+    The broadcast site is ``BaseNode.execute``'s ``PermissionError`` branch.
+    ``Credential.resolve()`` annotates the exception with ``.provider`` and
+    ``.reason``; ``BaseNode`` reads them and emits
+    ``credential.{api_key|oauth}.runtime_failed``.
+    """
+
+    def test_credential_resolvers_annotate_permission_error(self):
+        """Both resolvers must attach ``.provider`` so BaseNode can
+        broadcast the catalogue refresh. Without these attributes,
+        runtime failures fall to the generic exception branch and
+        the user gets no UI feedback."""
+        from services.plugin import credential as cred_module
+
+        oauth_src = inspect.getsource(cred_module.OAuth2Credential.resolve)
+        apikey_src = inspect.getsource(cred_module.ApiKeyCredential.resolve)
+
+        for label, src in (("OAuth2Credential", oauth_src), ("ApiKeyCredential", apikey_src)):
+            assert "err.provider" in src, (
+                f"{label}.resolve must annotate PermissionError with .provider "
+                "so BaseNode.execute can surface the failing credential."
+            )
+            assert "err.reason" in src, (
+                f"{label}.resolve must annotate PermissionError with .reason "
+                "('missing' / 'expired' / 'invalid')."
+            )
+            assert "err.auth" in src, (
+                f"{label}.resolve must annotate PermissionError with .auth "
+                "('api_key' or 'oauth2') so BaseNode can build the correct "
+                "CloudEvents type (credential.{auth}.runtime_failed)."
+            )
+
+    def test_basenode_permission_branch_broadcasts(self):
+        """BaseNode.execute's PermissionError branch must call
+        broadcast_credential_event (CloudEvents path) so the wire emits
+        a credential.<auth>.runtime_failed event the frontend can route."""
+        from services.plugin import base as base_module
+
+        src = inspect.getsource(base_module.BaseNode.execute)
+        assert _BROADCAST_PATTERN.search(src), (
+            "BaseNode.execute must broadcast on PermissionError so missing "
+            "credentials surface to the Credentials modal. Reuses the "
+            "existing broadcast contract — same regex as mutation handlers."
+        )
+        # Type string convention: credential.<auth>.runtime_failed
+        assert "runtime_failed" in src, (
+            "BaseNode.execute should emit credential.<auth>.runtime_failed "
+            "(matches the credential.oauth.connected naming convention)."
+        )
+
+    def test_broadcast_credential_event_carries_workflow_id_and_extras(self):
+        """The broadcaster helper must accept arbitrary extra data fields
+        (used for runtime failure events: reason, node_id, error)."""
+        import asyncio
+
+        from services.status_broadcaster import StatusBroadcaster
+
+        broadcaster = StatusBroadcaster()
+        captured: list[dict] = []
+
+        async def fake_broadcast(payload):
+            captured.append(payload)
+
+        broadcaster.broadcast = fake_broadcast  # type: ignore[method-assign]
+
+        asyncio.get_event_loop().run_until_complete(
+            broadcaster.broadcast_credential_event(
+                event_type="credential.api_key.runtime_failed",
+                provider="telegram_bot_token",
+                workflow_id="wf-test",
+                reason="missing",
+                node_id="telegramSend-1",
+                error="No API key for 'telegram_bot_token'.",
+            )
+        )
+
+        assert len(captured) == 1
+        payload = captured[0]
+        assert payload["type"] == "credential_catalogue_updated"
+        envelope = payload["data"]
+        assert envelope["specversion"] == "1.0"
+        assert envelope["type"] == "credential.api_key.runtime_failed"
+        assert envelope["subject"] == "telegram_bot_token"
+        assert envelope["workflow_id"] == "wf-test"
+        data = envelope["data"]
+        assert data["provider"] == "telegram_bot_token"
+        assert data["reason"] == "missing"
+        assert data["node_id"] == "telegramSend-1"
+        assert "error" in data

@@ -57,6 +57,7 @@ import {
   generateWorkflowId
 } from './utils/workflow';
 import { importWorkflowFromFile } from './utils/workflowExport';
+import { CATALOGUE_QUERY_KEY, type CatalogueResponse } from './hooks/useCatalogueQuery';
 import { buildCanvasStyles } from './styles/canvasAnimations';
 
 import 'reactflow/dist/style.css';
@@ -803,6 +804,31 @@ const DashboardContent: React.FC = () => {
         if (!file) return;
 
         const importedWorkflow = await importWorkflowFromFile(file);
+
+        // Cross-reference the export's `requirements.credentials` against
+        // the catalogue's `provider.stored` flag. Warn the user about
+        // missing credentials before saving — they can import anyway and
+        // configure later, or cancel. Older exports without `requirements`
+        // skip this step transparently.
+        const reqCreds = importedWorkflow.requirements?.credentials ?? [];
+        if (reqCreds.length > 0) {
+          const catalogue = queryClient.getQueryData<CatalogueResponse>(CATALOGUE_QUERY_KEY);
+          const providers = catalogue?.providers ?? [];
+          const missing = reqCreds
+            .map(need => providers.find(p => p.id === need.provider_id))
+            .filter((p): p is NonNullable<typeof p> => !!p && p.stored !== true)
+            .map(p => `- ${p.name} (${p.id})`);
+          if (missing.length > 0) {
+            const proceed = window.confirm(
+              `This workflow needs ${missing.length} credential${missing.length === 1 ? '' : 's'} ` +
+                `that ${missing.length === 1 ? 'is' : 'are'} not configured:\n\n` +
+                `${missing.join('\n')}\n\n` +
+                `You can import it anyway and configure ${missing.length === 1 ? 'it' : 'them'} later. ` +
+                `Click OK to import, or Cancel to abort.`,
+            );
+            if (!proceed) return;
+          }
+        }
 
         // Check for name conflict with existing workflows
         const existingNames = savedWorkflows.map(w => w.name.toLowerCase());

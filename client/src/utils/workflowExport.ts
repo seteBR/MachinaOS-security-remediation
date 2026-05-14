@@ -9,6 +9,7 @@ import { Node } from 'reactflow';
 import { WorkflowData } from '../store/useAppStore';
 import { validateWorkflow, serializeWorkflow, deserializeWorkflow } from '../schemas/workflowSchema';
 import { sanitizeParameters } from './parameterSanitizer';
+import { getCachedNodeSpec } from '../lib/nodeSpec';
 // Injected by Vite define from root package.json (see vite.config.js)
 declare const __APP_VERSION__: string;
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
@@ -17,9 +18,51 @@ const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '
 // that belongs in the DB and should not leak into exported JSON files.
 export const UI_DATA_FIELDS = new Set(['label', 'disabled', 'condition']);
 
+/**
+ * Declarative manifest of what an exported workflow needs to run on the
+ * target instance. Populated from each node's cached NodeSpec at export time;
+ * read by the import flow to surface a "missing credentials / unknown
+ * plugin" prompt before the workflow is saved.
+ *
+ * - `credentials`: the set of credential provider IDs the workflow references
+ *   (from each `NodeSpec.credentials`). Carries IDs only — values are stripped
+ *   by `parameterSanitizer`.
+ * - `nodes`: the plugin types and versions the workflow was authored against.
+ *   Used informationally for drift detection; not enforced.
+ *
+ * Older exports without this field import cleanly — its presence is the
+ * discriminator (no `format_version` bump needed).
+ */
+export interface RequirementsManifest {
+  credentials: Array<{ provider_id: string }>;
+  nodes: Array<{ type: string; version: number }>;
+}
+
 /** Workflow data with optional embedded node parameters (from new-format exports). */
 export interface ImportedWorkflow extends WorkflowData {
   nodeParameters?: Record<string, Record<string, any>>;
+  requirements?: RequirementsManifest;
+}
+
+/**
+ * Build the per-export `requirements` manifest by walking each node's
+ * cached NodeSpec. Returns undefined if no metadata is available
+ * (cold-start before specs warm — rare).
+ */
+function buildRequirements(nodes: Node[]): RequirementsManifest | undefined {
+  const credSet = new Set<string>();
+  const nodeReqs: Array<{ type: string; version: number }> = [];
+  for (const n of nodes) {
+    const spec = getCachedNodeSpec(n.type ?? '');
+    if (!spec) continue;
+    nodeReqs.push({ type: spec.type, version: spec.version ?? 1 });
+    for (const credId of spec.credentials ?? []) credSet.add(credId);
+  }
+  if (credSet.size === 0 && nodeReqs.length === 0) return undefined;
+  return {
+    credentials: [...credSet].map(provider_id => ({ provider_id })),
+    nodes: nodeReqs,
+  };
 }
 
 /**
@@ -83,6 +126,11 @@ export function exportWorkflowToFile(
     workflowJSON.nodeParameters = exportParams;
   }
 
+  const requirements = buildRequirements(workflow.nodes);
+  if (requirements) {
+    workflowJSON.requirements = requirements;
+  }
+
   const jsonString = serializeWorkflow(workflowJSON);
   const blob = new Blob([jsonString], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -109,8 +157,11 @@ export function importWorkflowFromFile(file: File): Promise<ImportedWorkflow> {
         const jsonString = event.target?.result as string;
         const raw = JSON.parse(jsonString);
 
-        // Extract nodeParameters before standard deserialization
+        // Extract embedded nodeParameters + requirements manifest before
+        // standard deserialization. Both are optional — older exports
+        // without them import cleanly.
         const nodeParameters = raw.nodeParameters || undefined;
+        const requirements: RequirementsManifest | undefined = raw.requirements || undefined;
 
         const workflow = deserializeWorkflow(jsonString);
 
@@ -120,7 +171,7 @@ export function importWorkflowFromFile(file: File): Promise<ImportedWorkflow> {
           return;
         }
 
-        resolve({ ...workflow, nodeParameters });
+        resolve({ ...workflow, nodeParameters, requirements });
       } catch (error) {
         reject(error);
       }
@@ -161,6 +212,11 @@ export function exportWorkflowToJSON(
     workflowJSON.nodeParameters = exportParams;
   }
 
+  const requirements = buildRequirements(workflow.nodes);
+  if (requirements) {
+    workflowJSON.requirements = requirements;
+  }
+
   return serializeWorkflow(workflowJSON);
 }
 
@@ -171,6 +227,7 @@ export function exportWorkflowToJSON(
 export function importWorkflowFromJSON(jsonString: string): ImportedWorkflow {
   const raw = JSON.parse(jsonString);
   const nodeParameters = raw.nodeParameters || undefined;
+  const requirements: RequirementsManifest | undefined = raw.requirements || undefined;
 
   const workflow = deserializeWorkflow(jsonString);
 
@@ -179,7 +236,7 @@ export function importWorkflowFromJSON(jsonString: string): ImportedWorkflow {
     throw new Error(`Invalid workflow JSON: ${validation.errors.join(', ')}`);
   }
 
-  return { ...workflow, nodeParameters };
+  return { ...workflow, nodeParameters, requirements };
 }
 
 /**

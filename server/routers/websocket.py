@@ -790,6 +790,32 @@ async def handle_clear_node_output(data: Dict[str, Any], websocket: WebSocket) -
 
 
 @ws_handler()
+async def handle_validate_workflow(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
+    """Run pre-execution validation on a workflow graph.
+
+    Serves three call sites: editor live-lint (debounced), pre-execute gate
+    (called internally from ``handle_execute_workflow``), and import dry-run
+    (called by the frontend after ``importWorkflowFromFile``).
+
+    Expects:
+        nodes: List of workflow nodes with {id, type, data}
+        edges: List of edges with {id, source, target}
+        parameters_by_id: Optional map of node_id -> parameters for INVALID_PARAM
+            check. Defaults to ``node.data.parameters`` (rarely populated).
+
+    Returns:
+        ``{"success": True, "report": {"errors": [...], "warnings": [...]}}``.
+    """
+    from services.workflow_validator import validate_workflow
+    report = await validate_workflow(
+        nodes=data.get("nodes", []),
+        edges=data.get("edges", []),
+        parameters_by_id=data.get("parameters_by_id"),
+    )
+    return {"report": report}
+
+
+@ws_handler()
 async def handle_execute_workflow(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Execute entire workflow from start node to end.
 
@@ -798,6 +824,9 @@ async def handle_execute_workflow(data: Dict[str, Any], websocket: WebSocket) ->
         nodes: List of workflow nodes with {id, type, data}
         edges: List of edges with {id, source, target}
         session_id: Optional session identifier
+        force: Optional bool — bypass validation errors. When False/missing,
+            validation errors short-circuit execution and the response carries
+            the report so the frontend can prompt the user.
 
     Returns:
         Workflow execution result with all node outputs
@@ -809,9 +838,25 @@ async def handle_execute_workflow(data: Dict[str, Any], websocket: WebSocket) ->
     nodes = data.get("nodes", [])
     edges = data.get("edges", [])
     session_id = data.get("session_id", "default")
+    force = bool(data.get("force"))
 
     if not nodes:
         return {"success": False, "error": "No nodes provided"}
+
+    # Pre-execute validation gate. force=True overrides errors (matches the
+    # "Run anyway" UX in Windmill); warnings never block.
+    if not force:
+        from services.workflow_validator import validate_workflow
+        report = await validate_workflow(
+            nodes=nodes, edges=edges,
+            parameters_by_id=data.get("parameters_by_id"),
+        )
+        if report["errors"]:
+            return {
+                "success": False,
+                "error": "validation_failed",
+                "report": report,
+            }
 
     # Mark this workflow active so the toolbar Start->Stop reflects whole-workflow runs
     await broadcaster.workflow_run_started(workflow_id)
@@ -906,6 +951,21 @@ async def handle_deploy_workflow(data: Dict[str, Any], websocket: WebSocket) -> 
 
     if not workflow_id:
         return {"success": False, "error": "workflow_id is required for deployment"}
+
+    # Pre-deploy validation gate. Deploy never honors a force-override —
+    # a broken workflow running on a schedule is far worse than a failed
+    # one-shot manual run.
+    from services.workflow_validator import validate_workflow
+    deploy_report = await validate_workflow(
+        nodes=nodes, edges=edges,
+        parameters_by_id=data.get("parameters_by_id"),
+    )
+    if deploy_report["errors"]:
+        return {
+            "success": False,
+            "error": "validation_failed",
+            "report": deploy_report,
+        }
 
     # Check if THIS specific workflow is already deployed (per-workflow isolation)
     if workflow_service.is_workflow_deployed(workflow_id):
@@ -2657,6 +2717,7 @@ MESSAGE_HANDLERS: Dict[str, MessageHandler] = {
     # Node execution
     "execute_node": handle_execute_node,
     "execute_workflow": handle_execute_workflow,
+    "validate_workflow": handle_validate_workflow,
     "cancel_execution": handle_cancel_execution,
     "get_workflow_status": handle_get_workflow_status,
     "get_node_output": handle_get_node_output,
