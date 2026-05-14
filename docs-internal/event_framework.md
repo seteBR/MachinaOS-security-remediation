@@ -18,6 +18,12 @@ phase plan lives in `~/.claude/plans/properly-fix-the-tech-dreamy-tarjan.md`.
 | C1 rollout (chat / task / telegram / whatsapp) — plugin-self-registered via `canary_registry` | ✅ shipped 2026-05-14 |
 | C2 canary (googleGmailReceive) — `PollingTriggerWorkflow` + `as_poll_activity` per-cycle activity | ✅ shipped 2026-05-15 (10 tests) |
 | C3 canary (cronScheduler) — Temporal Schedule + plugin-owned `CronTriggerWorkflow` via `SimplePlugin` | ✅ shipped 2026-05-15 (17 tests) |
+| D1 — Shared `_retry_policies` + `NodeUserError` non-retryable on workflow callsites | ✅ shipped 2026-05-15 (11 tests) |
+| D2 — Custom `event_dlq` SQLModel table | ❌ dropped 2026-05-15 — Temporal Event History + Visibility queries cover the ops-inspection use case; no separate table needed (matches the plan's "What Temporal eliminates" rationale) |
+| D2b — Retire `event_waiter.py` Redis-Streams branch | ⏸ deferred — gated on `event_framework_enabled` flipping to default-on |
+| D3 — Visibility admin WS handlers (`list_canary_listeners` / `list_canary_schedules` / `get_workflow_failure_history`) | ⏳ pending — reframed to Visibility-only after D2 drop |
+| D4 — Drain `_LEGACY_RAW_DICT_BROADCASTS` | ⏸ blocked on B11 FE migration |
+| D5 — Auto-gen `DEFAULT_TOOL_NAMES` from `ToolNode` ClassVars | ⏳ pending — large-scope refactor |
 | C2 — Polling triggers as long-lived workflows | ⏳ pending |
 | C3 — APScheduler → Temporal Schedules | ⏳ pending |
 | C4 — Close cross-plugin `_service` reaches (4 sites) | ⏳ pending |
@@ -155,6 +161,20 @@ Each Phase-A milestone has a verification command:
 Full test surface lands in Phase A9. Phase B (plugin `_events.py`
 modules) + Phase C (Temporal trigger-waiter migration) + Phase D
 (admin handlers + DLQ) build on this foundation.
+
+## Failure inspection — no separate DLQ table
+
+When a canary listener / polling cycle / cron firing fails after its
+`RetryPolicy` is exhausted, Temporal's own primitives are the ops
+inspection surface:
+
+- **Visibility list**: `client.list_workflows(query="ExecutionStatus='Failed' AND EventWorkflowId='<deployment_workflow_id>'")` returns every failed run for a deployment. The same Search Attributes the cancel sweep uses for cleanup (per `services/temporal/search_attributes.py`) make this query work.
+- **Failure detail**: `client.get_workflow_history(workflow_id, run_id)` returns the full Event History, including the `ActivityTaskFailed` event's error message + stacktrace + each retry attempt timestamp.
+- **Temporal Web UI**: http://localhost:8233 — the same data, browsable.
+
+This is why Wave 12 explicitly does NOT add a custom `event_dlq` SQLModel table. Doing so would reinvent the Temporal primitives the rest of the framework was built AROUND, not against. The pre-Temporal `services/execution/models.py::DLQEntry` for the legacy `WorkflowExecutor` is a separate concern and stays where it is.
+
+Wave 12 D3 (pending) adds thin WS handlers that wrap these Visibility queries for the FE admin surface, so operators can inspect failed runs without leaving the MachinaOs UI.
 
 ## References
 
