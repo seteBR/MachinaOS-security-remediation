@@ -29,7 +29,12 @@ logger = get_logger(__name__)
 # Settings.event_framework_enabled. When the flag is off the canary set
 # is irrelevant; when on, types outside this set stay on the legacy path.
 # Expansion path: add types here as each is proven Temporal-durable.
-_CANARY_LISTENER_TRIGGER_TYPES = frozenset(["webhookTrigger"])
+# Each entry requires its producer plugin's _events.py wrapper to call
+# services.events.dispatch.emit so signals reach running listeners.
+_CANARY_LISTENER_TRIGGER_TYPES = frozenset([
+    "webhookTrigger",   # shipped 2026-05-14 (C1 canary)
+    "chatTrigger",      # shipped 2026-05-14 (C1 rollout #1)
+])
 
 # Listener Temporal workflow type-name. Used both for ``start_workflow``
 # and as the Visibility filter for cancellation discovery.
@@ -519,6 +524,21 @@ class DeploymentManager:
         return f"trigger-listener-{workflow_id}-{node_id}"
 
     @staticmethod
+    def _trigger_kind_for(node_type: str) -> str:
+        """Coarse-grained classification for the ``EventTriggerKind``
+        Search Attribute. Derived from the node_type by stripping the
+        ``Trigger`` / ``Receive`` suffix — same mapping the frontend
+        uses for filter chips on the ops dashboard.
+
+        Examples: ``webhookTrigger`` → ``webhook``, ``chatTrigger`` →
+        ``chat``, ``telegramReceive`` → ``telegram``.
+        """
+        for suffix in ("Trigger", "Receive"):
+            if node_type.endswith(suffix):
+                return node_type[: -len(suffix)]
+        return node_type
+
+    @staticmethod
     async def _canary_listener_enabled_for(node_type: str) -> bool:
         """Whether the C1 canary applies to this trigger type.
 
@@ -604,7 +624,7 @@ class DeploymentManager:
                 SearchAttributePair(event_type_key, event_type),
                 SearchAttributePair(trigger_node_id_key, node_id),
                 SearchAttributePair(event_workflow_id_key, workflow_id),
-                SearchAttributePair(event_trigger_kind_key, "webhook"),
+                SearchAttributePair(event_trigger_kind_key, self._trigger_kind_for(node_type)),
             ]),
         )
 

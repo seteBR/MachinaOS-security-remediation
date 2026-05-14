@@ -47,12 +47,34 @@ def chat_message_received(event_data: Mapping[str, Any]) -> WorkflowEvent:
 # ---- Dispatcher wrapper ----------------------------------------------------
 
 
-def dispatch_chat_message_received(event_data: Mapping[str, Any]) -> int:
-    """Dispatch an incoming chat message to waiting ``chatTrigger``
-    nodes. Returns the count of resolved waiters."""
-    from services import event_waiter
+async def dispatch_chat_message_received(event_data: Mapping[str, Any]) -> int:
+    """Dispatch an incoming chat message to waiting ``chatTrigger`` nodes.
 
-    return event_waiter.dispatch(_LEGACY_EVENT_TYPE, dict(event_data))
+    Two delivery paths (in priority order):
+
+    1. **Legacy event_waiter waiters** via :func:`event_waiter.dispatch`
+       (in-process collector/processor; default while
+       ``Settings.event_framework_enabled`` is off).
+    2. **Temporal-durable listeners** via :func:`services.events.dispatch.emit`
+       (Wave 12 C1 canary). ``emit`` is a no-op pass-through when the
+       feature flag is off, so the legacy path keeps working unchanged.
+
+    Returns the count of legacy waiters resolved (Temporal listeners
+    are signalled asynchronously through Visibility queries and don't
+    show up in this count — that's by design, the chat panel UI only
+    cares about the legacy resolved-count for its "delivered" badge).
+    """
+    from services import event_waiter
+    from services.events.dispatch import emit
+
+    payload = dict(event_data)
+    resolved = event_waiter.dispatch(_LEGACY_EVENT_TYPE, payload)
+
+    # Temporal-durable fan-out (Wave 12 C1 canary). Always-call;
+    # dispatch.emit is a no-op when the feature flag is off.
+    await emit(chat_message_received(payload), wire_routing_key=_LEGACY_EVENT_TYPE)
+
+    return resolved
 
 
 __all__ = [

@@ -156,6 +156,49 @@ class TestCanaryScope:
         result = await DeploymentManager._canary_listener_enabled_for("webhookTrigger")
         assert result is True
 
+    @pytest.mark.asyncio
+    async def test_enabled_for_chat_trigger_when_flag_on(self, monkeypatch):
+        """C1 rollout #1: chatTrigger joined the canary set."""
+        from services.deployment.manager import DeploymentManager
+
+        class _On:
+            event_framework_enabled = True
+
+        import core.config
+        monkeypatch.setattr(core.config, "Settings", lambda: _On())
+
+        result = await DeploymentManager._canary_listener_enabled_for("chatTrigger")
+        assert result is True
+
+
+class TestTriggerKindDerivation:
+    """``EventTriggerKind`` Search Attribute is derived from node_type
+    by stripping the ``Trigger`` / ``Receive`` suffix. Locks the mapping
+    so future trigger types (e.g. ``slackReceive``) get a sensible
+    default kind without per-type code changes in DeploymentManager."""
+
+    def test_strips_trigger_suffix(self):
+        from services.deployment.manager import DeploymentManager
+
+        assert DeploymentManager._trigger_kind_for("webhookTrigger") == "webhook"
+        assert DeploymentManager._trigger_kind_for("chatTrigger") == "chat"
+        assert DeploymentManager._trigger_kind_for("taskTrigger") == "task"
+
+    def test_strips_receive_suffix(self):
+        from services.deployment.manager import DeploymentManager
+
+        assert DeploymentManager._trigger_kind_for("telegramReceive") == "telegram"
+        assert DeploymentManager._trigger_kind_for("whatsappReceive") == "whatsapp"
+        assert DeploymentManager._trigger_kind_for("emailReceive") == "email"
+
+    def test_unknown_suffix_returns_node_type_verbatim(self):
+        from services.deployment.manager import DeploymentManager
+
+        # Defensive fallback — never crashes, just emits whatever the
+        # node_type was. Ops dashboards see the raw value and can
+        # update the chip-mapping when needed.
+        assert DeploymentManager._trigger_kind_for("customListener") == "customListener"
+
 
 # ---------------------------------------------------------------------------
 # C1d.3 — _start_canary_listener: deterministic id + USE_EXISTING + search attrs
@@ -247,9 +290,48 @@ class TestStartCanaryListener:
         attrs_by_name = {pair.key.name: pair.value for pair in sa}
         assert attrs_by_name["EventWorkflowId"] == "wf-xyz"
         assert attrs_by_name["TriggerNodeId"] == "wh-1"
+        # EventTriggerKind derived via _trigger_kind_for (strips "Trigger" /
+        # "Receive" suffix) — NOT hardcoded "webhook".
         assert attrs_by_name["EventTriggerKind"] == "webhook"
         # EventType comes from event_waiter.TRIGGER_REGISTRY['webhookTrigger'].
         assert attrs_by_name["EventType"] == "webhook_received"
+
+    @pytest.mark.asyncio
+    async def test_chat_trigger_uses_chat_kind_in_search_attrs(self, monkeypatch):
+        """C1 rollout #1: starting a chatTrigger listener picks the
+        right EventTriggerKind ('chat', not 'webhook')."""
+        from services.deployment.manager import DeploymentManager
+        from temporalio.common import TypedSearchAttributes
+
+        mgr, _ = _build_manager_with_state(
+            "wf-chat",
+            nodes=[_node("ct-1", "chatTrigger"), _node("agent-1", "aiAgent")],
+            edges=[{"source": "ct-1", "target": "agent-1", "targetHandle": "input-main"}],
+        )
+
+        recorded: List[Dict[str, Any]] = []
+
+        async def fake_start_workflow(workflow_name, **kwargs):
+            recorded.append(kwargs)
+            return MagicMock()
+
+        client = MagicMock()
+        client.start_workflow = fake_start_workflow
+        wrapper = MagicMock()
+        wrapper.client = client
+
+        from core import container as container_mod
+        monkeypatch.setattr(container_mod.container, "temporal_client", lambda: wrapper)
+
+        listener_id = await mgr._start_canary_listener(
+            _node("ct-1", "chatTrigger"), "wf-chat", params={"session_id": "default"}
+        )
+        assert listener_id == "trigger-listener-wf-chat-ct-1"
+
+        sa = recorded[0]["search_attributes"]
+        attrs_by_name = {pair.key.name: pair.value for pair in sa}
+        assert attrs_by_name["EventTriggerKind"] == "chat"
+        assert attrs_by_name["EventType"] == "chat_message_received"
 
     @pytest.mark.asyncio
     async def test_returns_none_when_temporal_not_connected(self, monkeypatch):

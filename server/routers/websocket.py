@@ -1675,8 +1675,9 @@ async def handle_send_chat_message(data: Dict[str, Any], websocket: WebSocket) -
         "session_id": session_id
     }
 
-    # Dispatch to chatTrigger waiters
-    resolved = dispatch_chat_message_received(event_data)
+    # Dispatch to chatTrigger waiters (legacy event_waiter + Temporal-durable
+    # canary via dispatch.emit; the wrapper is async since Wave 12 C1).
+    resolved = await dispatch_chat_message_received(event_data)
 
     logger.info(f"[ChatMessage] Dispatched message to {resolved} chatTrigger waiter(s)")
 
