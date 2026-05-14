@@ -4,12 +4,119 @@ import sys
 import asyncio
 import structlog
 import logging
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Iterator, Optional
 from queue import Queue
 from threading import Thread
 from core.config import Settings
+
+
+# ---------------------------------------------------------------------------
+# Source-tag resolution for the Terminal UI panel
+# ---------------------------------------------------------------------------
+#
+# Every log record's ``record.name`` is a dotted-module path
+# (``services.workflow.executor``, ``nodes.telegram._service``,
+# ``routers.websocket``). The Terminal panel renders a single
+# ``source`` column, so we collapse the dotted path to a concise tag
+# (≤12 chars suits the supervisor's Honcho-style alignment, see
+# ``machina/colors.py``).
+#
+# Three resolution stages, in order:
+#
+# 1. **Plugin auto-rule** — ``nodes.<plugin>.<anything>`` → ``<plugin>``.
+#    Adding a new plugin folder gets the right tag for free; there is
+#    no per-plugin entry in this module.
+# 2. **Router auto-rule** — ``routers.<name>.<anything>`` → ``<name>``.
+# 3. **Explicit registry** — :data:`_LOG_SOURCE_TAGS` plus runtime
+#    additions via :func:`register_log_source_tag`. Only cross-cutting
+#    services / core infra need entries here — typically because the
+#    module name is too long (``workflow_validator`` → ``validator``)
+#    or because several submodules share one logical area
+#    (``services.user_auth`` + ``services.auth`` → ``auth``).
+# 4. **Fallback** — second dotted segment (``services.ai`` → ``ai``).
+#
+# No node-specific entries belong here. Plugins that genuinely need a
+# different label from their folder name should call
+# :func:`register_log_source_tag` from their package ``__init__.py``,
+# in the same self-registration style as the five plugin registries
+# (ws_handler, filter_builder, trigger_precheck, service_refresh,
+# output_schema).
+
+_LOG_SOURCE_TAGS: Dict[str, str] = {
+    # Cross-cutting service short tags. Longer prefixes must precede
+    # shorter parents — Python ≥3.7 preserves dict-insertion order.
+    'services.workflow_validator': 'validator',
+    'services.workflow_import': 'wf_import',
+    'services.parameter_resolver': 'params',
+    'services.node_executor': 'executor',
+    'services.status_broadcaster': 'broadcaster',
+    'services.ws_handler_registry': 'ws_registry',
+    'services.credential_registry': 'credentials',
+    'services.user_auth': 'auth',
+    'services.model_registry': 'models',
+    'services.node_output_schemas': 'schemas',
+    'services.markdown_formatter': 'markdown',
+    'services.example_loader': 'examples',
+    'services.skill_loader': 'skills',
+    'services.event_waiter': 'waiter',
+
+    # Core-infra short tags.
+    'core.credentials_database': 'credentials',
+    'core.credential_backends': 'credentials',
+}
+
+
+def register_log_source_tag(prefix: str, tag: str) -> None:
+    """Register a short Terminal-UI tag for a logger-name prefix.
+
+    Canonical extension point — matches the self-registration pattern
+    used by the five plugin registries. Call from a plugin folder's
+    ``__init__.py`` only when the auto-rule produces an unwanted tag
+    (e.g. ``nodes.long_plugin_name`` → want ``lpn``). Most plugins do
+    not need this.
+    """
+    _LOG_SOURCE_TAGS[prefix] = tag
+
+
+def _resolve_source_tag(name: str) -> str:
+    """Map ``record.name`` to a short Terminal-UI tag.
+
+    Order:
+
+    1. **Explicit registry** — :data:`_LOG_SOURCE_TAGS`, including any
+       runtime additions made via :func:`register_log_source_tag`.
+       Wins over the auto-rules so a plugin can override its
+       folder-name default (the canonical opt-out path).
+    2. **Plugin auto-rule** — ``nodes.<plugin>.<...>`` → ``<plugin>``.
+    3. **Router auto-rule** — ``routers.<name>.<...>`` → ``<name>``.
+    4. **Fallback** — second dotted segment (``services.ai`` → ``ai``).
+    """
+    # 1. Explicit registry — first matching prefix wins.
+    for prefix, mapped in _LOG_SOURCE_TAGS.items():
+        if name == prefix or name.startswith(prefix + "."):
+            return mapped
+
+    # 2. Plugin auto-rule.
+    if name.startswith("nodes."):
+        parts = name.split(".", 2)
+        if len(parts) >= 2 and parts[1] and not parts[1].startswith("_"):
+            return parts[1]
+
+    # 3. Router auto-rule.
+    if name.startswith("routers."):
+        parts = name.split(".", 2)
+        if len(parts) >= 2:
+            return parts[1]
+
+    # 4. Fallback — second dotted segment.
+    parts = name.split(".", 2)
+    if len(parts) >= 2 and parts[1]:
+        return parts[1]
+    return name
 
 
 class WebSocketLogHandler(logging.Handler):
@@ -28,22 +135,6 @@ class WebSocketLogHandler(logging.Handler):
         self._thread: Optional[Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
-        # Source name mapping for cleaner display
-        self._source_map = {
-            'services.workflow': 'workflow',
-            'services.ai': 'ai',
-            'nodes.android._relay': 'android',
-            'nodes.android._dispatcher': 'android',
-            'nodes.android._router': 'android',
-            'nodes.whatsapp._service': 'whatsapp',
-            'routers.websocket': 'websocket',
-            'routers.workflow': 'workflow',
-            'services.execution': 'execution',
-            'services.deployment': 'deployment',
-            '__main__': 'main',
-            'main': 'main',
-        }
-
     @classmethod
     def get_instance(cls) -> Optional['WebSocketLogHandler']:
         """Get the singleton instance."""
@@ -58,12 +149,10 @@ class WebSocketLogHandler(logging.Handler):
             # Get the raw message without structlog formatting
             message = record.getMessage()
 
-            # Map source name
-            source = record.name
-            for prefix, mapped in self._source_map.items():
-                if source.startswith(prefix):
-                    source = mapped
-                    break
+            # Map source name via the module-level resolver (auto-rule
+            # for nodes.<plugin> / routers.<name>, explicit registry for
+            # cross-cutting services, second-segment fallback).
+            source = _resolve_source_tag(record.name)
 
             # Extract structured key-value pairs from structlog
             details = None
@@ -149,24 +238,42 @@ class WebSocketLogHandler(logging.Handler):
 
 
 def configure_logging(settings: Settings) -> None:
-    """Configure structured logging based on settings."""
+    """Configure structured logging based on settings.
+
+    Console-mode output is deliberately timestamp-less — the supervisor
+    (``machina/colors.py``) prepends ``[HH:MM:SS.fff]`` to every line
+    it aggregates, so an inner ``TimeStamper`` would produce double-time
+    output. JSON mode keeps the ISO timestamp because machine
+    consumers (log shippers, query engines) parse it as a field.
+
+    When ``log_file`` is set, a :class:`RotatingFileHandler` is used so
+    long-running deployments don't fill the disk. Rotation thresholds
+    (``log_file_max_bytes`` / ``log_file_backup_count``) come from
+    :class:`Settings`.
+    """
+    log_level_value = getattr(logging, settings.log_level.upper())
 
     # Set up log file if specified
     if settings.log_file:
         log_path = Path(settings.log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Configure file handler
-        file_handler = logging.FileHandler(log_path)
-        file_handler.setLevel(getattr(logging, settings.log_level.upper()))
+        # Rotating file handler — settings own the rotation thresholds.
+        file_handler = RotatingFileHandler(
+            log_path,
+            maxBytes=settings.log_file_max_bytes,
+            backupCount=settings.log_file_backup_count,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(log_level_value)
 
         # Configure console handler
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(getattr(logging, settings.log_level.upper()))
+        console_handler.setLevel(log_level_value)
 
         # Configure root logger
         logging.basicConfig(
-            level=getattr(logging, settings.log_level.upper()),
+            level=log_level_value,
             handlers=[console_handler, file_handler],
             format="%(message)s"
         )
@@ -175,15 +282,19 @@ def configure_logging(settings: Settings) -> None:
         logging.basicConfig(
             format="%(message)s",
             stream=sys.stdout,
-            level=getattr(logging, settings.log_level.upper())
+            level=log_level_value,
         )
 
     # Silence noisy third-party loggers
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    # Configure structlog
+    # Configure structlog. ``merge_contextvars`` pulls fields bound via
+    # ``structlog.contextvars.bind_contextvars`` (or the :func:`log_context`
+    # helpers) into every log record automatically — survives
+    # ``asyncio.gather`` child tasks via stdlib ``contextvars``.
     processors = [
+        structlog.contextvars.merge_contextvars,
         structlog.stdlib.filter_by_level,
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
@@ -192,14 +303,13 @@ def configure_logging(settings: Settings) -> None:
         structlog.processors.UnicodeDecoder(),
     ]
 
-    # Add appropriate renderer based on format
+    # Pick the renderer. Console mode is timestamp-less by design
+    # (see docstring).
     if settings.log_format == "json":
         processors.insert(0, structlog.processors.TimeStamper(fmt="iso"))
         processors.insert(0, structlog.stdlib.add_logger_name)
         processors.append(structlog.processors.JSONRenderer())
     else:
-        # Console format with timestamp
-        processors.insert(0, structlog.processors.TimeStamper(fmt="%H:%M:%S"))
         processors.append(structlog.dev.ConsoleRenderer(
             colors=False,  # No ANSI colors for cleaner output
             pad_event=35,
@@ -218,6 +328,55 @@ def configure_logging(settings: Settings) -> None:
 def get_logger(name: str) -> structlog.BoundLogger:
     """Get a structured logger instance."""
     return structlog.get_logger(name)
+
+
+# ---------------------------------------------------------------------------
+# Context-bound logging helpers
+# ---------------------------------------------------------------------------
+#
+# Rather than threading ``workflow_id`` / ``node_id`` / ``execution_id``
+# through every ``logger.info(..., workflow_id=...)`` callsite, callers
+# bind once at the entry point and every log record in that async
+# context automatically picks the fields up via
+# ``structlog.contextvars.merge_contextvars`` (wired in
+# :func:`configure_logging`). Stdlib ``contextvars`` propagates across
+# ``await`` and ``asyncio.gather`` child tasks, so per-node executions
+# spawned in parallel each inherit the right context.
+#
+# Two helpers — pick the one that fits the call site:
+#
+# - :func:`log_context` (async context manager) — for ``async with``
+#   blocks around async work (e.g. inside ``BaseNode.execute``).
+# - :func:`log_context_sync` (sync context manager) — for sync blocks
+#   inside sync entry points; rare since most of the codebase is async.
+
+
+@asynccontextmanager
+async def log_context(**fields: Any) -> AsyncIterator[None]:
+    """Bind ``fields`` to every log record emitted in this async context.
+
+    Usage::
+
+        async with log_context(workflow_id=wf_id, node_id=node_id):
+            await do_work()  # all logs inside carry workflow_id + node_id
+
+    Bindings clear on ``__aexit__`` even if the inner block raises.
+    """
+    structlog.contextvars.bind_contextvars(**fields)
+    try:
+        yield
+    finally:
+        structlog.contextvars.unbind_contextvars(*fields.keys())
+
+
+@contextmanager
+def log_context_sync(**fields: Any) -> Iterator[None]:
+    """Synchronous variant of :func:`log_context` for sync callers."""
+    structlog.contextvars.bind_contextvars(**fields)
+    try:
+        yield
+    finally:
+        structlog.contextvars.unbind_contextvars(*fields.keys())
 
 
 def log_execution_time(logger: structlog.BoundLogger, operation: str,

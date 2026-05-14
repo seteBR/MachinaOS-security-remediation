@@ -189,10 +189,16 @@ async def execute_node_for_temporal(
             session_id=context.get("session_id", "temporal"),
             workflow_id=context.get("workflow_id"),
         )
-        print(f"[Temporal Endpoint] Node {request.node_id} result: success={result.get('success')}, error={result.get('error')}")
+        logger.info(
+            "Temporal endpoint node result",
+            node_id=request.node_id,
+            success=result.get("success"),
+            error=result.get("error"),
+        )
         return result
-    except Exception as e:
-        print(f"[Temporal Endpoint] Node {request.node_id} EXCEPTION: {str(e)}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        logger.exception(
+            "Temporal endpoint node execution failed",
+            node_id=request.node_id,
+        )
         raise

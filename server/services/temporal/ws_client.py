@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 _settings = Settings()
 WS_URL = f"ws://{_settings.host}:{_settings.port}/ws/internal"
 
-print(f"[Temporal WS Client] WebSocket URL configured: {WS_URL}")
+logger.info("WebSocket URL configured", url=WS_URL)
 
 
 class WSConnectionPool:
@@ -65,7 +65,10 @@ class WSConnectionPool:
                         connector=connector,
                         timeout=timeout,
                     )
-                    print(f"[WS Pool] Created session with pool_size={self.pool_size}")
+                    logger.info(
+                        "Created shared session",
+                        pool_size=self.pool_size,
+                    )
         return self._session
 
     @asynccontextmanager
@@ -115,7 +118,7 @@ class WSConnectionPool:
         try:
             async with self.connection() as ws:
                 await ws.send_json(message)
-                print(f"[WS Pool] Sent execute_node for {node_id}")
+                logger.debug("Sent execute_node", node_id=node_id)
 
                 # Wait for response with matching request_id
                 async with asyncio.timeout(timeout):
@@ -123,7 +126,11 @@ class WSConnectionPool:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             response = json.loads(msg.data)
                             if response.get("request_id") == request_id:
-                                print(f"[WS Pool] Received response for {node_id}: success={response.get('success')}")
+                                logger.debug(
+                                    "Received response",
+                                    node_id=node_id,
+                                    success=response.get("success"),
+                                )
                                 return response
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             raise Exception(f"WebSocket error: {ws.exception()}")
@@ -141,7 +148,7 @@ class WSConnectionPool:
         """Close the connection pool."""
         if self._session and not self._session.closed:
             await self._session.close()
-            print("[WS Pool] Session closed")
+            logger.info("Session closed")
 
 
 # Global connection pool instance

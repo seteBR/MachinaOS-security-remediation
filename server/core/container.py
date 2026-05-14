@@ -1,13 +1,15 @@
 """Dependency injection container for the application."""
 
-import time as _time
-
-_ct0 = _time.perf_counter()
-
 
 def _clog(msg):
-    elapsed = (_time.perf_counter() - _ct0) * 1000
-    print(f"           container: {msg} ({elapsed:.0f}ms)", flush=True)
+    """Pre-logger import-boundary marker.
+
+    Emits via ``print()``; the CLI wrapper prefixes the absolute
+    timestamp, so this helper carries no inline elapsed-time anymore.
+    Kept as a function rather than inlining ``print()`` so future
+    routing changes (e.g. to a logger after init) hit one site.
+    """
+    print(f"           container: {msg}", flush=True)
 
 
 from dependency_injector import containers, providers

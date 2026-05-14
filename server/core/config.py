@@ -191,6 +191,14 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_format: str = Field(default="json", env="LOG_FORMAT")
     log_file: Optional[str] = Field(default=None, env="LOG_FILE")
+    # File-rotation knobs — only consulted when LOG_FILE is set.
+    # Default ceiling = 10 MiB × 5 backups = ~50 MiB on disk.
+    log_file_max_bytes: int = Field(
+        default=10 * 1024 * 1024, env="LOG_FILE_MAX_BYTES", ge=1024,
+    )
+    log_file_backup_count: int = Field(
+        default=5, env="LOG_FILE_BACKUP_COUNT", ge=0,
+    )
 
     # Rate Limiting
     rate_limit_enabled: bool = Field(default=True, env="RATE_LIMIT_ENABLED")

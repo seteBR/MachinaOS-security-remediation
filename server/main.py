@@ -4,13 +4,17 @@ Modern FastAPI backend for React Flow workflow automation platform.
 Refactored with dependency injection, modular services, and clean architecture.
 """
 
-import time as _time
-_t0 = _time.perf_counter()
-
 
 def _startup_log(msg):
-    elapsed = _time.perf_counter() - _t0
-    print(f"  [{elapsed:6.2f}s] {msg}", flush=True)
+    """Pre-logger boot-progress marker.
+
+    Emits via ``print()`` so the global CLI wrapper's
+    ``[HH:MM:SS.ffffff]`` prefix supplies the timestamp — we don't add
+    a second one here. Used during the import phase (before
+    ``configure_logging`` runs) and inside the lifespan startup hook
+    for milestones; after that, regular ``logger.info`` is preferred.
+    """
+    print(f"  {msg}", flush=True)
 
 
 # Performance: Install uvloop if available (Linux/macOS only)

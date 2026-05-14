@@ -22,9 +22,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, ClassVar, Dict, List, Optional, Sequence, Type
 
+from opentelemetry import trace
 from pydantic import BaseModel, ValidationError
 
-from core.logging import get_logger
+from core.logging import get_logger, log_context
 from services.plugin.connection import Connection
 from services.plugin.context import NodeContext
 from services.plugin.credential import Credential
@@ -39,6 +40,7 @@ from services.plugin.scaling import (
 )
 
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class NodeUserError(Exception):
@@ -289,9 +291,58 @@ class BaseNode:
         """Universal entry point. Validate params → dispatch op →
         wrap result. Subclasses (TriggerNode, ToolNode) override to
         change the return shape or lifetime.
+
+        The body runs under two ambient contexts:
+
+        - :func:`core.logging.log_context` binds ``node_id`` /
+          ``node_type`` / ``workflow_id`` to every log record emitted
+          while the operation runs, via ``structlog.contextvars``.
+          Survives ``asyncio.gather`` child tasks (stdlib
+          ``contextvars`` is task-local).
+        - An OpenTelemetry span named ``node.{type}.execute`` so
+          per-plugin latency / failures show up in any tracer backend
+          without per-plugin instrumentation. Span attributes carry
+          the same identifiers as the log context.
         """
         start_time = time.time()
+        workflow_id_attr: Optional[str] = None
+        if isinstance(context.raw, dict):
+            workflow_id_attr = context.raw.get("workflow_id")
 
+        log_fields: Dict[str, Any] = {
+            "node_id": node_id,
+            "node_type": self.type,
+        }
+        if workflow_id_attr is not None:
+            log_fields["workflow_id"] = workflow_id_attr
+
+        async with log_context(**log_fields):
+            with tracer.start_as_current_span(
+                f"node.{self.type}.execute",
+                attributes={
+                    "node.id": node_id,
+                    "node.type": self.type,
+                    **({"workflow.id": workflow_id_attr} if workflow_id_attr else {}),
+                },
+            ):
+                return await self._execute_body(
+                    node_id=node_id,
+                    parameters=parameters,
+                    context=context,
+                    start_time=start_time,
+                )
+
+    async def _execute_body(
+        self,
+        *,
+        node_id: str,
+        parameters: Dict[str, Any],
+        context: NodeContext,
+        start_time: float,
+    ) -> Dict[str, Any]:
+        """The actual execute pipeline — extracted so :meth:`execute`
+        stays a thin shell around the ambient log-context + span. Kept
+        method-private; callers should always go through :meth:`execute`."""
         # Stash the raw (pre-validation) parameters dict in context.raw
         # so plugins can recover values the Pydantic extra="ignore" policy
         # would drop — e.g. ``api_key`` injected by node_executor's
