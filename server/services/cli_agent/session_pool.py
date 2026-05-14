@@ -121,6 +121,16 @@ class PooledClaudeSession:
     # memory_node_id (after a crash / reap) emit ``--resume <UUID>`` so
     # the same on-disk JSONL keeps growing across process restarts.
     current_session_uuid: str = ""
+    # Bearer token baked into claude's argv (via ``--mcp-config``) at
+    # spawn time. The token persists for the subprocess's lifetime —
+    # claude reads it from the frozen argv on every MCP request, so we
+    # can never rotate it without respawning. Stored here so the pool
+    # can (a) rebind the matching :class:`BatchContext` in place when
+    # the tool / skill / credential surface changes between batches
+    # without paying a cold-spawn, and (b) call ``unregister_batch``
+    # in ``_terminate_locked`` to drain the FastMCP tool refcounts
+    # when the subprocess dies.
+    batch_token: str = ""
     last_used_at: float = field(default_factory=time.monotonic)
     # Per-session lock; held throughout a turn. The reaper consults
     # ``lock.locked()`` to skip in-flight sessions.
@@ -234,6 +244,39 @@ class ClaudeSessionPool:
 
             if existing is not None:
                 existing.last_used_at = time.monotonic()
+                # Rebind the persistent :class:`BatchContext` bound to
+                # the warm subprocess's argv-baked bearer token to the
+                # surface the current batch declares. Without this the
+                # per-handler scope check in
+                # ``workflow_tools._build_handler`` still sees the
+                # stale ``connected_tools`` from the spawn batch and
+                # lets disconnected tools fire (and FastMCP refcounts
+                # leak by 1 per batch indefinitely).
+                #
+                # Service.py just issued ``mcp_bearer_token`` (T_new)
+                # for this batch and called ``register_batch`` on it.
+                # We transplant T_new's BatchContext values onto
+                # T_warm (the argv-baked one), then drop T_new — it
+                # would otherwise sit orphaned in ``_active_tokens``
+                # until app shutdown.
+                if (
+                    existing.batch_token
+                    and mcp_bearer_token
+                    and mcp_bearer_token != existing.batch_token
+                ):
+                    from services.cli_agent.mcp_server import (
+                        lookup_batch, rebind_batch, unregister_batch,
+                    )
+                    new_ctx = lookup_batch(mcp_bearer_token)
+                    if new_ctx is not None:
+                        rebind_batch(
+                            existing.batch_token,
+                            connected_tools=new_ctx.connected_tools,
+                            connected_skill_names=new_ctx.connected_skill_names,
+                            allowed_credentials=new_ctx.allowed_credentials,
+                            workspace_dir=new_ctx.workspace_dir,
+                        )
+                        unregister_batch(mcp_bearer_token)
                 logger.info(
                     "[ClaudeSessionPool] warm reuse memory_node=%s pid=%s uuid=%s",
                     memory_node_id, existing.process.pid,
@@ -260,6 +303,12 @@ class ClaudeSessionPool:
                 mcp_bearer_token=mcp_bearer_token,
                 connected_tool_names=connected_tool_names,
             )
+            # Track the spawn-time bearer token so subsequent batches can
+            # rebind the persistent BatchContext in place (warm-reuse
+            # path above) and ``_terminate_locked`` can drain FastMCP
+            # tool refcounts on death.
+            if mcp_bearer_token:
+                session.batch_token = mcp_bearer_token
             if crashed_uuid:
                 # The new subprocess is resuming the prior session; pre-seed
                 # the UUID so the first turn's emitted CloudEvents carry
@@ -681,6 +730,22 @@ class ClaudeSessionPool:
         if session is None:
             return
         session_uuid = session.current_session_uuid
+
+        # Drop the spawn-time BatchContext: decrement FastMCP tool
+        # refcounts (so disconnected tools eventually fall off the
+        # registry) and remove the token from ``_active_tokens`` (so a
+        # subsequent MCP request with a stale token gets a clean 401
+        # instead of resolving to leaked state). Best-effort — a failure
+        # here must not block subprocess teardown.
+        if session.batch_token:
+            try:
+                from services.cli_agent.mcp_server import unregister_batch
+                unregister_batch(session.batch_token)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.debug(
+                    "[ClaudeSessionPool] unregister_batch on terminate "
+                    "memory_node=%s exc=%s", memory_node_id, exc,
+                )
 
         # 1. Close stdin so claude can exit gracefully.
         process = session.process

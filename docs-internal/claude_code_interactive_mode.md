@@ -71,8 +71,8 @@ claude
   [--mcp-config <json> --strict-mcp-config]
   --model <name>
   [--resume <UUID> | --continue]
-  [--allowedTools <csv>]
-  --permission-mode bypassPermissions
+  --allowedTools <csv>
+  --permission-mode dontAsk
   [--append-system-prompt <text>]
   [--effort low|medium|high]
   [--add-dir <path>]...
@@ -89,10 +89,21 @@ Notable absences (intentional):
 | `--session-id <UUID>` | Rejected by claude in non-headless mode. We discover the UUID from the first event that carries `session_id`. |
 | `--include-partial-messages`, `--include-hook-events`, `--max-turns`, `--max-budget-usd`, `--fallback-model` | All `-p`-only. `ClaudeTaskSpec` keeps the fields for back-compat; they're silently dropped here. External cost / turn caps are a Phase 2 follow-up. |
 
-`--permission-mode bypassPermissions` is required for non-interactive
-automation — there's no human at the keyboard to approve the per-tool
-prompts `acceptEdits` would surface. Documented at
+`--permission-mode dontAsk` is the documented mode for *"only
+pre-approved tools, no prompts"* per
 [`code.claude.com/docs/en/permission-modes`](https://code.claude.com/docs/en/permission-modes).
+It gates `--allowedTools` strictly — anything not in the allowlist
+returns a permission denial without surfacing a TUI prompt
+(non-interactive automation has no human at the keyboard to click
+"Allow"). The earlier `bypassPermissions` default *"skips the
+permission layer entirely"* (same doc, §"Skip all checks"), which
+turned `--allowedTools` / `--disallowedTools` into documentation-only
+fields and let claude's built-in `Read` / `Edit` / `Bash` /
+`Glob` / `Grep` / `Write` / `Skill` / `WebSearch` / `WebFetch` fire
+regardless of wiring. `acceptEdits` was the prior config default but
+would prompt for any non-Edit tool — hanging the headless agent.
+`dontAsk` is the only mode that combines no-prompts with a strict
+allowlist gate.
 
 ## Session pool — warm-process reuse
 
@@ -173,13 +184,50 @@ ferried UUID).
 
 `claude` handles its own MCP authentication. We embed the bearer in
 `--mcp-config` at spawn time; the spawned claude uses it for the
-lifetime of its process. The pool stashes the token on
-`PooledClaudeSession.bearer_token` at spawn time so warm-reuse callers
-(`AICliService.run_batch`'s pool path) can re-register the batch
-context against the SAME token claude already has in its argv. The pool
-itself never issues / unregisters — that's `run_batch`'s job, with the
-twist that for pooled sessions the token persists across batches and
-orphans on pool eviction (bounded by `max_size`, acceptable for Phase 1).
+lifetime of its process — the JSON blob (token included) is frozen
+into argv and can never be rotated without respawning. The pool
+stashes the spawn-time token on
+[`PooledClaudeSession.batch_token`](../server/services/cli_agent/session_pool.py)
+so subsequent batches can find and update its bound `BatchContext`.
+
+Token lifecycle, three phases:
+
+1. **Cold spawn.** `AICliService.run_batch` issues a fresh token T,
+   calls `register_batch(T, ctx)` (which adds T to `_active_tokens`
+   and bumps FastMCP refcounts for each `ctx.connected_tools` entry
+   via `expose_workflow_tools`), then passes T to `pool.acquire`. The
+   pool spawns claude with T baked into `--mcp-config` argv and
+   records `session.batch_token = T`.
+2. **Warm reuse with a changed surface.** A subsequent batch issues
+   a NEW token T_new and registers `ctx_new` against it. Pool
+   `acquire` detects warm reuse and calls
+   [`rebind_batch`](../server/services/cli_agent/mcp_server.py)
+   on T (the persistent token claude bakes into MCP requests),
+   transplanting `ctx_new`'s `connected_tools` /
+   `connected_skill_names` / `allowed_credentials` /
+   `workspace_dir` onto T's `BatchContext` in place. The diff is
+   applied to FastMCP — `unexpose_workflow_tools` decrements
+   refcounts for tools dropped between batches (so a disconnected
+   `duckduckgoSearch` falls off the FastMCP tool list when its
+   refcount hits zero), `expose_workflow_tools` increments for
+   added tools. T_new is then immediately unregistered (it would
+   sit orphaned otherwise — claude's argv never references it).
+3. **Termination.** `_terminate_locked` calls `unregister_batch(T)`
+   so the dying subprocess's FastMCP refcounts drain cleanly on
+   pool eviction / `pool.clear` / `shutdown_all`. Closes the
+   long-standing leak where every pooled run permanently incremented
+   the refcount of every wired tool.
+
+The per-handler scope check in
+[`workflow_tools._build_handler`](../server/services/cli_agent/workflow_tools.py)
+reads `ctx.connected_tools` at call time — so even if claude's
+frozen `--allowedTools` argv still lists a tool that's since been
+disconnected, the handler returns
+`{"error": "...not connected to this batch", "status": 403}`.
+Combined with `--permission-mode dontAsk` (strict allowlist gate on
+the claude side) this gives a double-lock: the tool surface visible
+to claude is what the batch wired, no more no less, even across
+warm-reuse turns.
 
 ## CloudEvents broadcasts
 
@@ -204,16 +252,36 @@ store that renders the panel.
 
 ## Tools and skills
 
-**Tools (MCP) — unchanged from the `-p` era.** Spawn argv carries
-`--mcp-config <json>` (HTTP transport, bearer header) + `--strict-mcp-config`
-so the spawned claude only loads MachinaOs's FastMCP server. The
-`mcpServers.machinaos` block sets `alwaysLoad: true` to opt out of MCP
-tool-search deferral so all `mcp__machinaos__*` tools enter context at
-session start. `--allowedTools` lists the explicit allowlist:
-five built-ins (`Read,Edit,Bash,Glob,Grep,Write,Skill,WebSearch,WebFetch`),
-every `mcp__machinaos__<connected_tool>` passed by the caller, plus the
-five core MCP tools (`getWorkspaceFiles`, `listSkills`, `getSkill`,
-`getCredential`, `broadcastLog`).
+**Tools (MCP) — strict allowlist, no claude built-ins.** Spawn argv
+carries `--mcp-config <json>` (HTTP transport, bearer header) +
+`--strict-mcp-config` so the spawned claude only loads MachinaOs's
+FastMCP server. The `mcpServers.machinaos` block sets `alwaysLoad:
+true` to opt out of MCP tool-search deferral so all
+`mcp__machinaos__*` tools enter context at session start.
+`--allowedTools` is the explicit allowlist, and it does NOT include
+claude's built-in escape hatches (`Read`, `Edit`, `Bash`, `Glob`,
+`Grep`, `Write`, `Skill`, `WebSearch`, `WebFetch`) — every workflow
+already wires the equivalents (`fileRead`, `fileModify`, `fsSearch`,
+`shell`, `browser`, `perplexitySearch`, …) as MCP tools, and the
+built-ins were the leakage path that let the agent invoke
+capabilities the workflow didn't explicitly grant. The default
+allowlist is:
+
+- `mcp__machinaos__<node_type>` per node connected to the agent's
+  `input-tools` handle (LLM sees their typed Pydantic schemas via
+  FastMCP's `tools/list` reflection on the plugin `Params`).
+- The five MachinaOs MCP infrastructure tools — `getWorkspaceFiles`,
+  `listSkills`, `getSkill`, `getCredential`, `broadcastLog` — which
+  are how the agent reads its workspace, discovers connected skills,
+  fetches scoped credentials, and surfaces intermediate progress to
+  the FE.
+
+Callers wanting specific claude built-ins back in opt in per-task via
+`ClaudeTaskSpec.allowed_tools` (the field is honored verbatim — no
+auto-merge with workflow tools). Default value: empty string.
+Combined with `--permission-mode dontAsk`, the strict allowlist is
+actually enforced (see "argv shape" above for why `bypassPermissions`
+was the wrong default).
 
 **Skills — known gap on the pool path.** `AICliSession._materialise_skills`
 writes connected skills under `<cwd>/.claude/skills/` for the one-shot
@@ -221,6 +289,27 @@ non-pooled path. The pool path skips that materialisation; agents
 discover skills via MCP `listSkills` / `getSkill` tools at runtime
 instead. Fine for now, but pool-side skill materialisation is an open
 follow-up.
+
+**Workspace dir — routed via `--add-dir`.**
+[`AICliService.run_batch`](../server/services/cli_agent/service.py)
+splices the per-workflow workspace
+(`data/workspaces/<workflow_id>/`, injected into `ctx.raw` by
+`workflow.py:_get_workspace_dir`) into each task's `add_dir` list
+right after `task_list` is built — `interactive_argv` already emits
+`--add-dir <path>` per entry. Runs BEFORE the pool/non-pool branch
+split so both warm-subprocess and one-shot paths get it. Without
+this, the workspace is invisible to claude: memory-bound runs spawn
+with `cwd=repo_root` (stable for `--continue`'s `project_key`
+resolution) and non-memory runs with `cwd=worktree`, neither of which
+sees files dropped by upstream nodes (`fileDownloader`,
+`documentParser`, code executors, etc.). Mirrors the ai_agent
+pattern ([`services/ai.py:1899`](../server/services/ai.py) —
+`config['workspace_dir'] = context.get('workspace_dir', '')`) but
+uses claude's native `--add-dir` instead of MCP-tool-config injection
+because claude has its own filesystem tools (`Read`, `Edit`, `Glob`,
+`Grep`, `Write`, `Bash`) rather than MCP-injected ones. Verified
+end-to-end: a marker file dropped into a workspace is reachable via
+claude's `Read` tool inside a pooled turn.
 
 ## `/usage` and `/compact` semantics
 

@@ -249,7 +249,6 @@ export interface WhatsAppMessage {
 export interface NodeParameters {
   parameters: Record<string, any>;
   version: number;
-  timestamp?: number;
 }
 
 // Per-session compaction/token usage stats (pushed by backend broadcasts)
@@ -923,18 +922,40 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }
           break;
 
-        // Node parameters broadcasts (from other clients)
-        case 'node_parameters_updated':
-          if (node_id) {
-            const nextParams = {
-              parameters: message.parameters,
-              version: message.version,
-              timestamp: message.timestamp,
+        // CloudEvents v1.0 envelope from `broadcaster.broadcast_node_parameters_updated`.
+        // Wire shape (RFC §6.4 — same convention as `agent_progress` above):
+        //   { type: "node_parameters_updated",
+        //     data: { specversion, id, time, source, type,
+        //             subject: <node_id>, workflow_id?,
+        //             data: { node_id, parameters, version, source } } }
+        // Snake-case keys preserved across the Python → JSON → TS wire so
+        // the FE reads them by their Python field names directly. The
+        // pre-CloudEvent handler read `message.parameters` / `message.node_id`
+        // from the top level — both `undefined` post-cutover — so every
+        // broadcast was silently dropped and the simpleMemory panel only
+        // refreshed after a full page reload. Three emission sites today:
+        // user param-save (source="user"), Claude Code memory bridge
+        // (source="cli"), Temporal AgentWorkflow per-turn persist
+        // (source="agent").
+        case 'node_parameters_updated': {
+          const envelope = data as WorkflowEvent<{
+            node_id?: string;
+            parameters?: Record<string, any>;
+            version?: number;
+            source?: string;
+          }> | undefined;
+          const inner = envelope?.data;
+          const target_node_id = inner?.node_id || envelope?.subject;
+          if (target_node_id && inner?.parameters !== undefined) {
+            const next_params: NodeParameters = {
+              parameters: inner.parameters,
+              version: inner.version ?? 1,
             };
-            setNodeParameters(prev => ({ ...prev, [node_id]: nextParams }));
-            queryClient.setQueryData(nodeParamsQueryKey(node_id), nextParams);
+            setNodeParameters(prev => ({ ...prev, [target_node_id]: next_params }));
+            queryClient.setQueryData(nodeParamsQueryKey(target_node_id), next_params);
           }
           break;
+        }
 
         case 'node_parameters_deleted':
           if (node_id) {
@@ -1931,7 +1952,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const params: NodeParameters = {
           parameters: response.parameters,
           version: response.version || 0,
-          timestamp: response.timestamp
         };
         // Update local cache
         setNodeParameters(prev => ({ ...prev, [nodeId]: params }));
@@ -1955,7 +1975,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           result[nodeId] = {
             parameters: data.parameters || {},
             version: data.version || 0,
-            timestamp: response.timestamp
           };
         }
         // Update local cache with all parameters

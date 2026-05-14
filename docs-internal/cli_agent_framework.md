@@ -166,9 +166,9 @@ class ClaudeTaskSpec(BaseAICliTaskSpec):
     resume_session_id: Optional[str] = None
     max_turns: Optional[int] = None
     max_budget_usd: Optional[float] = None
-    allowed_tools: Optional[str] = None
+    allowed_tools: Optional[str] = None  # default: "" — see "Strict allowlist"
     permission_mode: Literal["default", "acceptEdits", "plan", "auto",
-                             "dontAsk", "bypassPermissions"] = "acceptEdits"
+                             "dontAsk", "bypassPermissions"] = "dontAsk"
     # Optional documented CLI flags
     effort: Optional[Literal["low", "medium", "high", "xhigh", "max"]] = None
     fallback_model: Optional[str] = None
@@ -247,7 +247,7 @@ Lockfile path: `~/.claude/ide/<pid>.lock` (Claude) or `<tmpdir>/gemini/ide/gemin
 }
 ```
 
-Bearer-token middleware (`mcp_server.py:_BearerAuthMiddleware`) validates each request against an in-memory per-batch `BatchContext` registry. Tokens registered at `AICliService.run_batch()` entry; unregistered in `finally` so 401s flip immediately when a batch settles.
+Bearer-token middleware (`mcp_server.py:_BearerAuthMiddleware`) validates each request against an in-memory per-batch `BatchContext` registry. **Non-pool path**: tokens registered at `AICliService.run_batch()` entry, unregistered in `finally` so 401s flip immediately when a batch settles. **Pool path** (`use_pool=True`, see [Claude Code Interactive Mode](./claude_code_interactive_mode.md#mcp-bearer-token-lifecycle) for the full lifecycle): claude bakes the bearer into argv (`--mcp-config`) at spawn time and can't rotate without respawning, so the pool stashes the spawn-time token on `PooledClaudeSession.batch_token` and rebinds the `BatchContext` in place on warm reuse via `rebind_batch(token, connected_tools=..., ...)` — closes the "disconnected tool still works" leak by (a) diffing `connected_tools` and decrementing FastMCP refcounts for tools dropped between batches, and (b) updating the per-handler scope check's data so `workflow_tools._build_handler` returns 403 for stale tools. `_terminate_locked` calls `unregister_batch(session.batch_token)` so refcounts drain on pool eviction / `clear` / `shutdown_all`.
 
 Tools exposed (mirror MachinaOs capabilities; deferred ones marked):
 
@@ -410,8 +410,26 @@ ClaudeCodeAgentNode.execute_op
                  ├─ appends user/assistant turns to params["memory_content"]
                  │  via append_to_memory_markdown + trim_markdown_window
                  ├─ database.save_node_parameters(memory_node_id, params)
-                 └─ broadcaster.broadcast({"type": "node_parameters_updated",
-                                           "node_id": memory_node_id, ...})
+                 └─ broadcaster.broadcast_node_parameters_updated(
+                        memory_node_id,
+                        parameters=params,
+                        source_hint="cli",
+                    )
+                    # Emits a CloudEvents v1.0 envelope (RFC §6.4):
+                    #   { type: "node_parameters_updated",
+                    #     data: { specversion, id, time,
+                    #             source: "machinaos://services/parameters",
+                    #             type: "com.machinaos.node.parameters.updated",
+                    #             subject: <memory_node_id>,
+                    #             workflow_id?,
+                    #             data: { node_id, parameters, version, source } } }
+                    # The FE handler in `client/src/contexts/WebSocketContext.tsx`
+                    # casts ``data`` to ``WorkflowEvent<{node_id, parameters,
+                    # version, source}>`` and routes the inner payload to
+                    # ``setNodeParameters`` + ``queryClient.setQueryData``,
+                    # so the simpleMemory parameter panel auto-refreshes
+                    # live (no page reload needed). Snake-case wire keys
+                    # preserved (``node_id``, not ``nodeId``).
 ```
 
 ### Parallel-batch guard

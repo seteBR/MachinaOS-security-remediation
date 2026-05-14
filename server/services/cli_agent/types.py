@@ -96,10 +96,13 @@ class ClaudeTaskSpec(BaseAICliTaskSpec):
     )
     allowed_tools: Optional[str] = Field(
         default=None,
-        description="Comma-separated tool list. Defaults to "
-                    "Read,Edit,Bash,Glob,Grep,Write.",
+        description="Comma-separated tool list. Default is empty — "
+                    "claude built-ins (Read/Edit/Bash/Glob/Grep/Write/"
+                    "Skill/WebSearch/WebFetch) are intentionally NOT in "
+                    "the allowlist; the agent only gets connected MCP "
+                    "tools + MachinaOs's own MCP infrastructure tools.",
     )
-    permission_mode: Literal["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] = "acceptEdits"
+    permission_mode: Literal["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] = "dontAsk"
 
     # ---- optional documented CLI flags (cli-reference) ----
     effort: Optional[Literal["low", "medium", "high", "xhigh", "max"]] = Field(

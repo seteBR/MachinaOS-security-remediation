@@ -104,11 +104,47 @@ class TestClaudeArgv:
         assert "--allowedTools" in argv
         assert "--permission-mode" in argv
         # Default permission mode is read from ``config/ai_cli_providers.json``
-        # (currently ``acceptEdits``). Callers wanting ``bypassPermissions``
-        # set it explicitly on ``task.permission_mode`` or via the per-call
-        # ``defaults`` arg.
+        # (currently ``dontAsk`` — "only pre-approved tools, no prompts",
+        # which gates ``--allowedTools`` strictly so claude's built-in
+        # Read/Edit/Bash/etc. can NOT fire unless explicitly listed).
+        # Callers wanting ``acceptEdits`` / ``bypassPermissions`` set it
+        # on ``task.permission_mode`` or via the per-call ``defaults`` arg.
         perm_idx = argv.index("--permission-mode")
-        assert argv[perm_idx + 1] == "acceptEdits"
+        assert argv[perm_idx + 1] == "dontAsk"
+
+    def test_no_claude_builtins_in_default_allowlist(self, claude_provider):
+        """Claude's built-in escape-hatch tools (Read, Edit, Bash, Glob,
+        Grep, Write, Skill, WebSearch, WebFetch) are intentionally NOT
+        in the default ``--allowedTools`` list. Combined with
+        ``--permission-mode dontAsk`` (which gates strictly on the
+        allowlist) this means the agent can ONLY invoke MCP tools that
+        were explicitly wired through ``input-tools`` plus MachinaOs's
+        own MCP infrastructure tools — never the built-ins.
+
+        Disconnected workflow tools are also blocked by the per-handler
+        scope check in ``workflow_tools._build_handler`` reading the
+        rebound ``BatchContext.connected_tools``.
+        """
+        task = ClaudeTaskSpec(prompt="x")
+        argv = claude_provider.interactive_argv(task, defaults={})
+        allowed_idx = argv.index("--allowedTools")
+        allowlist = argv[allowed_idx + 1]
+        entries = [e.strip() for e in allowlist.split(",")]
+        builtins = {
+            "Read", "Edit", "Bash", "Glob", "Grep", "Write",
+            "Skill", "WebSearch", "WebFetch",
+        }
+        for entry in entries:
+            assert entry not in builtins, (
+                f"claude built-in {entry!r} leaked into default allowlist"
+            )
+        # MachinaOs MCP infrastructure must still be present so the
+        # agent can read the workspace + invoke connected skills.
+        assert "mcp__machinaos__getWorkspaceFiles" in entries
+        assert "mcp__machinaos__listSkills" in entries
+        assert "mcp__machinaos__getSkill" in entries
+        assert "mcp__machinaos__getCredential" in entries
+        assert "mcp__machinaos__broadcastLog" in entries
 
     def test_no_session_id_flag_in_interactive(self, claude_provider):
         """Claude assigns its own session UUID in interactive mode; we

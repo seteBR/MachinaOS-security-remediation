@@ -92,6 +92,37 @@ class AICliService:
         """
         provider = create_cli_provider(provider_name)
         task_list: List[BaseAICliTaskSpec] = list(tasks)
+
+        # Pass the per-workflow workspace dir
+        # (``data/workspaces/<workflow_id>/`` — injected into ctx by
+        # ``workflow.py:_get_workspace_dir``) to the spawned claude via
+        # ``--add-dir`` so claude's built-in filesystem tools (``Read``,
+        # ``Edit``, ``Glob``, ``Grep``, ``Write``, ``Bash``) can access
+        # files produced by upstream nodes (``fileDownloader``,
+        # ``documentParser``, ``code`` executors, etc.). Without this
+        # the workspace is invisible to claude: memory-bound runs spawn
+        # with ``cwd=repo_root`` and non-memory runs with
+        # ``cwd=worktree``, neither of which sees the workflow's
+        # workspace files.
+        #
+        # Mirrors the ai_agent pattern (``services/ai.py:1899`` —
+        # ``config['workspace_dir'] = context.get('workspace_dir', '')``),
+        # but uses claude's native ``--add-dir`` mechanism instead of
+        # tool-config injection because claude has its own filesystem
+        # tools rather than MCP-injected ones.
+        workspace_str = str(Path(workspace_dir).resolve())
+        for t in task_list:
+            existing_add_dir = list(getattr(t, "add_dir", []) or [])
+            if workspace_str not in existing_add_dir:
+                existing_add_dir.append(workspace_str)
+                # ``ClaudeTaskSpec.add_dir`` is ``List[str]`` per
+                # ``types.py``; ``model_copy(update=...)`` is the
+                # Pydantic-clean way to splice it without mutating.
+                if hasattr(t, "model_copy"):
+                    task_list[task_list.index(t)] = t.model_copy(
+                        update={"add_dir": existing_add_dir},
+                    )
+
         tool_names = [t.get("node_type") for t in (connected_tools or [])]
         memory_node = (
             connected_memory.get("node_id") if connected_memory else None
@@ -241,11 +272,21 @@ class AICliService:
         finally:
             async with self._lock:
                 self._active_sessions.pop(key, None)
-            # When ``use_pool`` is True, the bearer token persists with
-            # the warm PTY across batches — unregistering here would
-            # break the next batch's MCP auth. The CLI owns its token;
-            # we accept that the registration leaks until app shutdown
-            # (bounded by max pool size).
+            # When ``use_pool`` is True, the bearer token for THIS batch
+            # is consumed by ``ClaudeSessionPool.acquire`` directly:
+            #   - Cold spawn: pool stores ``token`` on
+            #     ``PooledClaudeSession.batch_token`` so it survives
+            #     across subsequent batches; ``_terminate_locked``
+            #     unregisters it when the subprocess dies (drains
+            #     FastMCP tool refcounts cleanly on eviction / pool
+            #     shutdown).
+            #   - Warm reuse: pool rebinds the surviving warm
+            #     subprocess's persistent BatchContext to this batch's
+            #     surface in place and unregisters ``token`` (which
+            #     was redundant the moment we picked the warm path).
+            # Either way the pool owns the token's fate, so we must
+            # NOT unregister here for the pool path — doing so on
+            # cold spawn would 401 every subsequent warm-reuse turn.
             if not use_pool:
                 unregister_batch(token)
 

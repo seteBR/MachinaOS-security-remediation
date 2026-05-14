@@ -220,34 +220,40 @@ class AnthropicClaudeProvider:
         elif task.continue_session:
             argv += ["--continue"]
 
-        # Allowed tools — built-in defaults plus every workflow tool we
-        # exposed via the per-batch FastMCP bridge. Same shape as the
-        # prior headless argv. With ``--permission-mode bypassPermissions``
-        # (below) the allowlist becomes documentation-of-intent rather
-        # than an active gate, but we keep it explicit so the surface is
-        # auditable. Default fallback:
-        #   - Read,Edit,Bash,Glob,Grep,Write — filesystem + shell escape hatches
-        #   - Skill — invoke materialised `.claude/skills/<name>/SKILL.md`
-        #   - WebSearch,WebFetch — escape hatches when no MCP tool matches
-        # `ToolSearch` is intentionally NOT here: it's permission-free per
-        # https://code.claude.com/docs/en/tools-reference#built-in-tools.
-        allowed = task.allowed_tools or defaults.get(
+        # Allowed tools — STRICTLY scoped to what the operator wired
+        # through ``input-tools`` plus MachinaOs's own MCP infrastructure
+        # tools. Claude's built-in escape hatches (Read, Edit, Bash,
+        # Glob, Grep, Write, Skill, WebSearch, WebFetch) are intentionally
+        # NOT in the default allowlist: they let the agent invoke
+        # capabilities the workflow didn't explicitly grant — equivalent
+        # filesystem / shell / search functionality is wired via the
+        # ``fileRead`` / ``fileModify`` / ``fsSearch`` / ``shell`` /
+        # ``browser`` / ``perplexitySearch`` workflow tools, and
+        # connected skills are surfaced via MachinaOs's own
+        # ``listSkills`` / ``getSkill`` MCP tools (no materialisation
+        # under ``.claude/skills/`` on the pool path, so the built-in
+        # ``Skill`` tool has nothing to load anyway).
+        #
+        # Callers can opt specific claude built-ins back in per-task
+        # via ``ClaudeTaskSpec.allowed_tools`` if they really need them
+        # (the field is honored verbatim; no auto-merge with workflow
+        # tools — explicit is better than implicit).
+        allowed_extra = task.allowed_tools or defaults.get(
             "default_allowed_tools",
-            self._defaults.get(
-                "default_allowed_tools",
-                "Read,Edit,Bash,Glob,Grep,Write,Skill,WebSearch,WebFetch",
-            ),
+            self._defaults.get("default_allowed_tools", ""),
         )
         allowed_list: List[str] = (
-            [t.strip() for t in allowed.split(",") if t.strip()]
-            if allowed else []
+            [t.strip() for t in allowed_extra.split(",") if t.strip()]
+            if allowed_extra else []
         )
         if connected_tool_names:
             allowed_list += [
                 f"mcp__machinaos__{name}" for name in connected_tool_names
             ]
-        # Always permit MachinaOs's built-in MCP tools so the agent can
-        # discover skills + read workspace files without prompting.
+        # MachinaOs's own MCP infrastructure tools — needed for the
+        # agent to discover connected skills, read its workspace, and
+        # surface intermediate progress. These are OUR tools, not
+        # claude's, so they stay regardless.
         allowed_list += [
             "mcp__machinaos__getWorkspaceFiles",
             "mcp__machinaos__listSkills",
@@ -258,18 +264,22 @@ class AnthropicClaudeProvider:
         if allowed_list:
             argv += ["--allowedTools", ",".join(allowed_list)]
 
-        # Permission mode — ``bypassPermissions`` for non-interactive
-        # automation. ``acceptEdits`` (the prior default) auto-permits
-        # Edit-class tools but prompts for everything else, which would
-        # hang the PTY since no human is present to approve.
-        # ``bypassPermissions`` is one of the documented permission
-        # modes (https://code.claude.com/docs/en/permission-modes) —
-        # behaviourally equivalent to ``--dangerously-skip-permissions``
-        # but uses the documented mode enum. Per-task override still
-        # honoured if the user explicitly wants ``acceptEdits``.
+        # Permission mode — ``dontAsk`` is the documented mode for
+        # "only pre-approved tools, no prompts"
+        # (https://code.claude.com/docs/en/permission-modes), which is
+        # what we want for non-interactive automation with a STRICT
+        # tool allowlist. The prior ``bypassPermissions`` default
+        # "skips the permission layer entirely" — meaning
+        # ``--allowedTools`` and ``--disallowedTools`` become
+        # documentation-only and claude's built-in Read / Edit / Bash /
+        # Glob / Grep / Write / Skill / WebSearch / WebFetch remain
+        # invocable even when not in the allowlist. ``acceptEdits``
+        # would prompt for non-Edit tools, hanging the headless agent.
+        # ``dontAsk`` is the correct middle: no prompts AND strict
+        # allowlist gating. Per-task override still honoured.
         perm = task.permission_mode or defaults.get(
             "default_permission_mode",
-            self._defaults.get("default_permission_mode", "bypassPermissions"),
+            self._defaults.get("default_permission_mode", "dontAsk"),
         )
         if perm:
             argv += ["--permission-mode", perm]

@@ -118,6 +118,75 @@ def lookup_batch(token: str) -> Optional[BatchContext]:
     return _active_tokens.get(token)
 
 
+def rebind_batch(
+    token: str,
+    *,
+    connected_tools: Optional[List[Dict[str, Any]]] = None,
+    connected_skill_names: Optional[Set[str]] = None,
+    allowed_credentials: Optional[Set[str]] = None,
+    workspace_dir: Optional[Path] = None,
+) -> Optional[BatchContext]:
+    """In-place rebind of an existing batch's surface.
+
+    Used by :class:`ClaudeSessionPool` on warm-subprocess reuse:
+    claude bakes the bearer token into its argv at spawn time (via
+    ``--mcp-config``), so a warm subprocess keeps hitting the SAME
+    token across batches. If the operator disconnects a tool between
+    batches, the bearer-token's :class:`BatchContext` must be updated
+    in place — otherwise the per-handler scope check in
+    ``workflow_tools._build_handler`` still sees the stale
+    ``connected_tools`` and lets disconnected tools fire.
+
+    For ``connected_tools``: refcount diff is applied to FastMCP — any
+    node_type that's in the OLD list but not the new gets one
+    :func:`unexpose_workflow_tools` decrement (may remove the tool
+    from FastMCP when its refcount hits zero); any node_type that's
+    new gets one :func:`expose_workflow_tools` increment. Tools that
+    survive in both lists are left alone but their ``parameters`` /
+    ``label`` fields are refreshed via the in-place list assignment.
+
+    Returns the rebound context, or ``None`` if the token is unknown.
+    """
+    ctx = _active_tokens.get(token)
+    if ctx is None:
+        return None
+    if connected_tools is not None:
+        from services.cli_agent.workflow_tools import (
+            expose_workflow_tools,
+            unexpose_workflow_tools,
+        )
+        old_by_type = {
+            t.get("node_type"): t for t in ctx.connected_tools
+            if t.get("node_type")
+        }
+        new_by_type = {
+            t.get("node_type"): t for t in connected_tools
+            if t.get("node_type")
+        }
+        added = [v for k, v in new_by_type.items() if k not in old_by_type]
+        removed = [v for k, v in old_by_type.items() if k not in new_by_type]
+        if removed:
+            unexpose_workflow_tools(removed)
+        if added:
+            expose_workflow_tools(added)
+        ctx.connected_tools = list(connected_tools)
+        logger.info(
+            "[CC-Agent MCP rebind_batch] node=%s wf=%s token=%s... "
+            "+%d -%d kept=%d (now %d tools)",
+            ctx.node_id, ctx.workflow_id, token[:8],
+            len(added), len(removed),
+            len(old_by_type.keys() & new_by_type.keys()),
+            len(ctx.connected_tools),
+        )
+    if connected_skill_names is not None:
+        ctx.connected_skill_names = set(connected_skill_names)
+    if allowed_credentials is not None:
+        ctx.allowed_credentials = set(allowed_credentials)
+    if workspace_dir is not None:
+        ctx.workspace_dir = Path(workspace_dir).resolve()
+    return ctx
+
+
 def active_batch_count() -> int:
     return len(_active_tokens)
 
