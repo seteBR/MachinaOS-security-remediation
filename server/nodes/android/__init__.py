@@ -9,6 +9,7 @@ wifi_automation, ...) live alongside as siblings.
 Wiring is body-free; both registrations are idempotent.
 """
 
+from services.plugin.service_factories import register_service_factory
 from services.plugin.shutdown_hooks import register_shutdown_hook
 from services.status_broadcaster import register_service_refresh
 from services.ws_handler_registry import (
@@ -18,6 +19,7 @@ from services.ws_handler_registry import (
 )
 
 from . import _router
+from ._dispatcher import AndroidService
 from ._events import broadcast_android_status  # noqa: F401 — re-export
 from ._handlers import WS_HANDLERS
 from ._option_loaders import load_service_actions
@@ -45,3 +47,9 @@ async def _shutdown_android_relay() -> None:
 
 
 register_shutdown_hook("android_relay", _shutdown_android_relay)
+
+# Wave 12 C4 sub-piece C: publish AndroidService as the "android"
+# service factory so core/container.py can look it up at runtime
+# without a cross-plugin top-level import. See
+# services/plugin/service_factories.py.
+register_service_factory("android", AndroidService)

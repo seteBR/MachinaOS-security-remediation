@@ -12,6 +12,8 @@ def _clog(msg):
     print(f"           container: {msg}", flush=True)
 
 
+from typing import Any
+
 from dependency_injector import containers, providers
 
 from core.config import Settings
@@ -22,12 +24,10 @@ from core.credentials_database import CredentialsDatabase
 _clog("core imports done")
 from services.ai import AIService
 _clog("AIService imported")
-from nodes.location._service import MapsService
 from services.workflow import WorkflowService
 _clog("WorkflowService imported")
 from services.auth import AuthService
 from services.text import TextService
-from nodes.android._dispatcher import AndroidService
 from services.user_auth import UserAuthService
 from services.compaction import init_compaction_service
 _clog("all service imports done")
@@ -38,6 +38,48 @@ from services.temporal import TemporalClientWrapper
 def _create_temporal_client(server_address: str, namespace: str):
     """Factory function for temporal client."""
     return TemporalClientWrapper(server_address=server_address, namespace=namespace)
+
+
+# Wave 12 C4 sub-piece C: plugin-owned service factories.
+# ``MapsService`` (nodes/location) and ``AndroidService`` (nodes/android)
+# used to be imported here at module scope so providers.Factory could
+# reference the classes directly. That made the framework DI container
+# know about specific plugins' implementation classes — direct
+# violation of the "framework knows no plugin names" rule.
+# Now the plugins self-register their service classes via
+# ``services.plugin.service_factories.register_service_factory``;
+# the container's provider declarations reference the helper functions
+# below, which look up the registered factory at instantiation time
+# (first ``container.foo()`` call). Plugin auto-discovery on startup
+# populates the registry before any service is first resolved, so
+# import-ordering is not a constraint.
+
+
+def _build_registered_service(name: str, **kwargs: Any) -> Any:
+    """Look up a plugin-registered service factory and instantiate it.
+
+    Wrapped behind a thin function so the DI container can declare
+    providers without importing the concrete service classes.
+    """
+    from services.plugin.service_factories import get_service_factory
+
+    factory = get_service_factory(name)
+    if factory is None:
+        raise RuntimeError(
+            f"DI container: service factory {name!r} is not registered. "
+            "The owning plugin failed to import (or hasn't shipped a "
+            "register_service_factory call from its __init__.py). Check "
+            "the plugin folder's __init__.py for the registration."
+        )
+    return factory(**kwargs)
+
+
+def _build_maps_service(auth_service, settings):
+    return _build_registered_service("maps", auth_service=auth_service, settings=settings)
+
+
+def _build_android_service():
+    return _build_registered_service("android")
 
 
 class Container(containers.DeclarativeContainer):
@@ -109,7 +151,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     maps_service = providers.Factory(
-        MapsService,
+        _build_maps_service,
         auth_service=auth_service,
         settings=settings
     )
@@ -119,7 +161,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     android_service = providers.Factory(
-        AndroidService
+        _build_android_service
     )
 
     compaction_service = providers.Singleton(
