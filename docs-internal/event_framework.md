@@ -7,29 +7,39 @@ Temporal-native event-routing layer for MachinaOs. Implements RFC sections
 This doc is the operator + plugin-author reference. The design rationale +
 phase plan lives in `~/.claude/plans/properly-fix-the-tech-dreamy-tarjan.md`.
 
-## Status (2026-05-14)
+## Status (2026-05-15)
+
+### Shipped
 
 | Phase | State |
 |---|---|
-| A1-A9 — Temporal primitives + CloudEvents spec compliance | ✅ shipped (commit `c3dc85a`) |
-| B1-B10 — plugin-owned `_events.py` modules (9 plugin folders) | ✅ shipped (commits `7e4ff7b`, `c4d9428`, `da63d73`, `de8be88`) |
-| B11 — FE handler migration to envelope-aware readers | ⏳ deferred to FE session |
-| C1 canary (webhookTrigger) — `TriggerListenerWorkflow` + Visibility-API registry | ✅ shipped 2026-05-14 (25 tests) |
-| C1 rollout (chat / task / telegram / whatsapp) — plugin-self-registered via `canary_registry` | ✅ shipped 2026-05-14 |
-| C2 canary (googleGmailReceive) — `PollingTriggerWorkflow` + `as_poll_activity` per-cycle activity | ✅ shipped 2026-05-15 (10 tests) |
-| C3 canary (cronScheduler) — Temporal Schedule + plugin-owned `CronTriggerWorkflow` via `SimplePlugin` | ✅ shipped 2026-05-15 (17 tests) |
-| D1 — Shared `_retry_policies` + `NodeUserError` non-retryable on workflow callsites | ✅ shipped 2026-05-15 (11 tests) |
-| D2 — Custom `event_dlq` SQLModel table | ❌ dropped 2026-05-15 — Temporal Event History + Visibility queries cover the ops-inspection use case; no separate table needed (matches the plan's "What Temporal eliminates" rationale) |
-| D2b — Retire `event_waiter.py` Redis-Streams branch | ⏸ deferred — gated on `event_framework_enabled` flipping to default-on |
-| D3 — Visibility admin WS handlers (`list_canary_listeners` / `list_canary_schedules` / `get_workflow_failure_history`) | ✅ shipped 2026-05-15 (13 tests) |
-| D4 — Drain `_LEGACY_RAW_DICT_BROADCASTS` | ⏸ blocked on B11 FE migration |
-| D5 — Auto-gen `DEFAULT_TOOL_NAMES` from `ToolNode` ClassVars | ⏳ pending — large-scope refactor |
-| C2 — Polling triggers as long-lived workflows | ⏳ pending |
-| C3 — APScheduler → Temporal Schedules | ⏳ pending |
-| C4 — Close cross-plugin `_service` reaches (4 sites) | ⏳ pending |
-| D1-D5 — Visibility / retry / DLQ / drain / Y5 | ⏳ pending |
+| A1-A9 — Temporal primitives + CloudEvents spec compliance | ✅ commit `c3dc85a` (16 tests) |
+| A7 completion — `_pop_matching_event` helper | ✅ commit `0e835e2` (4 tests) |
+| B1-B10 — plugin-owned `_events.py` modules (9 plugin folders) | ✅ commits `7e4ff7b` / `c4d9428` / `da63d73` / `de8be88` |
+| C1 canary (webhookTrigger) — `TriggerListenerWorkflow` | ✅ commit `c24bc62` (25 tests) |
+| C1 rollouts — chat / task / telegram / whatsapp | ✅ commits `850cc9d` / `0d406b9` / `688f686` / `b4db7da` |
+| C1 architecture pivot — plugin-self-registered `canary_registry` retires tribal frozenset | ✅ commit `688f686` |
+| C2 canary (googleGmailReceive) — `PollingTriggerWorkflow` + `as_poll_activity` | ✅ commit `00dbf10` (10 tests) |
+| C3 canary (cronScheduler) — Temporal Schedule + plugin-owned `CronTriggerWorkflow` via `SimplePlugin` | ✅ commit `9314aff` (17 tests) |
+| C4 sub-piece A — `social_provider_registry` closes `nodes/social→nodes/whatsapp` | ✅ commit `d1cc33c` (8 tests) |
+| C4 sub-piece B — `shutdown_hooks` registry closes 2 reaches in `main.py` lifespan + `IdempotentRegistry` reload-tolerance fix | ✅ commit `4912239` (10 tests) |
+| C4 sub-piece C — `service_factories` registry closes `core/container.py` top-level imports | ✅ commit `73c5f08` (9 tests) |
+| D1 — Shared `_retry_policies` + `NodeUserError` non-retryable | ✅ commit `751ab94` (11 tests) |
+| D3 — Visibility admin WS handlers (`list_canary_listeners` / `list_canary_schedules` / `get_workflow_failure_history`) | ✅ commit `aebfb35` (13 tests) |
 
-`Settings.event_framework_enabled` gates the new dispatch path (default off in Phase A). When off, `services.events.dispatch.emit` is a no-op pass-through; plugin emitters still call `status_broadcaster.broadcast(...)` directly, so the FE fan-out is unchanged. Turn on per-callsite for opt-in dogfooding without flipping the flag globally.
+### Dropped / Deferred / Pending
+
+| Phase | State |
+|---|---|
+| D2 — Custom `event_dlq` SQLModel table | ❌ **dropped** (commit `89b15bd`, docs only). Temporal Event History + Visibility queries cover the ops-inspection use case; reinventing them would contradict Wave 12's "Temporal-native, no custom infra" thesis. See § "Failure inspection — no separate DLQ table". |
+| D2b — Retire `event_waiter.py` Redis-Streams branch | ⏸ **deferred** — gated on `event_framework_enabled` flipping default-on. Branch is still production-live for non-canary triggers. |
+| B11 — FE handler migration to envelope-aware readers | ⏳ deferred to coordinated FE session |
+| D4 — Drain `_LEGACY_RAW_DICT_BROADCASTS` | ⏸ blocked on B11 |
+| D5 — Auto-gen `DEFAULT_TOOL_NAMES` from `ToolNode` ClassVars | ⏳ pending — ~70 plugins + `services/ai.py:2515-2780` rewrite + snapshot test |
+
+**Test surface: 256 passed + 1 xfail** across 18 event-framework test files.
+
+`Settings.event_framework_enabled` gates the new dispatch path (default-OFF). When off, `services.events.dispatch.emit` is a no-op pass-through; plugin emitters still call `status_broadcaster.broadcast(...)` directly, so the FE fan-out is unchanged. Turn on per-callsite for opt-in dogfooding without flipping the flag globally.
 
 ## What this framework does
 
