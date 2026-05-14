@@ -25,6 +25,7 @@ from machina.platform_ import platform_name, project_root
 from machina.buildenv import validate_build
 from machina.ports import kill_port
 from machina.supervisor import Manager, ServiceSpec
+from machina.commands._temporal_specs import temporal_specs
 
 
 def _has_vite(root: Path) -> bool:
@@ -78,16 +79,7 @@ def _build_specs(root: Path, cfg, *, daemon: bool, use_vite: bool) -> list[Servi
         ready_port=cfg.backend_port,
     )
 
-    return [
-        client_spec,
-        server_spec,
-        ServiceSpec(
-            name="temporal",
-            argv=["temporal", "api"],
-            cwd=root,
-            ready_port=cfg.temporal_port,
-        ),
-    ]
+    return [client_spec, server_spec, *temporal_specs(root, cfg)]
 
 
 def dev_command(

@@ -28,6 +28,7 @@ from machina.buildenv import validate_build, venv_python
 from machina.ports import kill_port
 from machina.run import which_argv
 from machina.supervisor import Manager, RestartPolicy, ServiceSpec
+from machina.commands._temporal_specs import temporal_specs
 
 
 def _sqlalchemy_preflight(root: Path) -> None:
@@ -121,14 +122,7 @@ def _build_specs(root: Path, cfg, *, temporal_running: bool) -> list[ServiceSpec
         ),
     ]
     if not temporal_running:
-        specs.append(
-            ServiceSpec(
-                name="temporal",
-                argv=["temporal", "api"],
-                cwd=root,
-                ready_port=cfg.temporal_port,
-            )
-        )
+        specs.extend(temporal_specs(root, cfg))
     return specs
 
 

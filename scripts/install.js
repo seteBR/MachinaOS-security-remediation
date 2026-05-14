@@ -118,20 +118,17 @@ if (uvVersion) {
   }
 }
 
-// Check/Install temporal-server (global CLI, binary name: temporal)
+// Temporal binary: downloaded on first backend boot by
+// server/services/temporal/_install.py via pooch (~90 MB tarball
+// cached under platformdirs.user_cache). No global npm install.
+// User-installed `temporal` on PATH (brew / scoop / cargo) is still
+// honoured by the Python supervisor's shutil.which fallback.
 let temporalVersion = getVersion('temporal --version');
-if (temporalVersion) {
-  console.log(`  temporal-server: ${temporalVersion}`);
-} else {
-  console.log('  temporal-server: not found, installing...');
-  run('npm install -g temporal-server');
-  temporalVersion = getVersion('temporal --version');
-  if (temporalVersion) {
-    console.log(`  temporal-server: ${temporalVersion}`);
-  } else {
-    console.log('  Warning: temporal-server install failed. Distributed execution unavailable.');
-  }
-}
+console.log(
+  temporalVersion
+    ? `  temporal: ${temporalVersion} (system install, will be reused)`
+    : '  temporal: managed by Python backend (pooch download on first boot)',
+);
 
 // agent-browser is a project dependency (see package.json); pnpm/npm
 // already placed it in node_modules/.pnpm/ before this postinstall ran.

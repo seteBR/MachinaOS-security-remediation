@@ -96,7 +96,6 @@
   },
   "dependencies": {
     "cross-env": "^7.0.3",
-    "temporal-server": "^0.0.10",
     "agent-browser": "latest",
     "edgymeow": "0.0.20"
   },

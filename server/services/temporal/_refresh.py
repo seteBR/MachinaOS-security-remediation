@@ -1,0 +1,52 @@
+"""WS-connect status broadcast for the Temporal+Postgres stack.
+
+Registered via ``status_broadcaster.register_service_refresh`` so the
+frontend health indicator stays current — every WebSocket client
+connect triggers ``_refresh_all_services()`` which fans out to every
+registered callback. Same idiom :mod:`nodes.telegram._refresh` uses.
+
+Also exposes :func:`temporal_status_snapshot` — the single source of
+truth for the ``{postgres, temporal}`` status shape consumed by both
+this refresh callback and ``_handlers.py``'s WS commands.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from core.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+def temporal_status_snapshot() -> dict[str, Any]:
+    """Return ``{"postgres": {...}, "temporal": {...}}`` snapshots.
+
+    Both runtimes' ``status_snapshot()`` exposes the uniform
+    ``{name, running, started_at, last_error, ...extras}`` shape every
+    ``BaseSupervisor`` subclass returns. Shared by the WS-refresh
+    callback below and the ``temporal_status`` / ``_start`` / ``_stop``
+    handlers in :mod:`services.temporal._handlers`.
+    """
+    from services.temporal._runtime import (
+        get_postgres_runtime,
+        get_temporal_server_runtime,
+    )
+
+    return {
+        "postgres": get_postgres_runtime().status_snapshot(),
+        "temporal": get_temporal_server_runtime().status_snapshot(),
+    }
+
+
+async def refresh_temporal_status() -> None:
+    """Broadcast the Temporal + Postgres status snapshots on WS connect."""
+    from services.status_broadcaster import get_status_broadcaster
+
+    broadcaster = get_status_broadcaster()
+    await broadcaster.broadcast({
+        "type": "temporal_status",
+        "data": temporal_status_snapshot(),
+    })
+
+
+__all__ = ["refresh_temporal_status", "temporal_status_snapshot"]

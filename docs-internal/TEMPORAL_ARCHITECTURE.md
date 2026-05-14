@@ -434,20 +434,52 @@ client = await Client.connect(server_address, namespace=namespace, runtime=runti
 
 ## Server Management
 
-`temporal-server` is installed globally (`npm install -g temporal-server`) and managed via CLI:
+The Temporal binary + persistence layer are managed in-process by the plugin-folder pattern at [`server/services/temporal/`](../server/services/temporal/) — the `temporal-server` npm package has been retired. Six sibling files (`_install.py`, `_runtime.py`, `_config.py`, `_handlers.py`, `_refresh.py`, plus `__init__.py` for registry wiring) match the [Wave 11 plugin-folder pattern](./plugin_system.md#self-contained-plugin-folders) that `server/nodes/whatsapp/` uses for its Go binary.
 
-```bash
-temporal-server start       # Start in background (daemon)
-temporal-server stop        # Stop server
-temporal-server status      # Show status (all 4 ports)
-temporal-server api         # Start in foreground (blocks)
-temporal-server restart     # Restart server
-temporal-server clean       # Stop + remove bin/, data/
-```
+**Persistence backends** (selected by `TEMPORAL_BACKEND` env var):
 
-**Port management**: Temporal owns its ports (7233, 8233, 8080, 9090). They are NOT in MachinaOS `allPorts` and NOT killed during port-freeing. Use `temporal-server stop` to stop Temporal.
+| Backend | When | What runs |
+|---|---|---|
+| `sqlite` (dev default) | `TEMPORAL_BACKEND=sqlite` | Single supervised process running `temporal api` (the binary's built-in `start-dev` mode). In-memory or file-based SQLite. Zero deps beyond the Temporal binary. |
+| `postgres` (prod) | `TEMPORAL_BACKEND=postgres` | Two supervised processes: `temporal-postgres` (pgserver-managed PostgreSQL 16.2) then `temporal-server` (binary with YAML config pointing at the Postgres). Ordered automatically by the supervisor's TCP readiness probe. |
 
-**Start script integration**: `scripts/start.js` checks `temporal-server status` before building the concurrently service list. If already running, skips adding Temporal (prevents `--kill-others` cascade kill). `scripts/dev.js` always includes Temporal (no `--kill-others`, so early exit is harmless).
+**Modern libs doing the heavy lifting** (zero custom infrastructure code):
+- **[`pooch`](https://pypi.org/project/pooch/)** — `services/temporal/_install.py` downloads `temporal-server` + `temporal-sql-tool` from `temporalio/temporal` GitHub releases. SHA-256 verified (digests pinned in `_install.py:_CHECKSUMS`); XDG-cached via `pooch.os_cache()`; tar.gz / zip extraction handled by `pooch.Untar()` / `pooch.Unzip()`. Falls back to `shutil.which("temporal-server")` for system installs. ~30 LOC total.
+- **[`pgserver`](https://pypi.org/project/pgserver/)** — bundles PostgreSQL 16.2 binaries cross-platform (Linux / macOS / Windows, x86_64 + ARM64) via pip. Single API: `pgserver.get_server(data_dir)` returns a managed instance. `PostgresRuntime` wraps its lifecycle in `BaseSupervisor.start()` / `.stop()`.
+- **`BaseProcessSupervisor` + `BaseSupervisor`** (`server/services/_supervisor/`) — the existing in-house supervisor base classes that `server/nodes/whatsapp/_runtime.py` already uses. Provides cross-platform signal handling (POSIX setsid + Windows Job Objects + psutil tree-kill), restart policy via tenacity, log draining, status snapshots. We subclass both — zero custom supervisor logic.
+
+**ServiceSpec wiring**: [`machina/commands/_temporal_specs.py`](../machina/commands/_temporal_specs.py) returns the right ServiceSpec set for the selected backend. Both `start.py` and `dev.py` call it. The generic [`_supervised_runtime.py`](../machina/commands/_supervised_runtime.py) shim (~50 LOC) lets the `Manager` supervisor schedule any `BaseSupervisor` singleton as a regular subprocess — `python -m machina.commands._supervised_runtime services.temporal._runtime:get_postgres_runtime`.
+
+**WS surface**: `_handlers.py` registers `temporal_status` / `temporal_start` / `temporal_stop` via `services.ws_handler_registry.register_ws_handlers`. `_refresh.py` registers a WS-connect callback via `services.status_broadcaster.register_service_refresh` so the FE health indicator stays current.
+
+**Port management**: Temporal owns ports 7233 / 8233 / 8080 / 9090. Postgres picks a dynamic free port (read via `get_postgres_runtime().uri`). Both are excluded from MachinaOS `allPorts` and from port-freeing in `scripts/start.js`.
+
+**Direct CLI access** is still possible — the `temporal` binary on PATH (or under `pooch.os_cache("machinaos-temporal")`) supports `temporal server start --config <yaml>`, `temporal-sql-tool` subcommands, and `tctl`. The supervisor invokes these binaries; you can too.
+
+**Cluster tunables** (all live in [`core/config.py:Settings`](../server/core/config.py); zero magic numbers in the runtime / config / supervisor wiring):
+
+| Setting | Env var | Default | Purpose |
+|---|---|---|---|
+| `temporal_backend` | `TEMPORAL_BACKEND` | `sqlite` | Backend selector — `sqlite` (dev) / `postgres` (prod). |
+| `temporal_frontend_grpc_port` | `TEMPORAL_FRONTEND_GRPC_PORT` | `7233` | gRPC port the SDK client connects to. Drives the readiness probe + cluster `rpcAddress`. |
+| `temporal_matching_grpc_port` | `TEMPORAL_MATCHING_GRPC_PORT` | `7235` | Internal matching service. |
+| `temporal_history_grpc_port` | `TEMPORAL_HISTORY_GRPC_PORT` | `7234` | Internal history service. |
+| `temporal_worker_grpc_port` | `TEMPORAL_WORKER_GRPC_PORT` | `7239` | Internal worker service. |
+| `temporal_bind_local_only` | `TEMPORAL_BIND_LOCAL_ONLY` | `true` | When `true`, all gRPC ports bind `127.0.0.1`. Flip to `false` for multi-host deployments (`0.0.0.0`). |
+| `temporal_num_history_shards` | `TEMPORAL_NUM_HISTORY_SHARDS` | `4` | History-shard count. Bump for higher write throughput; not online-resizable. |
+| `temporal_default_max_conns` | `TEMPORAL_DEFAULT_MAX_CONNS` | `20` | Postgres pool size for the `temporal` (history) datastore. |
+| `temporal_visibility_max_conns` | `TEMPORAL_VISIBILITY_MAX_CONNS` | `4` | Postgres pool size for the `temporal_visibility` datastore. |
+| `temporal_max_conn_lifetime` | `TEMPORAL_MAX_CONN_LIFETIME` | `1h` | Postgres connection rotation interval. Accepts Go-duration strings (`30m`, `2h`, etc.). |
+| `temporal_binary_version` | `TEMPORAL_BINARY_VERSION` | `1.31.0` | Pinned `temporalio/temporal` release tag. Bumping requires a matching entry in `_install.py:_CHECKSUMS_BY_VERSION`. |
+| `temporal_graceful_shutdown_seconds` | `TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS` | `30` | SIGTERM → SIGKILL grace window for the Temporal binary supervisor. Shared with the embedded worker shutdown. |
+| `temporal_postgres_dsn` | `TEMPORAL_POSTGRES_DSN` | (unset) | Reserved for multi-host deployments — when set, bypasses pgserver and points Temporal at an external Postgres. Out of scope for current sprint. |
+
+Two supervisor-build-time env vars (read inside `_temporal_specs.py`, not in `Settings`):
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `TEMPORAL_PG_READY_TIMEOUT_SECONDS` | `60` | How long the supervisor waits for pgserver to be ready before marking the spec failed. |
+| `TEMPORAL_SERVER_READY_TIMEOUT_SECONDS` | `120` | How long the supervisor waits for Temporal's gRPC port to come up. Includes the first-run binary download (~90 MB). |
 
 ## Debugging
 

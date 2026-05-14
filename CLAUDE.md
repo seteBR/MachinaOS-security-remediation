@@ -1583,8 +1583,16 @@ TEMPORAL_PER_TYPE_DISPATCH=true         # F4.A flag — per-type activity dispat
 TEMPORAL_AGENT_WORKFLOW_ENABLED=true    # F4.B flag — agent-as-child-workflow
 ```
 
-**Temporal Server** (`temporal-server` global CLI):
-The `temporal-server` npm package bundles the official Temporal CLI binary for local dev server with SQLite persistence. It is a **global CLI tool** (not a project dependency) — installed automatically by `scripts/install.js` and `scripts/build.js`, or manually via `npm install -g temporal-server`. The package manages its own binary download, data directory, and lifecycle.
+**Temporal binary + persistence** are managed in-process by the plugin-folder pattern under [`server/services/temporal/`](./server/services/temporal/) — the `temporal-server` npm package is no longer used. Binary distribution + lifecycle = standard libs, zero custom code:
+
+- **`_install.py`** — [`pooch`](https://pypi.org/project/pooch/) downloads `temporal-server` + `temporal-sql-tool` from `temporalio/temporal` GitHub releases (SHA-256 verified, XDG-cached cross-platform). Falls back to `shutil.which("temporal-server")` when a system install is on PATH (brew / scoop / cargo).
+- **`_runtime.py`** — `PostgresRuntime` (subclasses `BaseSupervisor`; wraps [`pgserver`](https://pypi.org/project/pgserver/) which bundles PostgreSQL 16.2 binaries cross-platform) + `TemporalServerRuntime` (subclasses `BaseProcessSupervisor`; runs the binary with a Python-rendered YAML config). Same singleton + lifecycle surface every other supervised service uses ([`nodes/whatsapp/_runtime.py`](./server/nodes/whatsapp/_runtime.py) is the template).
+- **`_config.py`** — `pyyaml.safe_dump` of the Temporal cluster config; `temporal-sql-tool create-database` + `setup-schema` + `update-schema` for both `temporal` and `temporal_visibility` Postgres databases (idempotent).
+- **`_handlers.py` + `_refresh.py`** — `temporal_status` / `_start` / `_stop` WS commands and the WS-connect status snapshot, registered through `services.ws_handler_registry` and `services.status_broadcaster.register_service_refresh`.
+
+**Backend selection** via `TEMPORAL_BACKEND` env var:
+- `sqlite` (dev default) — single ServiceSpec runs `temporal api` against an in-memory / file-based SQLite. Same dev experience as before.
+- `postgres` (prod) — two ServiceSpecs run via the `_supervised_runtime.py` shim: `temporal-postgres` (pgserver) then `temporal-server` (Temporal binary). The supervisor's TCP readiness probe orders postgres → temporal automatically.
 
 **Ports:**
 | Service   | Port | URL                    |
@@ -1593,23 +1601,18 @@ The `temporal-server` npm package bundles the official Temporal CLI binary for l
 | HTTP API  | 8233 | http://localhost:8233   |
 | Web UI    | 8080 | http://localhost:8080   |
 | Metrics   | 9090 | http://localhost:9090   |
+| Postgres  | dyn  | postgresql://...:NNNNN  (`postgres` backend; pgserver picks a free port — read via `get_postgres_runtime().uri`) |
 
-**CLI commands**:
+**CLI commands** (still available when `temporal` is on PATH or pooch-installed):
 ```bash
-temporal-server start       # Start in background (daemon mode)
-temporal-server api         # Start in foreground (blocks)
-temporal-server stop        # Stop server
-temporal-server status      # Show status (all 4 ports)
-temporal-server restart     # Restart server
-temporal-server clean       # Stop + remove bin/, data/
+temporal-server start --config <yaml>   # what TemporalServerRuntime invokes
+temporal api                            # what the sqlite ServiceSpec invokes
+temporal --version
 ```
 
-**Start script integration** (`scripts/start.js`):
-The start script checks `temporal-server status` via CLI before building the concurrently service list. If Temporal is already running, it skips adding it to concurrently (prevents `--kill-others` cascade when `temporal-server api` exits immediately with "Already running"). If not running, adds `npm:temporal:start` (`temporal-server api` in foreground mode) to the service list.
+**Start script integration** ([`machina/commands/start.py`](./machina/commands/start.py) + [`machina/commands/dev.py`](./machina/commands/dev.py)): both call `temporal_specs(root, cfg)` ([`machina/commands/_temporal_specs.py`](./machina/commands/_temporal_specs.py)) which returns the right ServiceSpec set for the chosen backend. The supervisor's `_temporal_running()` probe still short-circuits if Temporal is already running on 7233 (lets you run `temporal-server start` standalone for debugging).
 
-**Port management**: Temporal manages its own ports (7233, 8233, 8080, 9090). These ports are NOT included in MachinaOS `allPorts` and are NOT killed during port-freeing. Temporal lifecycle is managed exclusively through its own CLI (`temporal-server start/stop/status`).
-
-**Docker**: Uses official `temporalio/temporal:latest` image as a separate container — the npm package is not needed in Docker.
+**Docker**: Optional. The Python supervisor handles cross-platform lifecycle without Docker; production-scale Temporal+Postgres runs identically on Linux / macOS / Windows via pip-installed binaries.
 
 **Execution Routing** (`workflow.py`):
 1. If `TEMPORAL_ENABLED=true` and Temporal configured → `_execute_temporal()`
