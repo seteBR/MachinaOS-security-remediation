@@ -54,11 +54,33 @@ import { useNodeStatusStore } from './stores/nodeStatusStore';
 import {
   sanitizeNodesForComparison,
   sanitizeEdgesForComparison,
-  generateWorkflowId
 } from './utils/workflow';
 import { importWorkflowFromFile } from './utils/workflowExport';
-import { CATALOGUE_QUERY_KEY, type CatalogueResponse } from './hooks/useCatalogueQuery';
+import type { ValidationIssue } from './hooks/useWorkflowValidation';
 import { buildCanvasStyles } from './styles/canvasAnimations';
+
+/** Wire shape returned by the backend ``import_workflow`` WS handler.
+ *  Mirrors ``services.workflow_import.import_workflow`` — flat optional
+ *  fields rather than a discriminated union, since callers branch on
+ *  ``response.success`` + ``response.preview`` anyway. */
+interface ImportWorkflowResponse {
+  success: boolean;
+  preview?: boolean;
+  workflow_id?: string;
+  name?: string;
+  node_count?: number;
+  edge_count?: number;
+  saved_parameters?: number;
+  error?: string;
+  report?: { errors: ValidationIssue[]; warnings: ValidationIssue[] };
+  missing_credentials?: Array<{ provider_id: string; display_name: string; kind: string }>;
+  name_conflict?: boolean;
+  suggested_name?: string | null;
+  requirements?: {
+    credentials: Array<{ provider_id: string }>;
+    nodes: Array<{ type: string; version: number }>;
+  };
+}
 
 import 'reactflow/dist/style.css';
 
@@ -135,7 +157,6 @@ const DashboardContent: React.FC = () => {
   const updateWorkflow = useAppStore((s) => s.updateWorkflow);
   const loadWorkflow = useAppStore((s) => s.loadWorkflow);
   const createNewWorkflow = useAppStore((s) => s.createNewWorkflow);
-  const saveWorkflow = useAppStore((s) => s.saveWorkflow);
   const deleteWorkflow = useAppStore((s) => s.deleteWorkflow);
   const migrateCurrentWorkflow = useAppStore((s) => s.migrateCurrentWorkflow);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
@@ -144,7 +165,6 @@ const DashboardContent: React.FC = () => {
   const toggleProMode = useAppStore((s) => s.toggleProMode);
   const exportWorkflowToJSON = useAppStore((s) => s.exportWorkflowToJSON);
   const exportWorkflowToFile = useAppStore((s) => s.exportWorkflowToFile);
-  const setCurrentWorkflow = useAppStore((s) => s.setCurrentWorkflow);
   const selectedNode = useAppStore((s) => s.selectedNode);
   const setSelectedNode = useAppStore((s) => s.setSelectedNode);
   const renamingNodeId = useAppStore((s) => s.renamingNodeId);
@@ -803,108 +823,90 @@ const DashboardContent: React.FC = () => {
         const file = (e.target as HTMLInputElement).files?.[0];
         if (!file) return;
 
-        const importedWorkflow = await importWorkflowFromFile(file);
+        // Frontend parses the file (nice error message on malformed JSON);
+        // everything else — validation, name-conflict check, missing-
+        // credential cross-reference, node-id remap, save — lives in the
+        // backend `import_workflow` orchestrator. This UI is reduced to
+        // file pick + user prompts + view switch.
+        const imported = await importWorkflowFromFile(file);
+        const proposedName = imported.name || 'Imported Workflow';
 
-        // Cross-reference the export's `requirements.credentials` against
-        // the catalogue's `provider.stored` flag. Warn the user about
-        // missing credentials before saving — they can import anyway and
-        // configure later, or cancel. Older exports without `requirements`
-        // skip this step transparently.
-        const reqCreds = importedWorkflow.requirements?.credentials ?? [];
-        if (reqCreds.length > 0) {
-          const catalogue = queryClient.getQueryData<CatalogueResponse>(CATALOGUE_QUERY_KEY);
-          const providers = catalogue?.providers ?? [];
-          const missing = reqCreds
-            .map(need => providers.find(p => p.id === need.provider_id))
-            .filter((p): p is NonNullable<typeof p> => !!p && p.stored !== true)
-            .map(p => `- ${p.name} (${p.id})`);
+        let response = await sendRequest<ImportWorkflowResponse>('import_workflow', {
+          workflow: imported,
+        });
+
+        if (!response.success) {
+          const reportLines = (response.report?.errors ?? [])
+            .map((err: ValidationIssue) => `- ${err.code}: ${err.message}`)
+            .join('\n');
+          alert(
+            `Failed to import workflow: ${response.error ?? 'unknown error'}` +
+              (reportLines ? `\n\nValidation errors:\n${reportLines}` : ''),
+          );
+          return;
+        }
+
+        // Preview branch — backend wants user confirmation before saving.
+        if (response.preview) {
+          let forceCredentials = false;
+          let finalName = proposedName;
+
+          // Missing credentials prompt
+          const missing = response.missing_credentials ?? [];
           if (missing.length > 0) {
+            const lines = missing
+              .map((c: { provider_id: string; display_name: string }) =>
+                `- ${c.display_name} (${c.provider_id})`)
+              .join('\n');
             const proceed = window.confirm(
               `This workflow needs ${missing.length} credential${missing.length === 1 ? '' : 's'} ` +
-                `that ${missing.length === 1 ? 'is' : 'are'} not configured:\n\n` +
-                `${missing.join('\n')}\n\n` +
-                `You can import it anyway and configure ${missing.length === 1 ? 'it' : 'them'} later. ` +
-                `Click OK to import, or Cancel to abort.`,
+                `that ${missing.length === 1 ? 'is' : 'are'} not configured:\n\n${lines}\n\n` +
+                `Click OK to import anyway and configure ${missing.length === 1 ? 'it' : 'them'} later, ` +
+                `or Cancel to abort.`,
             );
             if (!proceed) return;
+            forceCredentials = true;
+          }
+
+          // Name conflict prompt
+          if (response.name_conflict) {
+            const suggested = response.suggested_name ?? `${proposedName} (imported)`;
+            const userInput = window.prompt(
+              `A workflow named "${proposedName}" already exists.\n\nEnter a new name for the imported workflow:`,
+              suggested,
+            );
+            if (userInput === null) return;
+            finalName = userInput.trim();
+            if (!finalName) {
+              alert('Workflow name cannot be empty');
+              return;
+            }
+          }
+
+          // Commit with confirmations
+          response = await sendRequest<ImportWorkflowResponse>('import_workflow', {
+            workflow: imported,
+            name: finalName,
+            force_credentials: forceCredentials,
+          });
+
+          if (!response.success) {
+            alert(`Failed to import workflow: ${response.error ?? 'unknown error'}`);
+            return;
           }
         }
 
-        // Check for name conflict with existing workflows
-        const existingNames = savedWorkflows.map(w => w.name.toLowerCase());
-        let finalName = importedWorkflow.name;
-
-        if (existingNames.includes(finalName.toLowerCase())) {
-          // Name conflict detected - prompt user for new name
-          const suggestedName = `${importedWorkflow.name} (imported)`;
-          const userInput = window.prompt(
-            `A workflow named "${importedWorkflow.name}" already exists.\n\nEnter a new name for the imported workflow:`,
-            suggestedName
+        if (!response.preview && response.workflow_id) {
+          // Saved server-side. The backend already broadcast
+          // `workflow.imported` (handled in WebSocketContext), so other
+          // tabs refetch the workflows list automatically. This tab
+          // switches the editor view to the new workflow.
+          await loadWorkflow(response.workflow_id);
+          alert(
+            `Workflow "${response.name}" imported with ${response.node_count} nodes ` +
+              `and ${response.edge_count} connections`,
           );
-
-          if (userInput === null) {
-            // User cancelled the import
-            return;
-          }
-
-          finalName = userInput.trim();
-
-          if (!finalName) {
-            alert('Workflow name cannot be empty');
-            return;
-          }
-
-          // Check if the new name also conflicts
-          if (existingNames.includes(finalName.toLowerCase())) {
-            alert(`A workflow named "${finalName}" also exists. Please try again with a different name.`);
-            return;
-          }
         }
-
-        const workflow = {
-          ...importedWorkflow,
-          name: finalName,
-          id: generateWorkflowId(),
-          createdAt: new Date(),
-          lastModified: new Date()
-        };
-
-        console.log('Importing workflow:', workflow);
-
-        // Save embedded nodeParameters from new-format exports
-        if (importedWorkflow.nodeParameters) {
-          for (const [nodeId, params] of Object.entries(importedWorkflow.nodeParameters)) {
-            if (params && Object.keys(params).length > 0) {
-              try {
-                await saveNodeParameters(nodeId, params);
-                console.log(`Saved parameters for node ${nodeId} (from nodeParameters)`);
-              } catch (error) {
-                console.error(`Failed to save parameters for node ${nodeId}:`, error);
-              }
-            }
-          }
-        } else {
-          // Fallback for old-format exports: save node.data if it has non-UI fields
-          for (const node of workflow.nodes) {
-            if (node.data && Object.keys(node.data).length > 0) {
-              try {
-                await saveNodeParameters(node.id, node.data);
-                console.log(`Saved parameters for node ${node.id} (from node.data fallback)`);
-              } catch (error) {
-                console.error(`Failed to save parameters for node ${node.id}:`, error);
-              }
-            }
-          }
-        }
-
-        // Set as current workflow first
-        setCurrentWorkflow(workflow);
-
-        // Auto-save to database so it appears in sidebar immediately
-        await saveWorkflow();
-
-        console.log('Workflow imported and saved successfully');
-        alert(`Workflow "${workflow.name}" imported with ${workflow.nodes.length} nodes and ${workflow.edges.length} connections`);
       } catch (error: any) {
         console.error('Import error:', error);
         alert(`Failed to import workflow: ${error.message}`);

@@ -187,6 +187,7 @@ class WorkflowEvent(BaseModel):
             "lock.released",
             "execution.started",
             "execution.stopped",
+            "imported",
         ],
         *,
         workflow_id: str,
@@ -195,7 +196,13 @@ class WorkflowEvent(BaseModel):
         """Workflow lifecycle event. Carries ``workflow_id`` both as
         ``subject`` (CloudEvents convention) and as the
         ``workflow_id`` extension attribute (existing reader
-        contract)."""
+        contract).
+
+        ``imported`` fires from ``services.workflow_import.import_workflow``
+        after the new workflow is persisted. Frontend listeners invalidate
+        the workflows query so the sidebar picks up the new entry across
+        all connected clients (browser tabs).
+        """
         return cls(
             source="machinaos://services/workflow",
             type=f"{_TYPE_PREFIX}workflow.{stage}",

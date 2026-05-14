@@ -19,6 +19,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryConfig';
 import { invalidateCatalogue } from '../hooks/useCatalogueQuery';
 import { nodeParamsQueryKey } from '../hooks/useNodeParamsQuery';
+import { WORKFLOWS_QUERY_KEY } from '../hooks/useWorkflowsQuery';
 import type { WorkflowEvent } from '../types/cloudEvents';
 import { WS_CLOSE, WS_RECONNECT } from '../lib/connectionConfig';
 import {
@@ -709,6 +710,23 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           // envelope is read for telemetry / future dispatch.
           void event;
           invalidateCatalogue(queryClient);
+          break;
+        }
+
+        case 'workflow_lifecycle': {
+          // CloudEvents-typed workflow lifecycle (today: workflow.imported).
+          // Frontend action: invalidate the workflows query so the sidebar
+          // picks up the new entry on every connected client. Other stages
+          // (deployment.started, lock.acquired, ...) are read for future
+          // dispatch but currently have side effects elsewhere.
+          const event = data as WorkflowEvent<{
+            name?: string;
+            node_count?: number;
+            edge_count?: number;
+          }>;
+          if (event?.type?.endsWith('.imported')) {
+            void queryClient.invalidateQueries({ queryKey: WORKFLOWS_QUERY_KEY });
+          }
           break;
         }
 

@@ -328,6 +328,34 @@ class StatusBroadcaster:
             "data": event.model_dump(mode="json"),
         })
 
+    async def broadcast_workflow_lifecycle(
+        self,
+        stage: str,
+        *,
+        workflow_id: str,
+        **data_extra: Any,
+    ) -> None:
+        """Emit a CloudEvents-typed workflow.{stage} broadcast.
+
+        Wraps :meth:`WorkflowEvent.workflow_lifecycle` so callers don't
+        hand-build envelopes. ``stage`` matches the factory's Literal
+        (``imported`` / ``deployment.started`` / etc.). Wire-format key
+        is ``workflow_lifecycle`` — the frontend's ``WebSocketContext``
+        routes on this key and invalidates the workflows query so the
+        sidebar refreshes across all connected clients.
+        """
+        from services.events import WorkflowEvent
+
+        event = WorkflowEvent.workflow_lifecycle(
+            stage=stage,  # type: ignore[arg-type]
+            workflow_id=workflow_id,
+            data=data_extra or None,
+        )
+        await self.broadcast({
+            "type": "workflow_lifecycle",
+            "data": event.model_dump(mode="json"),
+        })
+
     async def broadcast_node_parameters_updated(
         self,
         node_id: str,

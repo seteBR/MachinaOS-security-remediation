@@ -1,4 +1,10 @@
-"""Example workflow loader - reuses existing database.save_workflow()"""
+"""Example workflow loader - reuses existing database.save_workflow().
+
+Most of the import business logic (validation, remap, requirements
+extraction, credential cross-check, name conflict) lives in
+``services.workflow_import`` and is shared with the WS ``import_workflow``
+handler. This module is the first-launch-only convenience wrapper.
+"""
 import json
 import logging
 from pathlib import Path
@@ -31,15 +37,17 @@ def get_example_workflows() -> List[Dict[str, Any]]:
 
 
 async def import_examples_for_user(database) -> int:
-    """Import all examples using existing database.save_workflow().
+    """Import all examples using shared ``services.workflow_import`` helpers.
 
-    Dry-runs the workflow validator (services.workflow_validator) on each
-    example before saving. Validation ERRORS skip the example (a broken
-    example shipped on disk is a bug); WARNINGS are logged but allowed
-    through — first-launch missing credentials are expected.
+    Dry-runs the workflow validator on each example, remaps node ids
+    (mandatory: today's two example workflows share 6 node ids), then
+    saves the workflow + per-node parameters. Errors skip the example
+    (broken examples shipped on disk are bugs); warnings are logged but
+    allowed through — first-launch missing credentials are expected.
 
-    Returns count of workflows imported.
+    Returns the count of workflows imported.
     """
+    from services.workflow_import import remap_node_ids
     from services.workflow_validator import validate_workflow
 
     examples = get_example_workflows()
@@ -48,13 +56,18 @@ async def import_examples_for_user(database) -> int:
     for example in examples:
         # Use ID from JSON, prefixed with 'example_' for clarity
         workflow_id = f"example_{example.get('id', 'unknown')}"
-        nodes = example.get("nodes", [])
-        edges = example.get("edges", [])
-        node_parameters = example.get("nodeParameters", {})
 
-        # Pre-save validation. parameters_by_id from the JSON's
-        # ``nodeParameters`` block lets INVALID_PARAM check see the
-        # configured defaults instead of empty dicts.
+        # Rewrite every node id so two examples that share ids don't
+        # overwrite each other's parameters in the node_parameters table.
+        nodes, edges, node_parameters = remap_node_ids(
+            example.get("nodes", []),
+            example.get("edges", []),
+            example.get("nodeParameters", {}),
+        )
+
+        # Pre-save validation. parameters_by_id is the freshly-remapped
+        # map so INVALID_PARAM check sees the configured defaults instead
+        # of empty dicts.
         try:
             report = await validate_workflow(
                 nodes=nodes, edges=edges,
@@ -93,7 +106,7 @@ async def import_examples_for_user(database) -> int:
             imported += 1
             logger.info(f"Imported example: {example.get('name')}")
 
-            # Save embedded nodeParameters if present
+            # Save embedded nodeParameters under the remapped node ids.
             for node_id, params in node_parameters.items():
                 if params:
                     try:

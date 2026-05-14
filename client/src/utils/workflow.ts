@@ -26,5 +26,11 @@ export const snapToGrid = (position: { x: number; y: number }, gridSize = 20) =>
   y: Math.round(position.y / gridSize) * gridSize,
 });
 
-export const getDefaultNodePosition = (nodeCount: number): { x: number; y: number } => 
+export const getDefaultNodePosition = (nodeCount: number): { x: number; y: number } =>
   nodeCount === 0 ? { x: 100, y: 200 } : { x: 0, y: 0 };
+
+// Node-id remap on import lives backend-side in
+// ``server/services/workflow_import.py::remap_node_ids`` — the import
+// path is now backend-authoritative (``import_workflow`` WS handler),
+// so there's no need for a duplicate frontend implementation. The
+// in-canvas copy/paste path uses its own id scheme in ``useCopyPaste``.

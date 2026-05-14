@@ -1565,6 +1565,40 @@ async def handle_save_workflow(data: Dict[str, Any], websocket: WebSocket) -> Di
     return {"success": success, "workflow_id": data["workflow_id"]}
 
 
+@ws_handler()
+async def handle_import_workflow(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
+    """Import a workflow JSON. Two-step UX:
+
+    First call with just the workflow object returns a preview if
+    confirmations are needed (name conflict, missing credentials). The
+    frontend prompts the user, then re-calls with ``name`` set and
+    ``force_credentials=True`` to commit.
+
+    Body fields:
+        workflow: Raw workflow dict (nodes, edges, optional nodeParameters).
+        name: User-confirmed final workflow name; omit on first call to
+            let the server report a name conflict.
+        force_credentials: Skip the missing-credential preview gate when
+            the user has acknowledged the warning.
+
+    See ``services.workflow_import.import_workflow`` for the full
+    orchestrator contract.
+    """
+    from services.workflow_import import import_workflow
+
+    workflow_payload = data.get("workflow")
+    if not isinstance(workflow_payload, dict):
+        return {"success": False, "error": "workflow payload required"}
+
+    return await import_workflow(
+        workflow_payload,
+        name=data.get("name"),
+        force_credentials=bool(data.get("force_credentials")),
+        auth_service=container.auth_service(),
+        database=container.database(),
+    )
+
+
 async def handle_get_workflow(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Get workflow by ID."""
     database = container.database()
@@ -2777,6 +2811,7 @@ MESSAGE_HANDLERS: Dict[str, MessageHandler] = {
 
     # Workflow storage operations
     "save_workflow": handle_save_workflow,
+    "import_workflow": handle_import_workflow,
     "get_workflow": handle_get_workflow,
     "get_all_workflows": handle_get_all_workflows,
     "delete_workflow": handle_delete_workflow,
