@@ -115,11 +115,11 @@ class TestClaudeArgv:
     def test_no_claude_builtins_in_default_allowlist(self, claude_provider):
         """Claude's built-in escape-hatch tools (Read, Edit, Bash, Glob,
         Grep, Write, Skill, WebSearch, WebFetch) are intentionally NOT
-        in the default ``--allowedTools`` list. Combined with
-        ``--permission-mode dontAsk`` (which gates strictly on the
-        allowlist) this means the agent can ONLY invoke MCP tools that
-        were explicitly wired through ``input-tools`` plus MachinaOs's
-        own MCP infrastructure tools — never the built-ins.
+        in the default ``--allowedTools`` list when no skills are
+        wired. Combined with ``--permission-mode dontAsk`` (which
+        gates strictly on the allowlist) this means the agent can
+        ONLY invoke MCP tools that were explicitly wired through
+        ``input-tools`` plus MachinaOs's own MCP infrastructure tools.
 
         Disconnected workflow tools are also blocked by the per-handler
         scope check in ``workflow_tools._build_handler`` reading the
@@ -145,6 +145,50 @@ class TestClaudeArgv:
         assert "mcp__machinaos__getSkill" in entries
         assert "mcp__machinaos__getCredential" in entries
         assert "mcp__machinaos__broadcastLog" in entries
+
+    def test_skill_builtin_conditional_on_wired_skills(self, claude_provider):
+        """``Skill`` is the one claude built-in we conditionally allow
+        — present in ``--allowedTools`` iff at least one skill is wired
+        through the agent's ``input-skill`` handle. Paired with
+        :func:`services.cli_agent._skills.materialise_skills` which
+        writes the connected SKILL.md trees under
+        ``<cwd>/.claude/skills/`` before spawn so the built-in skill
+        loader has something to discover.
+
+        When no skill is wired, ``Skill`` stays out of the allowlist
+        (the strict-allowlist invariant from
+        :meth:`test_no_claude_builtins_in_default_allowlist` still
+        holds for that path).
+        """
+        task = ClaudeTaskSpec(prompt="x")
+
+        # No skills wired → Skill stays out.
+        argv_no_skills = claude_provider.interactive_argv(task, defaults={})
+        allowed_idx = argv_no_skills.index("--allowedTools")
+        entries_no_skills = [
+            e.strip() for e in argv_no_skills[allowed_idx + 1].split(",")
+        ]
+        assert "Skill" not in entries_no_skills
+
+        # Skills wired → Skill enters the allowlist.
+        argv_with_skills = claude_provider.interactive_argv(
+            task,
+            defaults={},
+            connected_skill_names=["humanify-skill", "memory-skill"],
+        )
+        allowed_idx = argv_with_skills.index("--allowedTools")
+        entries_with_skills = [
+            e.strip() for e in argv_with_skills[allowed_idx + 1].split(",")
+        ]
+        assert "Skill" in entries_with_skills
+        # Other built-ins still stay out — only Skill is conditionally
+        # enabled. The rest (Read, Edit, Bash, etc.) are never
+        # auto-added by the allowlist builder.
+        for forbidden in (
+            "Read", "Edit", "Bash", "Glob", "Grep", "Write",
+            "WebSearch", "WebFetch",
+        ):
+            assert forbidden not in entries_with_skills
 
     def test_no_session_id_flag_in_interactive(self, claude_provider):
         """Claude assigns its own session UUID in interactive mode; we

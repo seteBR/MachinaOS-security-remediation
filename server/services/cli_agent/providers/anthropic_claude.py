@@ -18,8 +18,11 @@ Subprocess: ``claude --permission-mode bypassPermissions
     `claude` discovers `mcp__machinaos__*` tools via `tools/list`.
   - ``--allowedTools`` carries the explicit allowlist (built-ins +
     every wired MCP tool) — same shape as the prior headless path.
-  - Skills are still materialised under ``<cwd>/.claude/skills/`` by
-    ``AICliSession._materialise_skills`` (unchanged).
+  - Skills are materialised under ``<cwd>/.claude/skills/`` by the
+    shared :func:`services.cli_agent._skills.materialise_skills`
+    helper (called from both ``AICliSession._pre_spawn`` AND
+    ``ClaudeSessionPool._spawn``); ``Skill`` enters
+    ``--allowedTools`` iff at least one skill is wired.
 
 **Permission mode**: ``bypassPermissions`` lets every allowlist entry
 fire without a TUI prompt — non-interactive automation has no human at
@@ -106,6 +109,7 @@ class AnthropicClaudeProvider:
         mcp_endpoint_url: Optional[str] = None,
         mcp_bearer_token: Optional[str] = None,
         connected_tool_names: Optional[List[str]] = None,
+        connected_skill_names: Optional[List[str]] = None,
         include_prompt: bool = True,
     ) -> List[str]:
         """Build the full argv for one ``claude`` invocation, VSCode-style.
@@ -250,6 +254,18 @@ class AnthropicClaudeProvider:
             allowed_list += [
                 f"mcp__machinaos__{name}" for name in connected_tool_names
             ]
+        # Conditionally enable claude's built-in ``Skill`` tool ONLY
+        # when at least one skill is wired through ``input-skill``.
+        # The spawn path (pool + non-pool) materialises connected
+        # SKILL.md files under ``<cwd>/.claude/skills/`` via the
+        # shared :func:`services.cli_agent._skills.materialise_skills`
+        # helper, so the built-in skill loader has something to
+        # discover. Skills accessed by name (`Skill <name>`) load
+        # those materialised files. If no skill is wired, ``Skill``
+        # stays disabled — strict allowlist invariant holds (see
+        # ``test_no_claude_builtins_in_default_allowlist``).
+        if connected_skill_names:
+            allowed_list.append("Skill")
         # MachinaOs's own MCP infrastructure tools — needed for the
         # agent to discover connected skills, read its workspace, and
         # surface intermediate progress. These are OUR tools, not

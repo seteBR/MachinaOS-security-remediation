@@ -212,6 +212,7 @@ class ClaudeSessionPool:
         mcp_endpoint_url: Optional[str],
         mcp_bearer_token: Optional[str],
         connected_tool_names: Optional[List[str]] = None,
+        connected_skill_names: Optional[List[str]] = None,
         workflow_id: Optional[str] = None,
     ) -> PooledClaudeSession:
         """Return a live :class:`PooledClaudeSession`.
@@ -302,6 +303,7 @@ class ClaudeSessionPool:
                 mcp_endpoint_url=mcp_endpoint_url,
                 mcp_bearer_token=mcp_bearer_token,
                 connected_tool_names=connected_tool_names,
+                connected_skill_names=connected_skill_names,
             )
             # Track the spawn-time bearer token so subsequent batches can
             # rebind the persistent BatchContext in place (warm-reuse
@@ -502,8 +504,22 @@ class ClaudeSessionPool:
         mcp_endpoint_url: Optional[str],
         mcp_bearer_token: Optional[str],
         connected_tool_names: Optional[List[str]],
+        connected_skill_names: Optional[List[str]] = None,
     ) -> PooledClaudeSession:
         """Cold-spawn a new pooled claude subprocess. Caller holds pool_lock."""
+        # Materialise connected skills under ``<cwd>/.claude/skills/``
+        # BEFORE spawning so the spawned claude sees them on its first
+        # filesystem scan. Same helper the non-pool ``AICliSession``
+        # path uses. Paired with the conditional ``Skill`` entry in
+        # ``--allowedTools`` (see ``interactive_argv``) — both fire when
+        # ``connected_skill_names`` is non-empty.
+        if connected_skill_names:
+            from services.cli_agent._skills import materialise_skills
+            await materialise_skills(
+                cwd, connected_skill_names,
+                log_label=f"pool {memory_node_id}",
+            )
+
         # ``include_prompt`` is ignored by the new ``interactive_argv``
         # (stream-json input mode reads the prompt from stdin), but we
         # pass ``False`` to make the intent explicit for any future
@@ -514,6 +530,7 @@ class ClaudeSessionPool:
             mcp_endpoint_url=mcp_endpoint_url,
             mcp_bearer_token=mcp_bearer_token,
             connected_tool_names=connected_tool_names,
+            connected_skill_names=connected_skill_names,
             include_prompt=False,
         )
 

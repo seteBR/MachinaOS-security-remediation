@@ -260,8 +260,8 @@ true` to opt out of MCP tool-search deferral so all
 `mcp__machinaos__*` tools enter context at session start.
 `--allowedTools` is the explicit allowlist, and it does NOT include
 claude's built-in escape hatches (`Read`, `Edit`, `Bash`, `Glob`,
-`Grep`, `Write`, `Skill`, `WebSearch`, `WebFetch`) — every workflow
-already wires the equivalents (`fileRead`, `fileModify`, `fsSearch`,
+`Grep`, `Write`, `WebSearch`, `WebFetch`) — every workflow already
+wires the equivalents (`fileRead`, `fileModify`, `fsSearch`,
 `shell`, `browser`, `perplexitySearch`, …) as MCP tools, and the
 built-ins were the leakage path that let the agent invoke
 capabilities the workflow didn't explicitly grant. The default
@@ -270,11 +270,21 @@ allowlist is:
 - `mcp__machinaos__<node_type>` per node connected to the agent's
   `input-tools` handle (LLM sees their typed Pydantic schemas via
   FastMCP's `tools/list` reflection on the plugin `Params`).
+- The claude built-in `Skill` — **conditional**, present iff at
+  least one skill is wired through the agent's `input-skill`
+  handle. Paired with the `materialise_skills` helper (below)
+  which writes the connected SKILL.md trees under
+  `<cwd>/.claude/skills/` so the built-in skill loader has
+  something to discover. The one exception to the
+  "no claude built-ins" rule, because the alternative (forcing the
+  agent to load every skill through the `getSkill` MCP round-trip)
+  is materially worse UX for the common case where the workflow
+  pre-wired which skills should be on the table.
 - The five MachinaOs MCP infrastructure tools — `getWorkspaceFiles`,
   `listSkills`, `getSkill`, `getCredential`, `broadcastLog` — which
-  are how the agent reads its workspace, discovers connected skills,
-  fetches scoped credentials, and surfaces intermediate progress to
-  the FE.
+  are how the agent reads its workspace, discovers connected skills
+  (when no wiring is present), fetches scoped credentials, and
+  surfaces intermediate progress to the FE.
 
 Callers wanting specific claude built-ins back in opt in per-task via
 `ClaudeTaskSpec.allowed_tools` (the field is honored verbatim — no
@@ -283,12 +293,21 @@ Combined with `--permission-mode dontAsk`, the strict allowlist is
 actually enforced (see "argv shape" above for why `bypassPermissions`
 was the wrong default).
 
-**Skills — known gap on the pool path.** `AICliSession._materialise_skills`
-writes connected skills under `<cwd>/.claude/skills/` for the one-shot
-non-pooled path. The pool path skips that materialisation; agents
-discover skills via MCP `listSkills` / `getSkill` tools at runtime
-instead. Fine for now, but pool-side skill materialisation is an open
-follow-up.
+**Skills — materialised on BOTH paths via the shared helper.**
+[`services/cli_agent/_skills.py::materialise_skills`](../server/services/cli_agent/_skills.py)
+writes one `SKILL.md` tree per connected skill under
+`<cwd>/.claude/skills/<name>/`. Filesystem skills (those declared
+under `server/skills/<group>/<name>/`) are copied wholesale via
+`shutil.copytree` so `scripts/` and `references/` survive
+intact; database skills (user-created from the UI) reconstruct
+the frontmatter (`name`, `description`, `allowed-tools`,
+`metadata`) plus the markdown body. Called from
+`AICliSession._pre_spawn` (non-pool path) and
+`ClaudeSessionPool._spawn` (pool path) — same helper, same
+semantics, so memory-bound runs get the built-in `Skill` tool
+working too (was the open follow-up before; closed now). Failure
+modes are non-fatal: a skill that fails to load or write logs at
+WARN and is skipped — the spawn continues.
 
 **Workspace dir — routed via `--add-dir`.**
 [`AICliService.run_batch`](../server/services/cli_agent/service.py)

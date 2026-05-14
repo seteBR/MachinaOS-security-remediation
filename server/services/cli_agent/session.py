@@ -37,7 +37,6 @@ import asyncio
 import json
 import os
 import re
-import shutil
 import sys
 import time
 import uuid
@@ -45,7 +44,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import anyio
-import yaml
 
 from core.logging import get_logger
 from services._supervisor.process import BaseProcessSupervisor
@@ -175,6 +173,7 @@ class AICliSession(BaseProcessSupervisor):
             mcp_endpoint_url=self._mcp_endpoint_url(),
             mcp_bearer_token=self._batch_token,
             connected_tool_names=self._connected_tool_names,
+            connected_skill_names=self._connected_skill_names,
         )
 
     def _mcp_endpoint_url(self) -> str:
@@ -264,87 +263,14 @@ class AICliSession(BaseProcessSupervisor):
 
         # 3. Materialise connected skills under cwd's `.claude/skills/`.
         # cwd is repo_root for memory-bound, worktree otherwise — both
-        # are project-scope per the spec.
+        # are project-scope per the spec. Same helper now also runs on
+        # the pool path (``ClaudeSessionPool._spawn``) so memory-bound
+        # runs get the built-in ``Skill`` tool too.
         if self._connected_skill_names:
-            await self._materialise_skills()
-
-    async def _materialise_skills(self) -> None:
-        """Write `<worktree>/.claude/skills/<name>/SKILL.md` for each
-        connected skill so the spawned claude can invoke them via the
-        built-in `Skill` tool. Filesystem skills are copied wholesale
-        (preserves `scripts/` + `references/`); DB skills are
-        reconstructed from frontmatter.
-
-        Only ``AICliSession`` (the non-pooled, one-shot agent path)
-        calls this. ``ClaudeSessionPool`` (the pooled, memory-bound
-        path) leaves skills accessible via the FastMCP server's
-        ``listSkills``/``getSkill`` tools instead. Switching the pool
-        to the standard ``--add-dir`` skill discovery is tracked
-        separately (requires restructuring ``server/skills/`` to the
-        Agent Skills `<root>/.claude/skills/<name>/SKILL.md` shape).
-        """
-        from services.skill_loader import get_skill_loader
-
-        loader = get_skill_loader()
-        # cwd-relative — repo_root for memory-bound runs, worktree otherwise.
-        skills_dir = self.cwd() / ".claude" / "skills"
-        try:
-            skills_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            logger.warning(
-                "[%s] cannot create skills dir %s: %s — skipping",
-                self.label, skills_dir, exc,
+            from services.cli_agent._skills import materialise_skills
+            await materialise_skills(
+                self.cwd(), self._connected_skill_names, log_label=self.label,
             )
-            return
-
-        for name in self._connected_skill_names:
-            try:
-                skill = await loader.load_skill_async(name)
-            except Exception as exc:
-                logger.warning(
-                    "[%s] load_skill_async(%r) failed: %s",
-                    self.label, name, exc,
-                )
-                continue
-            if skill is None:
-                logger.warning(
-                    "[%s] skill %r not found — skipping materialisation",
-                    self.label, name,
-                )
-                continue
-
-            dest = skills_dir / name
-            try:
-                if skill.metadata.path is not None:
-                    # Filesystem skill: copy whole directory tree.
-                    shutil.copytree(
-                        skill.metadata.path, dest, dirs_exist_ok=True,
-                    )
-                else:
-                    # DB skill: reconstruct frontmatter + body.
-                    dest.mkdir(parents=True, exist_ok=True)
-                    frontmatter = {
-                        "name": skill.metadata.name,
-                        "description": skill.metadata.description,
-                        "allowed-tools": " ".join(skill.metadata.allowed_tools),
-                        "metadata": skill.metadata.metadata,
-                    }
-                    body = (
-                        f"---\n"
-                        f"{yaml.safe_dump(frontmatter, sort_keys=False)}"
-                        f"---\n\n"
-                        f"{skill.instructions}"
-                    )
-                    (dest / "SKILL.md").write_text(body, encoding="utf-8")
-                logger.info(
-                    "[CC-Agent _pre_spawn] materialised skill %r -> %s",
-                    name, dest,
-                )
-            except OSError as exc:
-                logger.warning(
-                    "[%s] failed to materialise skill %r at %s: %s",
-                    self.label, name, dest, exc,
-                )
 
     # ------------------------------------------------------------------
     # _do_start: PTY spawn + JSONL watcher (interactive cutover)

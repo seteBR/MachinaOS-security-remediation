@@ -262,6 +262,7 @@ class AICliService:
                     mcp_port=port,
                     mcp_bearer_token=token,
                     connected_tools=connected_tools or [],
+                    connected_skill_names=list(connected_skill_names or []),
                     workflow_id=workflow_id,
                 )]
             else:
@@ -393,6 +394,7 @@ class AICliService:
         mcp_port: int,
         mcp_bearer_token: str,
         connected_tools: List[Dict[str, Any]],
+        connected_skill_names: List[str],
         workflow_id: str,
     ) -> SessionResult:
         """Route one memory-bound claude turn through ``ClaudeSessionPool``.
@@ -439,6 +441,7 @@ class AICliService:
             mcp_endpoint_url=mcp_endpoint_url,
             mcp_bearer_token=mcp_bearer_token,
             connected_tool_names=tool_names,
+            connected_skill_names=connected_skill_names,
             workflow_id=workflow_id,
         )
         try:
