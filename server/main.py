@@ -366,13 +366,14 @@ async def lifespan(app: FastAPI):
     if _proxy_svc:
         await _proxy_svc.shutdown()
 
-    # Close Android relay client (prevents "Unclosed client session" warning)
-    from nodes.android._relay.manager import close_relay_client
-    await close_relay_client(clear_stored_session=False)
-
-    # Shut down agent-browser daemon (prevents orphaned processes and EBUSY file locks)
-    from nodes.browser._service import shutdown_browser_service
-    await shutdown_browser_service()
+    # Wave 12 C4 sub-piece B: drain every plugin that self-registered
+    # a shutdown hook via services.plugin.shutdown_hooks. Today:
+    # android relay client (prevents "Unclosed client session" warning),
+    # browser service (prevents orphaned processes + EBUSY file locks).
+    # New plugins with cleanup needs register a hook from their
+    # __init__.py — main.py never edits.
+    from services.plugin.shutdown_hooks import run_shutdown_hooks
+    await run_shutdown_hooks()
 
     # Kill all managed processes (process manager node)
     from services.process_service import shutdown_process_service

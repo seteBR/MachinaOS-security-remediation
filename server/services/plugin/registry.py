@@ -80,23 +80,27 @@ class IdempotentRegistry(Generic[K, V]):
     def register(self, key: K, value: V) -> None:
         """Add ``key -> value``. Idempotent on equality; raises on conflict.
 
-        Equality (``!=``) instead of identity (``is not``) so the
-        registry stays idempotent across:
+        Three equivalence checks (any match = idempotent re-register):
 
-        * String / int / dataclass value types where Python does not
-          guarantee interning (e.g. two ``"/api/google/callback"``
-          literals from separate module loads).
-        * ``importlib.reload(module)`` — reload constructs fresh
-          function / class objects whose identity differs from the
-          originals, but they're functionally equivalent and should
-          re-register cleanly. The self-containment test suite relies
-          on this.
+        1. ``existing == value`` — covers strings / ints / dataclasses /
+           dicts (content-equal even on reload) and singleton instances
+           cached across imports.
+        2. **Reload tolerance for callables**: same fully-qualified
+           name (``__module__`` + ``__qualname__``) means the same
+           source-level function reloaded under fresh identity.
+           ``importlib.reload(module)`` constructs new function objects
+           that compare unequal under Python's identity-based
+           ``function.__eq__``; without this branch the
+           self-containment reload tests would break for every plugin
+           that registers a wrapper closure.
+        3. **Reload tolerance for classes**: same ``__module__`` +
+           ``__qualname__`` for class objects (same reason).
 
-        Genuinely conflicting registrations (different values for the
-        same key) still raise ``ValueError`` at import time.
+        Genuinely conflicting registrations (different values, different
+        names) still raise ``ValueError`` at import time.
         """
         existing = self._items.get(key)
-        if existing is not None and existing != value:
+        if existing is not None and not self._values_equivalent(existing, value):
             raise ValueError(
                 f"{self._name}: {key!r} is already registered by "
                 f"{_qual(existing)}; refusing to overwrite with {_qual(value)}"
@@ -104,6 +108,35 @@ class IdempotentRegistry(Generic[K, V]):
         self._items[key] = value
         if self._on_register is not None:
             self._on_register(key, value)
+
+    @staticmethod
+    def _values_equivalent(existing: object, new: object) -> bool:
+        """True iff ``existing`` and ``new`` are the same registration
+        for idempotency purposes. See :meth:`register` docstring."""
+        # Content equality first (strings, dicts, dataclasses, singletons
+        # cached across imports). Catches the bulk of cases.
+        try:
+            if existing == new:
+                return True
+        except Exception:  # noqa: BLE001 — exotic types with broken __eq__
+            pass
+
+        # Reload tolerance: callable / class objects re-defined under a
+        # fresh module-level identity still count as the "same"
+        # registration when their fully-qualified name matches.
+        existing_module = getattr(existing, "__module__", None)
+        new_module = getattr(new, "__module__", None)
+        existing_qualname = getattr(existing, "__qualname__", None)
+        new_qualname = getattr(new, "__qualname__", None)
+        if (
+            existing_qualname is not None
+            and new_qualname is not None
+            and existing_module == new_module
+            and existing_qualname == new_qualname
+        ):
+            return True
+
+        return False
 
     def get(self, key: K) -> Optional[V]:
         return self._items.get(key)
