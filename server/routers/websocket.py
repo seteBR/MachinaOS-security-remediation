@@ -1512,181 +1512,12 @@ async def handle_process_send_input(data: Dict[str, Any], websocket: WebSocket) 
 
 
 # ============================================================================
-# User Settings Handlers
+# Settings handlers — extracted to services/settings/handlers.py (Wave 13.3)
 # ============================================================================
-
-@ws_handler()
-async def handle_get_user_settings(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get user settings from database."""
-    database = container.database()
-    user_id = data.get("user_id", "default")
-    settings = await database.get_user_settings(user_id)
-
-    # Return default settings if none exist
-    if settings is None:
-        settings = {
-            "user_id": user_id,
-            "auto_save": True,
-            "auto_save_interval": 30,
-            "sidebar_default_open": True,
-            "component_palette_default_open": True
-        }
-
-    return {"settings": settings}
-
-
-@ws_handler()
-async def handle_save_user_settings(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Save user settings to database."""
-    database = container.database()
-    user_id = data.get("user_id", "default")
-    settings_data = data.get("settings", {})
-
-    success = await database.save_user_settings(settings_data, user_id)
-
-    if success:
-        # Sync process limit if changed
-        if "max_processes" in settings_data:
-            from services.process_service import get_process_service
-            get_process_service().max_processes = int(settings_data["max_processes"])
-
-        # Fetch the saved settings to return
-        settings = await database.get_user_settings(user_id)
-        return {"settings": settings}
-    else:
-        return {"success": False, "error": "Failed to save settings"}
-
-
-# ============================================================================
-# Provider Defaults Handlers
-# ============================================================================
-
-@ws_handler()
-async def handle_get_provider_defaults(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get default parameters for a provider."""
-    from services.ai import get_default_model
-    from services.model_registry import get_model_registry
-    database = container.database()
-    provider = data.get("provider", "").lower()
-    defaults = await database.get_provider_defaults(provider)
-
-    # Get default model from JSON config as fallback
-    config_default_model = get_default_model(provider)
-
-    if defaults:
-        # If DB record exists but default_model is empty, use config default
-        if not defaults.get("default_model"):
-            defaults["default_model"] = config_default_model
-        return {"provider": provider, "defaults": defaults}
-
-    # No DB record - fetch model constraints from registry for sensible defaults
-    registry = get_model_registry()
-    model_max_tokens = registry.get_max_output_tokens(config_default_model, provider)
-
-    return {
-        "provider": provider,
-        "defaults": {
-            "default_model": config_default_model,
-            "temperature": 0.7,
-            "max_tokens": model_max_tokens,
-            "thinking_enabled": False,
-            "thinking_budget": 2048,
-            "reasoning_effort": "medium",
-            "reasoning_format": "parsed",
-        }
-    }
-
-
-@ws_handler()
-async def handle_save_provider_defaults(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Save default parameters for a provider."""
-    database = container.database()
-    provider = data.get("provider", "").lower()
-    defaults = data.get("defaults", {})
-    success = await database.save_provider_defaults(provider, defaults)
-    return {"success": success, "provider": provider}
-
-
-@ws_handler()
-async def handle_get_validated_ai_providers(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get all AI providers with stored API keys and their popular models.
-
-    Returns providers that have validated keys, their stored models,
-    and the current global default provider/model from UserSettings.
-    """
-    import json
-    from pathlib import Path
-
-    auth_service = container.auth_service()
-    database = container.database()
-
-    from services.ai import PROVIDER_CONFIGS
-    AI_PROVIDERS = list(PROVIDER_CONFIGS.keys())
-
-    # Load popular models from llm_defaults.json
-    defaults_path = Path(__file__).parent.parent / "config" / "llm_defaults.json"
-    try:
-        with open(defaults_path) as f:
-            llm_defaults = json.load(f)
-    except Exception:
-        llm_defaults = {"providers": {}}
-
-    providers = []
-    for provider in AI_PROVIDERS:
-        api_key = await auth_service.get_api_key(provider, data.get("session_id", "default"))
-        if not api_key:
-            continue
-
-        # Get stored models (full list from validation)
-        stored_models = await auth_service.get_stored_models(provider, data.get("session_id", "default"))
-
-        # Get popular models from llm_defaults (the explicit entries, not _default)
-        provider_config = llm_defaults.get("providers", {}).get(provider, {})
-        default_model = provider_config.get("default_model", "")
-        popular_models = [
-            m for m in provider_config.get("max_output_tokens", {}).keys()
-            if m != "_default"
-        ]
-
-        # Get per-provider default model override
-        provider_defaults = await database.get_provider_defaults(provider)
-        if provider_defaults and provider_defaults.get("default_model"):
-            default_model = provider_defaults["default_model"]
-
-        providers.append({
-            "provider": provider,
-            "models": stored_models or [],
-            "popular_models": popular_models,
-            "default_model": default_model,
-        })
-
-    # Get global default from UserSettings
-    user_id = data.get("user_id", "default")
-    settings = await database.get_user_settings(user_id)
-    global_provider = settings.get("default_llm_provider") if settings else None
-    global_model = settings.get("default_llm_model") if settings else None
-
-    return {
-        "providers": providers,
-        "global_provider": global_provider,
-        "global_model": global_model,
-    }
-
-
-@ws_handler()
-async def handle_save_global_model(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Save the global default provider + model to UserSettings."""
-    database = container.database()
-    provider = data.get("provider", "")
-    model = data.get("model", "")
-    user_id = data.get("user_id", "default")
-
-    success = await database.save_user_settings({
-        "default_llm_provider": provider,
-        "default_llm_model": model,
-    }, user_id)
-
-    return {"success": success, "provider": provider, "model": model}
+# 6 of 8 handlers live there: get_user_settings / save_user_settings /
+# get_provider_defaults / save_provider_defaults / get_validated_ai_providers /
+# save_global_model. The remaining 2 (get_compaction_stats / configure_compaction)
+# also moved out — see the Compaction Handlers comment below.
 
 
 # ============================================================================
@@ -1732,43 +1563,10 @@ async def handle_get_api_usage_summary(data: Dict[str, Any], websocket: WebSocke
 
 
 # ============================================================================
-# Compaction Handlers
+# Compaction Handlers — extracted to services/settings/handlers.py (Wave 13.3)
 # ============================================================================
-
-@ws_handler("session_id")
-async def handle_get_compaction_stats(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get compaction statistics for a session.
-
-    Optional model/provider params enable model-aware threshold (50% of context window).
-    """
-    from services.compaction import get_compaction_service
-    svc = get_compaction_service()
-    if not svc:
-        return {"success": False, "error": "Compaction service not initialized"}
-    return await svc.stats(
-        data["session_id"],
-        model=data.get("model", ""),
-        provider=data.get("provider", ""),
-    )
-
-
-@ws_handler("session_id")
-async def handle_configure_compaction(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Configure compaction settings for a session."""
-    from services.compaction import get_compaction_service
-    svc = get_compaction_service()
-    if not svc:
-        return {"success": False, "error": "Compaction service not initialized"}
-    success = await svc.configure(data["session_id"], data.get("threshold"), data.get("enabled"))
-    return {"success": success}
-
-
-@ws_handler()
-async def handle_get_provider_usage_summary(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get aggregated token usage and cost by provider for Credentials Modal."""
-    database = container.database()
-    providers = await database.get_provider_usage_summary()
-    return {"success": True, "providers": providers}
+# get_compaction_stats + configure_compaction moved. get_provider_usage_summary
+# stays here for now (Wave 13.8 pricing extraction will move it).
 
 
 # ============================================================================
@@ -2086,22 +1884,9 @@ MESSAGE_HANDLERS: Dict[str, MessageHandler] = {
     # services/skills/handlers.py (Wave 13.1); register via the shared
     # ws_handler_registry on package import. No entries below.
 
-    # User Settings
-    "get_user_settings": handle_get_user_settings,
-    "save_user_settings": handle_save_user_settings,
-
-    # Provider Defaults
-    "get_provider_defaults": handle_get_provider_defaults,
-    "save_provider_defaults": handle_save_provider_defaults,
-    "get_validated_ai_providers": handle_get_validated_ai_providers,
-    "save_global_model": handle_save_global_model,
-
-    # Compaction
-    "get_compaction_stats": handle_get_compaction_stats,
-    "configure_compaction": handle_configure_compaction,
-
-    # Provider Usage Summary
-    "get_provider_usage_summary": handle_get_provider_usage_summary,
+    # User Settings + Provider Defaults + Compaction + Provider Usage Summary
+    # — extracted to services/settings/handlers.py (Wave 13.3); register
+    # via ws_handler_registry on package import.
 
     # Pricing Config
     "get_pricing_config": handle_get_pricing_config,

@@ -89,6 +89,11 @@ async def lifespan(app: FastAPI):
     # routers/websocket.py.
     import services.skills  # noqa: F401
 
+    # Wave 13.3: services/settings/__init__.py self-registers the 9 settings
+    # handlers (user_settings + provider_defaults + validated_ai_providers +
+    # save_global_model + compaction + provider_usage_summary).
+    import services.settings  # noqa: F401
+
     # Wire dependency injection
     container.wire(modules=[
         "routers.workflow",
