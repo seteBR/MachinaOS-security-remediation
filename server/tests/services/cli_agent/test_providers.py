@@ -150,7 +150,7 @@ class TestClaudeArgv:
         """``Skill`` is the one claude built-in we conditionally allow
         — present in ``--allowedTools`` iff at least one skill is wired
         through the agent's ``input-skill`` handle. Paired with
-        :func:`services.cli_agent._skills.materialise_skills` which
+        :func:`nodes.agent.claude_code_agent._skills.materialise_skills` which
         writes the connected SKILL.md trees under
         ``<cwd>/.claude/skills/`` before spawn so the built-in skill
         loader has something to discover.

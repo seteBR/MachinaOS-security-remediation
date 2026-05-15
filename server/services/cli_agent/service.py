@@ -405,8 +405,14 @@ class AICliService:
         ``/clear`` rotation and new-UUID capture happen inside the pool.
         The MCP bearer token stays with the spawned claude across batches
         — see the use-pool branch in :meth:`run_batch` for the rationale.
+
+        The pool lives in the plugin folder (per the canonical
+        plugin-folder layout); we look it up through the
+        :func:`services.cli_agent.factory.get_session_pool` registry
+        instead of importing directly so the framework stays free of
+        any ``services → nodes`` layering violation.
         """
-        from services.cli_agent.session_pool import get_session_pool
+        from services.cli_agent.factory import get_session_pool
 
         if not isinstance(task, ClaudeTaskSpec):
             raise TypeError(
@@ -414,7 +420,14 @@ class AICliService:
                 f"{type(task).__name__}"
             )
 
-        pool = get_session_pool()
+        pool = get_session_pool("claude")
+        if pool is None:
+            raise RuntimeError(
+                "No session pool registered for 'claude'. The "
+                "claude_code_agent plugin's __init__.py should call "
+                "register_session_pool('claude', get_session_pool). "
+                "Did its module fail to import?"
+            )
         await pool.start_reaper()
 
         mcp_endpoint_url = (

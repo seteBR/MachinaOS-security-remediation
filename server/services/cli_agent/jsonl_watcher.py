@@ -200,7 +200,7 @@ class JsonlWatcher:
 class JsonlDirWatcher:
     """Watch a directory for newly-appearing ``.jsonl`` files.
 
-    Used by :class:`services.cli_agent.session_pool.ClaudeSessionPool`
+    Used by :class:`nodes.agent.claude_code_agent._pool.ClaudeSessionPool`
     to capture the new session UUID after sending ``/clear``: claude
     mints a fresh UUID and starts writing to
     ``<project_key>/<new_uuid>.jsonl``; the watcher fires the callback

@@ -141,7 +141,7 @@ class PooledClaudeSession:
     workspace_dir: Optional[Path] = None
     # Set of skill names currently materialised under
     # ``<workspace_dir>/.claude/skills/`` for this warm subprocess.
-    # The pool calls :func:`services.cli_agent._skills.materialise_skills`
+    # The pool calls :func:`nodes.agent.claude_code_agent._skills.materialise_skills`
     # with this as the ``previous_skill_names`` arg on every warm
     # reuse, so only the delta is touched on disk. Claude's filesystem
     # watcher picks up add/remove events without respawning.
@@ -304,7 +304,7 @@ class ClaudeSessionPool:
                 # ``existing.materialised_skills`` and only touches
                 # the delta on disk.
                 if existing.workspace_dir is not None:
-                    from services.cli_agent._skills import materialise_skills
+                    from ._skills import materialise_skills
                     new_set = frozenset(connected_skill_names or [])
                     added, removed = await materialise_skills(
                         existing.workspace_dir,
@@ -572,7 +572,7 @@ class ClaudeSessionPool:
         # Falls back to ``cwd`` only when no workspace_dir was
         # provided (defensive — every production caller passes one).
         if connected_skill_names:
-            from services.cli_agent._skills import materialise_skills
+            from ._skills import materialise_skills
             target_dir = workspace_dir or cwd
             await materialise_skills(
                 target_dir, connected_skill_names,

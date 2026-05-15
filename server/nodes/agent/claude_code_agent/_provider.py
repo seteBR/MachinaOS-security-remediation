@@ -19,7 +19,7 @@ Subprocess: ``claude --permission-mode bypassPermissions
   - ``--allowedTools`` carries the explicit allowlist (built-ins +
     every wired MCP tool) — same shape as the prior headless path.
   - Skills are materialised under ``<cwd>/.claude/skills/`` by the
-    shared :func:`services.cli_agent._skills.materialise_skills`
+    shared :func:`nodes.agent.claude_code_agent._skills.materialise_skills`
     helper (called from both ``AICliSession._pre_spawn`` AND
     ``ClaudeSessionPool._spawn``); ``Skill`` enters
     ``--allowedTools`` iff at least one skill is wired.
@@ -270,7 +270,7 @@ class AnthropicClaudeProvider:
         # when at least one skill is wired through ``input-skill``.
         # The spawn path (pool + non-pool) materialises connected
         # SKILL.md files under ``<cwd>/.claude/skills/`` via the
-        # shared :func:`services.cli_agent._skills.materialise_skills`
+        # shared :func:`nodes.agent.claude_code_agent._skills.materialise_skills`
         # helper, so the built-in skill loader has something to
         # discover. Skills accessed by name (`Skill <name>`) load
         # those materialised files. If no skill is wired, ``Skill``

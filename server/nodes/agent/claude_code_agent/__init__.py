@@ -43,12 +43,21 @@ from services.cli_agent.types import SessionResultModel  # noqa: E402
 # ``docs-internal/plugin_system.md`` § "Self-contained plugin folders"),
 # the plugin folder owns its provider class + auth helpers + session
 # pool + skill materialiser. The generic framework
-# (``services/cli_agent/``) doesn't import from us — it asks the
-# ``register_provider`` registry for the provider class by name.
-from services.cli_agent.factory import register_provider  # noqa: E402
+# (``services/cli_agent/``) doesn't import from us — it asks three
+# parallel registries (one per concern, all in ``factory.py``) for
+# the right callable by provider name.
+from services.cli_agent.factory import (  # noqa: E402
+    register_provider,
+    register_session_pool,
+    register_skill_materialiser,
+)
+from ._pool import get_session_pool as _claude_get_session_pool  # noqa: E402
 from ._provider import AnthropicClaudeProvider  # noqa: E402
+from ._skills import materialise_skills as _claude_materialise_skills  # noqa: E402
 
 register_provider("claude", AnthropicClaudeProvider)
+register_session_pool("claude", _claude_get_session_pool)
+register_skill_materialiser("claude", _claude_materialise_skills)
 
 
 # Claude Code-supported models. Per

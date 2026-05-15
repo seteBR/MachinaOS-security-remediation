@@ -39,10 +39,10 @@ async def main() -> int:
     server_dir = Path(__file__).resolve().parent.parent
     sys.path.insert(0, str(server_dir))
 
-    from services.cli_agent._skills import materialise_skills
-    from services.cli_agent.session_pool import get_session_pool
     from services.cli_agent.types import ClaudeTaskSpec
     from nodes.agent.claude_code_agent._oauth import MACHINA_CLAUDE_DIR
+    from nodes.agent.claude_code_agent._pool import get_session_pool
+    from nodes.agent.claude_code_agent._skills import materialise_skills
 
     repo_root = server_dir.parent
     memory_node_id = "smoke-test-memory"

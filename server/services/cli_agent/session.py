@@ -273,17 +273,23 @@ class AICliSession(BaseProcessSupervisor):
         # when both share ``cwd=repo_root``. Claude discovers them
         # via ``--add-dir <workspace_dir>`` (emitted in argv) per the
         # skills spec's "Automatic discovery from parent and nested
-        # directories" rule. Same helper now also runs on the pool
-        # path so memory-bound runs get the built-in ``Skill`` tool
-        # too.
+        # directories" rule.
+        #
+        # The materialiser is provider-specific (only claude honours
+        # SKILL.md per the Anthropic Skills spec); we look it up
+        # through ``factory.get_skill_materialiser`` so the framework
+        # stays decoupled from the plugin's implementation. Codex /
+        # Gemini don't register one → call is a no-op.
         if self._connected_skill_names:
-            from services.cli_agent._skills import materialise_skills
-            await materialise_skills(
-                self._workspace_dir,
-                self._connected_skill_names,
-                previous_skill_names=None,
-                log_label=self.label,
-            )
+            from services.cli_agent.factory import get_skill_materialiser
+            materialiser = get_skill_materialiser(self._provider.name)
+            if materialiser is not None:
+                await materialiser(
+                    self._workspace_dir,
+                    self._connected_skill_names,
+                    previous_skill_names=None,
+                    log_label=self.label,
+                )
 
     # ------------------------------------------------------------------
     # _do_start: PTY spawn + JSONL watcher (interactive cutover)
