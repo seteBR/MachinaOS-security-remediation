@@ -96,10 +96,7 @@ async def handle_get_status(data: Dict[str, Any], websocket: WebSocket) -> Dict[
     return {"type": "full_status", "data": broadcaster.get_status()}
 
 
-async def handle_get_android_status(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get Android connection status."""
-    broadcaster = get_status_broadcaster()
-    return {"type": "android_status", "data": broadcaster.get_android_status()}
+# handle_get_android_status moved to nodes/android/_handlers.py (Wave 13.9).
 
 
 async def handle_get_node_status(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
@@ -1210,29 +1207,10 @@ async def handle_process_send_input(data: Dict[str, Any], websocket: WebSocket) 
 
 
 # ============================================================================
-# Pricing Config Handlers
+# Pricing Config Handlers — extracted to services/pricing_handlers.py (Wave 13.8)
 # ============================================================================
-
-@ws_handler()
-async def handle_get_pricing_config(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get full pricing configuration for display/editing."""
-    from services.pricing import get_pricing_service
-    pricing = get_pricing_service()
-    return {"success": True, "config": pricing.get_config()}
-
-
-@ws_handler()
-async def handle_save_pricing_config(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Save updated pricing configuration."""
-    from services.pricing import get_pricing_service
-
-    config = data.get('config')
-    if not config:
-        return {"success": False, "error": "No config provided"}
-
-    pricing = get_pricing_service()
-    success = pricing.save_config(config)
-    return {"success": success}
+# 3 handlers (get_pricing_config / save_pricing_config / get_api_usage_summary)
+# self-register on services/pricing_handlers.py import.
 
 
 @ws_handler()
@@ -1240,15 +1218,6 @@ async def handle_get_node_allowlist(data: Dict[str, Any], websocket: WebSocket) 
     """Return the node allowlist that controls which nodes appear in the palette."""
     from services.node_allowlist import get_node_allowlist_service
     return get_node_allowlist_service().get_config()
-
-
-@ws_handler()
-async def handle_get_api_usage_summary(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Get aggregated API usage and cost by service (Twitter, etc.)."""
-    database = container.database()
-    service = data.get('service')  # Optional filter by service
-    services = await database.get_api_usage_summary(service)
-    return {"success": True, "services": services}
 
 
 # ============================================================================
@@ -1325,7 +1294,7 @@ MESSAGE_HANDLERS: Dict[str, MessageHandler] = {
     # Status/ping
     "ping": handle_ping,
     "get_status": handle_get_status,
-    "get_android_status": handle_get_android_status,
+    # get_android_status moved to nodes/android/_handlers.py (Wave 13.9)
     "get_node_status": handle_get_node_status,
     "get_variable": handle_get_variable,
 
@@ -1444,10 +1413,8 @@ MESSAGE_HANDLERS: Dict[str, MessageHandler] = {
     # — extracted to services/settings/handlers.py (Wave 13.3); register
     # via ws_handler_registry on package import.
 
-    # Pricing Config
-    "get_pricing_config": handle_get_pricing_config,
-    "save_pricing_config": handle_save_pricing_config,
-    "get_api_usage_summary": handle_get_api_usage_summary,
+    # Pricing Config — extracted to services/pricing_handlers.py (Wave 13.8);
+    # registered via ws_handler_registry on package import.
 
     # Node Allowlist (UI palette filter)
     "get_node_allowlist": handle_get_node_allowlist,

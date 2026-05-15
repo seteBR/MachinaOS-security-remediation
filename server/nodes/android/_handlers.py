@@ -29,6 +29,12 @@ from services.status_broadcaster import get_status_broadcaster
 logger = get_logger(__name__)
 
 
+async def handle_get_android_status(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
+    """Get Android connection status (Wave 13.9 — moved from routers/websocket.py)."""
+    broadcaster = get_status_broadcaster()
+    return {"type": "android_status", "data": broadcaster.get_android_status()}
+
+
 async def handle_get_android_devices(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Get list of connected Android devices."""
     from services.plugin.deps import get_android_service
@@ -146,6 +152,7 @@ async def handle_android_relay_reconnect(data: Dict[str, Any], websocket: WebSoc
 
 
 WS_HANDLERS = {
+    "get_android_status": handle_get_android_status,
     "get_android_devices": handle_get_android_devices,
     "execute_android_action": handle_execute_android_action,
     "android_relay_connect": handle_android_relay_connect,

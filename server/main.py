@@ -37,25 +37,27 @@ _startup_log("Importing FastAPI...")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-_startup_log("Importing DI container + all services...")
-from core.container import container
+# Configure logging FIRST — before any imports that may trigger
+# ``logger.debug(...)`` calls (DI container, routers, plugin
+# self-registration). Otherwise structlog's *default* processor chain
+# wins on first use, which includes ``TimeStamper`` and produces
+# double-time output (``[10:51:08.157] server | 2026-05-15 10:51:08
+# [debug] ...``) because the supervisor already prepends
+# ``[HH:MM:SS.fff]`` to every aggregated line.
 _startup_log("Importing settings + logging...")
 from core.config import Settings
 from core.logging import configure_logging, get_logger, setup_websocket_logging, shutdown_websocket_logging
 from core.tracing import init_tracing
-_startup_log("Importing routers...")
-from routers import workflow, database, nodejs_compat, websocket, webhook, auth, credentials, schemas
-_startup_log("All imports complete")
-
-# Initialize settings, logging, and tracing.
-# init_tracing() registers the OpenTelemetry TracerProvider with a
-# ConsoleSpanExporter so every span emitted via
-# ``trace.get_tracer(__name__).start_as_current_span(...)`` shows up in
-# stdout for cold-start benchmarking.
 settings = Settings()
 configure_logging(settings)
 init_tracing()
 logger = get_logger(__name__)
+
+_startup_log("Importing DI container + all services...")
+from core.container import container
+_startup_log("Importing routers...")
+from routers import workflow, database, nodejs_compat, websocket, webhook, auth, credentials, schemas
+_startup_log("All imports complete")
 
 # Suppress noisy loggers
 import logging
@@ -108,7 +110,11 @@ async def lifespan(app: FastAPI):
     # get_workflow / get_all_workflows / delete_workflow).
     import services.workflow_storage  # noqa: F401
 
-    # Wire dependency injection
+    # Wave 13.8: services/pricing_handlers.py self-registers the 3
+    # pricing handlers (get_pricing_config / save_pricing_config /
+    # get_api_usage_summary). Flat module (sibling to services/pricing.py)
+    # to avoid renaming the existing `services.pricing` import path.
+    import services.pricing_handlers  # noqa: F401
     container.wire(modules=[
         "routers.workflow",
         "routers.database",
