@@ -98,6 +98,11 @@ async def lifespan(app: FastAPI):
     # team-lifecycle handlers (create_team / get_team / ... / get_team_messages).
     import services.agent_teams  # noqa: F401
 
+    # Wave 13.5: services/credentials/__init__.py self-registers the 4
+    # credential CRUD handlers (validate_api_key / get_stored_api_key /
+    # save_api_key / delete_api_key).
+    import services.credentials  # noqa: F401
+
     # Wire dependency injection
     container.wire(modules=[
         "routers.workflow",

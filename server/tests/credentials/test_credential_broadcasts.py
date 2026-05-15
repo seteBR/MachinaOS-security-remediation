@@ -74,7 +74,8 @@ class TestCredentialMutationHandlersBroadcast:
         )
 
     def test_save_api_key_broadcasts(self):
-        from routers import websocket as ws_module
+        # Wave 13.5: moved to services.credentials.handlers.
+        from services.credentials import handlers as ws_module
 
         src = _handler_source(ws_module.handle_save_api_key)
         assert _BROADCAST_PATTERN.search(src), (
@@ -84,7 +85,8 @@ class TestCredentialMutationHandlersBroadcast:
         )
 
     def test_delete_api_key_broadcasts(self):
-        from routers import websocket as ws_module
+        # Wave 13.5: moved to services.credentials.handlers.
+        from services.credentials import handlers as ws_module
 
         src = _handler_source(ws_module.handle_delete_api_key)
         # Delete must trigger BOTH broadcasts: api_key_status (clears

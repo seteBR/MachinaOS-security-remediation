@@ -18,7 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from routers import websocket as ws_module
+# Wave 13.5: API key handlers moved from routers.websocket to
+# services.credentials.handlers. Aliasing the new module so the existing
+# ``ws_module.handle_xxx`` references below keep working unchanged.
+from services.credentials import handlers as ws_module
 
 
 pytestmark = pytest.mark.credentials
