@@ -27,6 +27,7 @@ from services.ws_handler_registry import (
 )
 
 from . import _router
+from ._events import dispatch_twitter_event_received  # noqa: F401 — re-export
 from ._filters import build_filter as build_twitter_filter
 from ._handlers import WS_HANDLERS
 from ._refresh import refresh_twitter_status

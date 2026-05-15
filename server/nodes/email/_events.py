@@ -1,4 +1,4 @@
-"""Wave 12 B4: CloudEvents factories + broadcaster wrappers for email.
+"""Wave 12 B4 + canary opt-in: CloudEvents factories + dispatcher for email.
 
 Plugin-specific event emission — replaces:
   - ``event_waiter.dispatch("email_received", email_data)`` in
@@ -9,9 +9,14 @@ the plugin folder.
 
 Legacy ``event_type`` (``"email_received"``) is preserved on the
 dispatch path so the ``emailReceive`` trigger node's ``event_type``
-ClassVar still matches without a coordinated registry-side rename
-(Phase B11 / C1 will swap to the typed
-``com.machinaos.email.message.received`` form together).
+ClassVar still matches without a coordinated registry-side rename.
+
+Dual-dispatch (canary opt-in, post-2026-05-15):
+  - Legacy ``event_waiter.dispatch`` for the in-process collector/processor
+    (still production-live for non-canary triggers).
+  - Typed ``services.events.dispatch.emit`` for Temporal-durable
+    ``TriggerListenerWorkflow`` consumers (when canary registry +
+    ``event_framework_enabled`` are both on — both default-true).
 """
 
 from __future__ import annotations
@@ -46,16 +51,38 @@ def email_message_received(email_data: Mapping[str, Any]) -> WorkflowEvent:
 # ---- Dispatcher wrapper ----------------------------------------------------
 
 
-def dispatch_email_received(email_data: Mapping[str, Any]) -> int:
+async def dispatch_email_received(email_data: Mapping[str, Any]) -> int:
     """Dispatch an incoming email to waiting ``emailReceive`` trigger
-    nodes. Returns the count of resolved waiters.
+    nodes.
 
-    Replaces the direct ``event_waiter.dispatch("email_received", ...)``
-    call in ``email_receive/__init__.py``.
+    Two delivery paths (mirrors :func:`telegram._events.dispatch_telegram_message_received`):
+
+    1. **Legacy event_waiter waiters** via :func:`event_waiter.dispatch`
+       (in-process collector/processor; still default for trigger nodes
+       outside the canary registry).
+    2. **Temporal-durable listeners** via
+       :func:`services.events.dispatch.emit`. ``emit`` is a pass-through
+       no-op when ``event_framework_enabled`` is off; otherwise it
+       Visibility-queries running ``TriggerListenerWorkflow`` instances
+       and signals each.
+
+    Returns the count of legacy waiters resolved.
     """
     from services import event_waiter
+    from services.events.dispatch import emit
 
-    return event_waiter.dispatch(_LEGACY_EVENT_TYPE, dict(email_data))
+    payload = dict(email_data)
+    resolved = event_waiter.dispatch(_LEGACY_EVENT_TYPE, payload)
+
+    # Temporal-durable fan-out (canary opt-in via
+    # ``register_canary_trigger_type("emailReceive")`` in
+    # ``nodes/email/__init__.py``).
+    await emit(
+        email_message_received(payload),
+        wire_routing_key=_LEGACY_EVENT_TYPE,
+    )
+
+    return resolved
 
 
 __all__ = [

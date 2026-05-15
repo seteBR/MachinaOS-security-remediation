@@ -159,10 +159,13 @@ class EmailReceiveNode(PollingTriggerNode):
                         poll["folder"],
                     )
 
-                # Wave 12 B4: route through plugin _events.py wrapper.
+                # Wave 12 B4 + canary opt-in: route through plugin
+                # _events.py wrapper. Dual-dispatch via event_waiter
+                # (legacy collector) + dispatch.emit (Temporal-durable
+                # TriggerListenerWorkflow consumers).
                 from nodes.email import dispatch_email_received
 
-                dispatch_email_received(email_data)
+                await dispatch_email_received(email_data)
                 return {
                     "success": True, "node_id": node_id, "node_type": self.type,
                     "result": email_data,
