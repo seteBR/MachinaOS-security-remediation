@@ -31,6 +31,7 @@ surface is one registration call inside that plugin's package.
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Any, Awaitable, Callable, Dict, List
 
@@ -42,6 +43,38 @@ logger = logging.getLogger(__name__)
 
 WSHandler = Callable[[Dict[str, Any], WebSocket], Awaitable[Dict[str, Any]]]
 LoadOptionsFn = Callable[[Dict[str, Any]], Awaitable[List[Dict[str, Any]]]]
+
+
+# ---- WS-handler decorator ------------------------------------------------
+
+
+def ws_handler(*required_fields: str):
+    """Decorator for WebSocket handlers.
+
+    Validates required fields are non-empty and wraps exceptions into a
+    ``{"success": False, "error": str(e)}`` envelope. Default-injects
+    ``{"success": True}`` when the handler body omits it.
+
+    Moved from ``routers/websocket.py`` (Wave 13) so domain modules
+    under ``services/`` can decorate their own handlers without a
+    circular import on the router.
+    """
+    def decorator(func: WSHandler) -> WSHandler:
+        @functools.wraps(func)
+        async def wrapper(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
+            for field in required_fields:
+                if not data.get(field):
+                    return {"success": False, "error": f"{field} required"}
+            try:
+                result = await func(data, websocket)
+                if "success" not in result:
+                    result = {"success": True, **result}
+                return result
+            except Exception as e:
+                logger.error(f"Handler error: {e}", exc_info=True)
+                return {"success": False, "error": str(e)}
+        return wrapper
+    return decorator
 
 _WS_REGISTRY: IdempotentRegistry[str, WSHandler] = IdempotentRegistry("ws_handler")
 _ROUTER_REGISTRY: IdempotentRegistry[str, APIRouter] = IdempotentRegistry("router")

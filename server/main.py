@@ -83,6 +83,12 @@ async def lifespan(app: FastAPI):
     # `cli_login` / `cli_auth_status` into `services.ws_handler_registry`.
     import services.cli_agent  # noqa: F401
 
+    # Wave 13.1: services/skills/__init__.py self-registers the 13 skill
+    # WS handlers (get_skill_content / user-skill CRUD / clear_memory /
+    # reset_skill / ...) into ws_handler_registry — moved out of
+    # routers/websocket.py.
+    import services.skills  # noqa: F401
+
     # Wire dependency injection
     container.wire(modules=[
         "routers.workflow",
