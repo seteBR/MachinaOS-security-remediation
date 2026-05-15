@@ -2767,9 +2767,13 @@ MESSAGE_HANDLERS: Dict[str, MessageHandler] = {
     "save_api_key": handle_save_api_key,
     "delete_api_key": handle_delete_api_key,
 
-    # Claude OAuth operations
-    "claude_oauth_login": handle_claude_oauth_login,
-    "claude_oauth_status": handle_claude_oauth_status,
+    # Claude/Codex login handlers live in the plugin folders + framework:
+    # - ``claude_code_login`` / ``claude_code_logout`` registered by
+    #   ``nodes/agent/claude_code_agent/__init__.py``.
+    # - ``codex_cli_login`` / ``codex_cli_logout`` registered by
+    #   ``services/cli_agent/__init__.py``.
+    # Both go through ``services.ws_handler_registry``; nothing to
+    # mount in MESSAGE_HANDLERS here.
 
     # Twitter OAuth operations
 
