@@ -35,6 +35,8 @@ class GmapsNearbyPlacesNode(ActionNode):
     group = ("location", "service", "tool")
     description = "Google Places API nearbySearch"
     component_kind = "square"
+    tool_name = "nearby_places"
+    tool_description = "Search for nearby places (restaurants, hospitals, banks, etc.) using Google Maps Places API."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

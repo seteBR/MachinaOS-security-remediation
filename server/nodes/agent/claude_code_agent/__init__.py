@@ -240,6 +240,7 @@ class ClaudeCodeAgentNode(ActionNode):
         "Each task is isolated in its own git worktree."
     )
     component_kind = "agent"
+    tool_description = "ONE-SHOT delegation to Claude Code Agent. Call ONCE per task, returns task_id. Agentic coding with file reading, editing, and command execution - do NOT re-call."
     handles = std_agent_handles()
     ui_hints = STD_AGENT_HINTS
     annotations = {"destructive": True, "readonly": False, "open_world": True}

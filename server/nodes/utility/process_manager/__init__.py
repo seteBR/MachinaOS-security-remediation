@@ -44,6 +44,8 @@ class ProcessManagerNode(ActionNode):
     group = ("utility", "tool")
     description = "Start, stop, restart, and manage long-running processes"
     component_kind = "square"
+    tool_name = "process_manager"
+    tool_description = "Start, stop, and manage long-running processes (dev servers, watchers, build tools). Operations: start (spawn a process), stop (kill process tree), restart, list (show all running), send_input (write to stdin), get_output (read recent output lines). Output streams to Terminal tab. Use get_output to check what a process printed."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

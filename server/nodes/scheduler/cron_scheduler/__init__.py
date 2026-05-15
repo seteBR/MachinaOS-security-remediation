@@ -196,6 +196,8 @@ class CronSchedulerNode(ActionNode):
     group = ("scheduler", "trigger", "tool")
     description = "Cron expression-based scheduling trigger"
     component_kind = "trigger"
+    tool_name = "cron_scheduler"
+    tool_description = "Schedule a delayed or recurring execution. Supports seconds, minutes, hours, daily, weekly, monthly frequencies with timezone. Use frequency to set schedule type, then set the relevant interval/time parameters."
     handles = (
         {"name": "output-main", "kind": "output", "position": "right",
          "label": "Output", "role": "main"},

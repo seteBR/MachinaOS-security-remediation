@@ -96,6 +96,8 @@ class CalendarNode(ActionNode):
     group = ("google", "tool")
     description = "Google Calendar create / list / update / delete events"
     component_kind = "square"
+    tool_name = "google_calendar"
+    tool_description = "Manage Google Calendar events. Operations: create (new event), list (events in date range), update (modify event), delete (remove event)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

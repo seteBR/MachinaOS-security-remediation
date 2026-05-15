@@ -5,3 +5,4 @@ class SystemInfoNode(AndroidServiceBase):
     type = "systemInfo"
     display_name = "System Info"
     description = "Get device and OS information"
+    tool_name = "android_system_info"

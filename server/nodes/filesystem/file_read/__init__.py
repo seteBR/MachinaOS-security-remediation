@@ -30,6 +30,8 @@ class FileReadNode(ActionNode):
     subtitle = "Read Contents"
     group = ("filesystem", "tool")
     description = "Read file contents with line numbers and pagination"
+    tool_name = "file_read"
+    tool_description = "Read file contents with pagination. Returns line-numbered text."
     component_kind = "square"
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},

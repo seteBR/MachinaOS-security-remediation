@@ -25,5 +25,6 @@ class AppLauncherNode(AndroidServiceBase):
     type = "appLauncher"
     display_name = "App Launcher"
     description = "Launch applications by package name"
+    tool_name = "android_app_launcher"
 
     Params = AppLauncherParams

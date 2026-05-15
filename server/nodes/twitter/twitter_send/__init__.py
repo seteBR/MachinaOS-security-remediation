@@ -172,6 +172,8 @@ class TwitterSendNode(ActionNode):
     group = ("social", "tool")
     description = "Post tweets, reply, retweet, like, or delete tweets on Twitter/X"
     component_kind = "square"
+    tool_name = "twitter_send"
+    tool_description = "Post, reply, retweet, like, unlike, or delete tweets on Twitter/X. Actions: tweet, reply, retweet, like, unlike, delete. Specify text (280 char max), tweet_id, reply_to_id as needed."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

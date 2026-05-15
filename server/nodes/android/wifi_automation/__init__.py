@@ -5,3 +5,4 @@ class WifiAutomationNode(AndroidServiceBase):
     type = "wifiAutomation"
     display_name = "WiFi Automation"
     description = "WiFi control and scanning"
+    tool_name = "android_wifi"

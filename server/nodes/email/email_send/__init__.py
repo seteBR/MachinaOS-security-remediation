@@ -38,6 +38,8 @@ class EmailSendNode(ActionNode):
     group = ("email", "tool")
     description = "Send emails via SMTP (Gmail, Outlook, Yahoo, iCloud, ProtonMail, Fastmail, custom)"
     component_kind = "square"
+    tool_name = "email_send"
+    tool_description = "Send email via SMTP. Specify to, subject, body. Optional: cc, bcc, body_type (text/html)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

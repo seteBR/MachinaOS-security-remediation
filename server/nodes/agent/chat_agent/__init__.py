@@ -92,6 +92,7 @@ class ChatAgentNode(ActionNode):
     group = ("agent",)
     description = "Conversational AI agent with skills and memory"
     component_kind = "agent"
+    tool_name = "delegate_to_chat_agent"
     handles = std_agent_handles()
     ui_hints = STD_AGENT_HINTS
     annotations = {"destructive": False, "readonly": False, "open_world": True}

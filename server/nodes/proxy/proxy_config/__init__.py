@@ -369,6 +369,8 @@ class ProxyConfigNode(ActionNode):
     group = ("proxy", "tool")
     description = "Configure proxy providers and routing rules"
     component_kind = "square"
+    tool_name = "proxy_config"
+    tool_description = "Manage proxy providers and routing rules. Operations: list_providers, add_provider, update_provider, remove_provider, set_credentials, test_provider, get_stats, add_routing_rule, list_routing_rules, remove_routing_rule."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

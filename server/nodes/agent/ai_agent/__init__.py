@@ -102,6 +102,7 @@ class AIAgentNode(ActionNode):
     group = ("agent",)
     description = "AI agent with tool calling, memory, and iterative reasoning"
     component_kind = "agent"
+    tool_name = "delegate_to_ai_agent"
     handles = std_agent_handles()
     ui_hints = STD_AGENT_HINTS
     annotations = {"destructive": False, "readonly": False, "open_world": True}

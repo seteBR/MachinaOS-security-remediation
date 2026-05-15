@@ -46,6 +46,8 @@ class ProxyRequestNode(ActionNode):
     group = ("proxy", "tool")
     description = "Make HTTP requests through residential proxy providers"
     component_kind = "square"
+    tool_name = "proxy_request"
+    tool_description = "Make HTTP requests through residential proxy providers with geo-targeting, session control, and automatic failover. Supports GET, POST, PUT, DELETE, PATCH methods."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

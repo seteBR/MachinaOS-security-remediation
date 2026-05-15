@@ -74,6 +74,8 @@ class TasksNode(ActionNode):
     group = ("google", "tool")
     description = "Google Tasks create / list / complete / update / delete"
     component_kind = "square"
+    tool_name = "google_tasks"
+    tool_description = "Manage Google Tasks. Operations: create (new task), list (find tasks), complete (mark done), update (modify task), delete (remove task)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

@@ -14,6 +14,8 @@ class TypeScriptExecutorNode(CodeExecutorBase):
     display_name = "TypeScript Executor"
     subtitle = "Run TS"
     description = "Execute TypeScript code via persistent Node.js server with type safety"
+    tool_name = "typescript_code"
+    tool_description = "Execute TypeScript code via persistent Node.js server with type safety. Set output variable with result."
 
     @Operation("execute")
     async def execute_op(self, ctx: NodeContext, params: CodeExecutorParams) -> Any:

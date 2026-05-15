@@ -240,6 +240,8 @@ class ApifyActorNode(ActionNode):
     group = ("api", "scraper", "tool")
     description = "Run Apify actors for Instagram, TikTok, Twitter, LinkedIn, etc."
     component_kind = "square"
+    tool_name = "apify_actor"
+    tool_description = "Run Apify actors (pre-built web scrapers) for Instagram, TikTok, Twitter, LinkedIn, Facebook, YouTube, Google Search, Google Maps, and websites. Specify actor_id and actor_input (JSON)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

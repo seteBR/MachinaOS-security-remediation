@@ -30,6 +30,8 @@ class FsSearchNode(ActionNode):
     subtitle = "ls/glob/grep"
     group = ("filesystem", "tool")
     description = "Search the filesystem (ls, glob, grep)"
+    tool_name = "fs_search"
+    tool_description = "Search the filesystem. Modes: ls (list directory), glob (pattern match files), grep (search file contents for text)."
     component_kind = "square"
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},

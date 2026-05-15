@@ -30,6 +30,8 @@ class CurrentTimeToolNode(ToolNode):
     group = ("tool", "ai")
     description = "Get current date/time with timezone support"
     component_kind = "tool"
+    tool_name = "get_current_time"
+    tool_description = "Get the current date and time. Optionally specify timezone."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

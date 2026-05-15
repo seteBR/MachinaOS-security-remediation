@@ -82,6 +82,8 @@ class BraveSearchNode(ActionNode):
     group = ("search", "tool")
     description = "Search the web using Brave Search API"
     component_kind = "square"
+    tool_name = "brave_search"
+    tool_description = "Search the web using Brave Search. Returns web results with titles, snippets, and URLs."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

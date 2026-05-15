@@ -41,6 +41,8 @@ class ShellNode(ActionNode):
     subtitle = "Run Command"
     group = ("filesystem", "tool")
     description = "Execute shell commands (sandboxed; no system PATH)"
+    tool_name = "shell_execute"
+    tool_description = "Execute a shell command. Returns stdout, stderr, and exit code."
     component_kind = "square"
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},

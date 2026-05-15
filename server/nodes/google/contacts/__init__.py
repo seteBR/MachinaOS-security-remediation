@@ -104,6 +104,8 @@ class ContactsNode(ActionNode):
     group = ("google", "tool")
     description = "Google Contacts create / list / search / get / update / delete"
     component_kind = "square"
+    tool_name = "google_contacts"
+    tool_description = "Manage Google Contacts. Operations: create (new contact), list (browse), search (find by name/email/phone), get (details by resource name), update (modify), delete (remove)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

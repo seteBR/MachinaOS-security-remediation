@@ -323,6 +323,8 @@ class WhatsAppDbNode(ActionNode):
     group = ("whatsapp", "tool")
     description = "Query WhatsApp database (chat history, contacts, groups, channels)"
     component_kind = "square"
+    tool_name = "whatsapp_db"
+    tool_description = "Query WhatsApp database - list contacts, search groups, get contact/group info, retrieve chat history."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

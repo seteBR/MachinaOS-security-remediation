@@ -305,6 +305,8 @@ class BrowserNode(ActionNode):
     group = ("browser", "tool")
     description = "Interactive browser automation via agent-browser CLI"
     component_kind = "square"
+    tool_name = "browser"
+    tool_description = "Control a web browser interactively. Use snapshot to see the page (returns accessibility tree with @eN refs). Then click/type/fill with those refs. Workflow: navigate -> snapshot -> interact -> snapshot. Operations: navigate, click, type, fill, screenshot, snapshot, get_text, get_html, eval, wait, scroll, select, batch."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

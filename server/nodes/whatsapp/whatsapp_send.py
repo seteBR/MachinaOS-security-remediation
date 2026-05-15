@@ -245,6 +245,7 @@ class WhatsAppSendNode(ActionNode):
     group = ("whatsapp", "tool")
     description = "Send WhatsApp messages (text, media, location, contact, sticker)"
     component_kind = "square"
+    tool_name = "whatsapp_send"
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

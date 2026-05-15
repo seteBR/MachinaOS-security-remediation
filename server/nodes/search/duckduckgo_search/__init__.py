@@ -43,6 +43,8 @@ class DuckDuckGoSearchNode(ToolNode):
     group = ("tool", "ai", "search")
     description = "DuckDuckGo web search (free, no API key required)"
     component_kind = "tool"
+    tool_name = "web_search"
+    tool_description = "Search the web for information using DuckDuckGo. Returns relevant search results. Free, no API key required."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

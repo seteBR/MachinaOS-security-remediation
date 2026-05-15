@@ -35,6 +35,19 @@ class WriteTodosNode(ToolNode):
     group = ("tool", "ai")
     description = "Structured task list planning for complex multi-step operations"
     component_kind = "tool"
+    tool_name = "write_todos"
+    tool_description = (
+        "Create and manage a structured task list for your current work session. "
+        "This helps you track progress, organize complex tasks, and demonstrate "
+        "thoroughness to the user. Only use this tool if you think it will be "
+        "helpful in staying organized. If the user's request is trivial and takes "
+        "less than 3 steps, it is better to NOT use this tool and just do the task "
+        "directly. Use for complex multi-step tasks (3+ steps), non-trivial planning, "
+        "or when user explicitly requests a todo list. Task states: pending, "
+        "in_progress, completed. Mark tasks as in_progress BEFORE beginning work, "
+        "completed IMMEDIATELY after finishing. Remove irrelevant tasks. Break "
+        "complex tasks into smaller steps."
+    )
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

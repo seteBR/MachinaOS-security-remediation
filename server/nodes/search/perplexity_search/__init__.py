@@ -83,6 +83,8 @@ class PerplexitySearchNode(ActionNode):
     group = ("search", "tool")
     description = "AI-powered search using Perplexity Sonar with citations"
     component_kind = "square"
+    tool_name = "perplexity_search"
+    tool_description = "Search the web using Perplexity Sonar AI. Returns an AI-generated answer with citations and source URLs."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

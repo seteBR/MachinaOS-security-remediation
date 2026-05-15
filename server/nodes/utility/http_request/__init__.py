@@ -72,6 +72,8 @@ class HttpRequestNode(ActionNode):
     group = ("utility", "tool")
     description = "Make HTTP requests to external APIs (GET, POST, PUT, DELETE, PATCH)"
     component_kind = "square"
+    tool_name = "http_request"
+    tool_description = "Make HTTP requests to external APIs. Specify method (GET/POST/PUT/DELETE/PATCH), url, headers (JSON object), body (JSON or string). Optional: use_proxy to route through a residential proxy with geo-targeting."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

@@ -61,6 +61,8 @@ class CalculatorToolNode(ToolNode):
     group = ("tool", "ai")
     description = "Add, subtract, multiply, divide, power, sqrt, mod, abs"
     component_kind = "tool"
+    tool_name = "calculator"
+    tool_description = "Perform mathematical calculations. Operations: add, subtract, multiply, divide, power, sqrt, mod, abs"
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

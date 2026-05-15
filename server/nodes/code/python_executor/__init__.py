@@ -22,6 +22,8 @@ class PythonExecutorNode(CodeExecutorBase):
     display_name = "Python Executor"
     subtitle = "Run Python"
     description = "Execute Python code for calculations, data processing, and automation"
+    tool_name = "python_code"
+    tool_description = "Execute Python code for calculations, data processing, and automation. Available: math, json, datetime, Counter, defaultdict. Set output variable with result."
 
     @Operation("execute")
     async def execute_op(self, ctx: NodeContext, params: CodeExecutorParams) -> Any:

@@ -99,6 +99,8 @@ class GmailNode(ActionNode):
     group = ("google", "tool")
     description = "Google Gmail send / search / read (dual-purpose workflow + AI tool)"
     component_kind = "square"
+    tool_name = "google_gmail"
+    tool_description = "Send, search, and read emails via Gmail. Operations: send (compose email), search (find emails by query), read (get email by ID)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

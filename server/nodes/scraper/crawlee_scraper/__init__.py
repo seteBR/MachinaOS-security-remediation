@@ -281,6 +281,8 @@ class CrawleeScraperNode(ActionNode):
     group = ("scraper", "tool")
     description = "Web scraper supporting static HTML (BeautifulSoup) and JS-rendered (Playwright)"
     component_kind = "square"
+    tool_name = "web_reader"
+    tool_description = "Read and extract content from web pages. Fetches page text, links, and data. Use beautifulsoup for static pages or playwright for JS-rendered pages. You MUST use this tool when the user asks to read, fetch, or get content from any URL."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

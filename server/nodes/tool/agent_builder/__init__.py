@@ -300,6 +300,8 @@ class AgentBuilderNode(ToolNode):
         "agent calls operations through the standard tool path."
     )
     component_kind = "tool"
+    tool_name = "agent_builder"
+    tool_description = "Inspect and modify the workflow canvas at runtime. Operations: inspect_canvas (read current nodes/edges), spawn_tool (add a tool node + wire it), enable_skill (add a skill folder to a connected masterSkill), add_delegate_agent (add a specialized agent), create_workflow (spawn a brand-new workflow)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

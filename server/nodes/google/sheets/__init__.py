@@ -83,6 +83,8 @@ class SheetsNode(ActionNode):
     group = ("google", "tool")
     description = "Google Sheets read / write / append spreadsheet data"
     component_kind = "square"
+    tool_name = "google_sheets"
+    tool_description = "Read and write Google Sheets data. Operations: read (get range), write (set range), append (add rows)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

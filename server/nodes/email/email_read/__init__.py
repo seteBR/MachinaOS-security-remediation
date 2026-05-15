@@ -104,6 +104,8 @@ class EmailReadNode(ActionNode):
     group = ("email", "tool")
     description = "Read and manage emails via IMAP - list, search, read, move, delete, flag"
     component_kind = "square"
+    tool_name = "email_read"
+    tool_description = "Read and manage emails via IMAP. Operations: list (envelopes), search (query), read (message by ID), folders (list), move, delete, flag."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

@@ -14,6 +14,8 @@ class JavaScriptExecutorNode(CodeExecutorBase):
     display_name = "JavaScript Executor"
     subtitle = "Run JS"
     description = "Execute JavaScript code via persistent Node.js server"
+    tool_name = "javascript_code"
+    tool_description = "Execute JavaScript code for calculations, data processing, and JSON manipulation. Set output variable with result."
 
     @Operation("execute")
     async def execute_op(self, ctx: NodeContext, params: CodeExecutorParams) -> Any:

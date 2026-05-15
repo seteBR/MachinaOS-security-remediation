@@ -87,6 +87,8 @@ class TwitterSearchNode(ActionNode):
     group = ("social", "tool")
     description = "Search recent tweets on Twitter/X using the Search API"
     component_kind = "square"
+    tool_name = "twitter_search"
+    tool_description = "Search recent tweets on Twitter/X. Returns enriched tweets with expanded URLs, author profile, public_metrics, media, referenced_tweets, note_tweet. Supports query operators: keywords, #hashtags, @mentions, from:user, to:user, -exclude, OR, lang:, has:links/media/images/videos, is:retweet/reply/quote, url:."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

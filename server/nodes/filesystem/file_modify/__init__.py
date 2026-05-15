@@ -37,6 +37,8 @@ class FileModifyNode(ActionNode):
     subtitle = "Write/Edit"
     group = ("filesystem", "tool")
     description = "Write new files or edit existing files"
+    tool_name = "file_modify"
+    tool_description = "Write a new file or edit an existing file with string replacement. Operations: write (create/overwrite), edit (find and replace)."
     component_kind = "square"
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},

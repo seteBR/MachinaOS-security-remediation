@@ -28,6 +28,7 @@ class RLMAgentNode(ActionNode):
     group = ("agent",)
     description = "Recursive Language Model agent (REPL-based)"
     component_kind = "agent"
+    tool_description = "ONE-SHOT delegation to RLM Agent. Call ONCE per task, returns task_id. Uses recursive REPL-based reasoning with code execution - do NOT re-call."
     handles = std_agent_handles()
     ui_hints = STD_AGENT_HINTS
     annotations = {"destructive": True, "readonly": False, "open_world": True}

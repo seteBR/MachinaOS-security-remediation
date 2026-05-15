@@ -29,6 +29,8 @@ class ProxyStatusNode(ActionNode):
     group = ("proxy", "tool")
     description = "View proxy provider health, scores, and usage statistics"
     component_kind = "square"
+    tool_name = "proxy_status"
+    tool_description = "Get proxy provider health stats, scores, and usage statistics. Returns enabled status, provider list with health scores, and aggregated stats."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-main", "kind": "output", "position": "right", "label": "Output", "role": "main"},

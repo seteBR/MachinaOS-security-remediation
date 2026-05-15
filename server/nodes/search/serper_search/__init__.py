@@ -79,6 +79,8 @@ class SerperSearchNode(ActionNode):
     group = ("search", "tool")
     description = "Search the web using Google via Serper API (web/news/images/places)"
     component_kind = "square"
+    tool_name = "serper_search"
+    tool_description = "Search the web using Google via Serper API. Returns web results with titles, snippets, and URLs."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

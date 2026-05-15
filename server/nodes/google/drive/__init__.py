@@ -100,6 +100,8 @@ class DriveNode(ActionNode):
     group = ("google", "tool")
     description = "Google Drive upload / download / list / share files"
     component_kind = "square"
+    tool_name = "google_drive"
+    tool_description = "Manage Google Drive files. Operations: upload (add file from URL), download (get file by ID), list (find files), share (share with user)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

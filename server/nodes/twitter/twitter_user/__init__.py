@@ -130,6 +130,8 @@ class TwitterUserNode(ActionNode):
     group = ("social", "tool")
     description = "Look up Twitter/X user profiles, followers, and following"
     component_kind = "square"
+    tool_name = "twitter_user"
+    tool_description = "Look up Twitter/X user profiles with description and created_at. Operations: me (authenticated user), by_username, by_id, followers (max_results 1-1000), following (max_results 1-1000)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

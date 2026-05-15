@@ -46,6 +46,8 @@ class TaskManagerNode(ToolNode):
     group = ("tool", "ai")
     description = "Task management tool for AI agents to create, track, and manage tasks"
     component_kind = "tool"
+    tool_name = "task_manager"
+    tool_description = "Track delegated sub-agent tasks. Operations: list_tasks (see all tasks), get_task (check specific task status/result), mark_done (cleanup completed tasks)."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},

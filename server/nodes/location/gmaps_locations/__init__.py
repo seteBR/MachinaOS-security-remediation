@@ -56,6 +56,8 @@ class GmapsLocationsNode(ActionNode):
     group = ("location", "service", "tool")
     description = "Google Maps Geocoding service"
     component_kind = "square"
+    tool_name = "geocode"
+    tool_description = "Geocode addresses to coordinates or reverse geocode coordinates to addresses using Google Maps."
     handles = (
         {"name": "input-main", "kind": "input", "position": "left",
          "label": "Input", "role": "main"},
