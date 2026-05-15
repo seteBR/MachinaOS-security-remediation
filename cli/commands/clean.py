@@ -18,12 +18,22 @@ from cli.ports import kill_orphaned_machina_processes, kill_port
 
 
 # Removed each run -- order doesn't matter, ``shutil.rmtree`` is recursive.
+# Only project-local artefacts. Home-rooted state (``~/.machina/``,
+# ``~/.claude/``, etc.) is the user's; we never touch it from
+# ``machina clean``.
 _TARGETS = [
     "node_modules",
     "client/node_modules",
     "client/dist",
     "client/.vite",
-    "server/data",       # workflow.db, credentials.db, workspaces/
+    # Repo-local DATA_DIR target. Only present when the operator opts
+    # out of the user-home default by setting ``DATA_DIR=.machina``
+    # in ``.env`` (per the resolution rules in ``cli/config.py``).
+    ".machina",
+    # Pre-cutover legacy data paths; harmless to remove if absent.
+    "data",
+    "server/data",
+    # Python venvs
     "server/.venv",
     ".venv",             # stale root venv (should not exist)
 ]
@@ -58,8 +68,12 @@ def clean_command() -> None:
             console.print(f"  Port {port}: Killed {len(result.killed_pids)} process(es)")
             killed_ports += len(result.killed_pids)
 
-    # Step 2: kill orphaned project processes (may hold .venv file locks)
-    orphaned = kill_orphaned_machina_processes(str(root), exclude_substring="machina")
+    # Step 2: kill orphaned project processes (may hold .venv file locks).
+    # ``exclude_substring`` skips the supervisor that's running this very
+    # ``clean`` command — its cmdline is ``python -m cli clean`` post-rename
+    # (was ``python -m machina ...`` pre-cutover; supervisor entry-point
+    # moved with the source dir).
+    orphaned = kill_orphaned_machina_processes(str(root), exclude_substring="-m cli")
     if orphaned:
         console.print(f"  Orphaned: Killed {len(orphaned)} process(es)")
 
