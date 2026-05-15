@@ -1458,27 +1458,9 @@ async def handle_delete_api_key(data: Dict[str, Any], websocket: WebSocket) -> D
     return await store.run(data.get("request_id"), _do_delete)
 
 
-# ============================================================================
-# Claude OAuth Handlers
-# ============================================================================
-
-@ws_handler()
-async def handle_claude_oauth_login(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Initiate Claude OAuth in isolated session."""
-    from services.claude_oauth import initiate_claude_oauth
-    return await initiate_claude_oauth()
-
-
-@ws_handler()
-async def handle_claude_oauth_status(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
-    """Check Claude OAuth credentials status via ``claude auth status``."""
-    from services.claude_oauth import claude_auth_status
-    has_token = await claude_auth_status()
-    return {"success": True, "has_token": has_token}
-
-
-# NOTE: `cli_login` / `cli_auth_status` handlers are owned by
-# `services/cli_agent/_handlers.py` and self-registered into
+# NOTE: claude / codex auth WS handlers (`claude_code_login`,
+# `claude_code_logout`, `claude_code_auth_status`, `codex_cli_*`) are
+# owned by `services/cli_agent/_handlers.py` and self-registered into
 # `services.ws_handler_registry` on package import — no entries needed
 # here. See `services/cli_agent/__init__.py`.
 
@@ -1932,6 +1914,10 @@ async def handle_save_skill_content(data: Dict[str, Any], websocket: WebSocket) 
             # Clear cache so next load gets fresh content
             skill_loader.clear_cache()
 
+            from nodes.skill.master_skill._events import broadcast_skill_lifecycle
+            await broadcast_skill_lifecycle(
+                "content_saved", name=skill_name, is_builtin=True,
+            )
             logger.info(f"[Skills] Updated built-in skill: {skill_name}")
             return {
                 "success": True,
@@ -1950,6 +1936,10 @@ async def handle_save_skill_content(data: Dict[str, Any], websocket: WebSocket) 
             instructions=new_instructions
         )
         if updated:
+            from nodes.skill.master_skill._events import broadcast_skill_lifecycle
+            await broadcast_skill_lifecycle(
+                "content_saved", name=skill_name, is_builtin=False,
+            )
             logger.info(f"[Skills] Updated user skill: {skill_name}")
             return {
                 "success": True,
@@ -2107,8 +2097,9 @@ async def handle_get_user_skill(data: Dict[str, Any], websocket: WebSocket) -> D
 @ws_handler("name", "display_name", "instructions")
 async def handle_create_user_skill(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Create a new user skill."""
+    from nodes.skill.master_skill._events import broadcast_skill_lifecycle
+
     database = container.database()
-    broadcaster = get_status_broadcaster()
 
     skill = await database.create_user_skill(
         name=data["name"],
@@ -2124,12 +2115,7 @@ async def handle_create_user_skill(data: Dict[str, Any], websocket: WebSocket) -
     )
 
     if skill:
-        # Broadcast skill created to all clients
-        await broadcaster.broadcast({
-            "type": "user_skill_created",
-            "skill": skill,
-            "timestamp": time.time()
-        })
+        await broadcast_skill_lifecycle("created", name=data["name"], skill=skill)
         return {"skill": skill, "timestamp": time.time()}
     return {"success": False, "error": f"Failed to create skill. Name '{data['name']}' may already exist."}
 
@@ -2137,8 +2123,9 @@ async def handle_create_user_skill(data: Dict[str, Any], websocket: WebSocket) -
 @ws_handler("name")
 async def handle_update_user_skill(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Update an existing user skill."""
+    from nodes.skill.master_skill._events import broadcast_skill_lifecycle
+
     database = container.database()
-    broadcaster = get_status_broadcaster()
 
     skill = await database.update_user_skill(
         name=data["name"],
@@ -2154,12 +2141,7 @@ async def handle_update_user_skill(data: Dict[str, Any], websocket: WebSocket) -
     )
 
     if skill:
-        # Broadcast skill updated to all clients
-        await broadcaster.broadcast({
-            "type": "user_skill_updated",
-            "skill": skill,
-            "timestamp": time.time()
-        })
+        await broadcast_skill_lifecycle("updated", name=data["name"], skill=skill)
         return {"skill": skill, "timestamp": time.time()}
     return {"success": False, "error": f"Skill '{data['name']}' not found"}
 
@@ -2167,18 +2149,14 @@ async def handle_update_user_skill(data: Dict[str, Any], websocket: WebSocket) -
 @ws_handler("name")
 async def handle_delete_user_skill(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Delete a user skill."""
+    from nodes.skill.master_skill._events import broadcast_skill_lifecycle
+
     database = container.database()
-    broadcaster = get_status_broadcaster()
 
     deleted = await database.delete_user_skill(data["name"])
 
     if deleted:
-        # Broadcast skill deleted to all clients
-        await broadcaster.broadcast({
-            "type": "user_skill_deleted",
-            "name": data["name"],
-            "timestamp": time.time()
-        })
+        await broadcast_skill_lifecycle("deleted", name=data["name"])
         logger.info(f"[Skills] Deleted user skill: {data['name']}")
         return {"success": True, "deleted": True, "name": data["name"], "timestamp": time.time()}
     return {"success": False, "error": f"Skill '{data['name']}' not found"}

@@ -165,17 +165,29 @@ class SkillLoader:
         if 'allowed-tools' in frontmatter:
             allowed_tools = frontmatter['allowed-tools'].split()
 
-        # Resolve icon + color from the target node via central handler.
-        # `allowed-tools` uses snake_case; node `type` is camelCase.
-        from nodes._visuals import get_icon, get_color
+        # Resolve icon + color from the target node, mirroring
+        # ``BaseNode._metadata_dict``'s chain so skills inherit whichever
+        # icon source the teaching node uses:
+        #   1. ``<plugin>/icon.svg`` or ``<plugin>/icon_<type>.svg`` →
+        #      ``/api/schemas/nodes/<type>/icon`` URL (wire format
+        #      consumed by frontend ``resolveIcon``)
+        #   2. ``visuals.json`` entry (emoji or ``lobehub:<brand>``)
+        # Color: ``<plugin>/meta.json`` first, then ``visuals.json``.
+        # ``allowed-tools`` uses snake_case; node ``type`` is camelCase.
+        from nodes._visuals import (
+            get_color, get_icon, get_plugin_icon_path, get_plugin_meta,
+        )
         meta_in = dict(frontmatter.get('metadata') or {})
         for tok in allowed_tools:
             cam = tok if "_" not in tok else (
                 tok.split("_")[0] + "".join(p.title() for p in tok.split("_")[1:])
             )
             for candidate in (cam, tok):
-                icon = get_icon(candidate)
-                color = get_color(candidate)
+                if get_plugin_icon_path(candidate) is not None:
+                    icon = f"/api/schemas/nodes/{candidate}/icon"
+                else:
+                    icon = get_icon(candidate)
+                color = get_plugin_meta(candidate, "color") or get_color(candidate)
                 if icon or color:
                     if icon:
                         meta_in['icon'] = icon

@@ -729,6 +729,29 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           break;
         }
 
+        case 'skill_lifecycle': {
+          // CloudEvents-typed skill registry lifecycle from
+          // server/nodes/skill/master_skill/_events.py. Stages
+          // `skill.created` / `.updated` / `.deleted` invalidate the
+          // user-skills + folder-skills caches so the Master Skill
+          // panel and any agent's Connected Skills view refresh
+          // across every connected client. `skill.content_saved`
+          // and `.deleted` also drop the per-skill content cache so
+          // the next read re-fetches fresh instructions.
+          const event = data as WorkflowEvent<{
+            name?: string;
+            is_builtin?: boolean;
+            skill?: unknown;
+          }>;
+          const name = event?.data?.name || event?.subject;
+          void queryClient.invalidateQueries({ queryKey: ['userSkills'] });
+          void queryClient.invalidateQueries({ queryKey: ['folderSkills'] });
+          if (name && (event?.type?.endsWith('.content_saved') || event?.type?.endsWith('.deleted'))) {
+            queryClient.removeQueries({ queryKey: ['skillContent', name] });
+          }
+          break;
+        }
+
         case 'android_status':
           setAndroidStatus(data || defaultAndroidStatus);
           break;
