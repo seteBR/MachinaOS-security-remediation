@@ -15,9 +15,9 @@ import sys
 
 _RUNTIME_DEPS = (
     "typer>=0.12",
-    "rich>=13.0",
-    "anyio>=4.0",
-    "psutil>=6.0",
+    "rich>=13",
+    "anyio>=4",
+    "psutil>=6",
 )
 
 

@@ -8,7 +8,6 @@ dependencies = [
   "rich>=13",
   "psutil>=6",
   "anyio>=4",
-  "python-dotenv>=1",
   # Required on Windows for the supervisor's Job Object (cli/tree.py).
   # Without it, child processes survive abnormal supervisor exit (SIGKILL,
   # BSOD, console close) and accumulate as orphans across dev restarts.

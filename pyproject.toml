@@ -5,9 +5,15 @@ description = "MachinaOS project supervisor CLI (machina)."
 requires-python = ">=3.12"
 dependencies = [
     "typer>=0.12",
-    "rich>=13.0",
-    "anyio>=4.0",
-    "psutil>=6.0",
+    "rich>=13",
+    "anyio>=4",
+    "psutil>=6",
+    # Required on Windows for the supervisor's Job Object (cli/tree.py).
+    # Without it, child processes survive abnormal supervisor exit
+    # (SIGKILL, BSOD, console close) and accumulate as orphans across
+    # dev restarts. Floor 308 is the first release shipping prebuilt
+    # wheels for Python 3.13.
+    "pywin32>=308; platform_system == 'Windows'",
 ]
 
 [project.scripts]
