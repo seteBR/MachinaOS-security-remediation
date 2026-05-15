@@ -93,7 +93,7 @@ async def _broadcast_credential_event(event_type: str, provider: str) -> None:
 async def _finalize_claude_login() -> None:
     """Run ``claude auth login`` to completion, then store user info +
     broadcast on success."""
-    from services.claude_oauth import claude_auth_status_info, run_claude_login
+    from nodes.agent.claude_code_agent._oauth import claude_auth_status_info, run_claude_login
 
     try:
         envelope = await run_claude_login()
@@ -137,7 +137,7 @@ async def handle_claude_code_login(
     """Spawn ``claude auth login`` in the background; let the CLI open
     the user's browser. Idempotent re-click syncs the marker without
     re-running the flow."""
-    from services.claude_oauth import claude_auth_status_info
+    from nodes.agent.claude_code_agent._oauth import claude_auth_status_info
 
     info = await claude_auth_status_info()
     if info.get("loggedIn"):
@@ -174,7 +174,7 @@ async def handle_claude_code_logout(
 ) -> Dict[str, Any]:
     """Run ``claude auth logout`` (CLI clears its own credentials), drop
     the catalogue marker, broadcast ``.disconnected``."""
-    from services.claude_oauth import claude_auth_logout
+    from nodes.agent.claude_code_agent._oauth import claude_auth_logout
 
     try:
         await claude_auth_logout()

@@ -40,7 +40,7 @@ on-disk JSONL gives us the same data without `-p`):
 external monitors (Phase 2).
 
 Binary + auth: shared with the auth surface via
-``services.claude_oauth.claude_binary_path()`` — single project-local
+``._oauth.claude_binary_path()`` — single project-local
 install at ``<repo>/data/claude-machina/npm/`` and ``CLAUDE_CONFIG_DIR``
 set on the spawn env so the agent picks up the same credentials the
 Login button wrote.
@@ -60,8 +60,8 @@ from typing import Any, Dict, List, Optional
 
 from core.logging import get_logger
 
-from services.claude_oauth import claude_binary_path
 from services.cli_agent.config import get_provider_config
+from ._oauth import claude_binary_path, MACHINA_CLAUDE_DIR
 from services.cli_agent.protocol import CanonicalUsage
 from services.cli_agent.types import ClaudeTaskSpec
 
@@ -92,8 +92,9 @@ class AnthropicClaudeProvider:
         # ``MACHINA_CLAUDE_DIR/ide``. Deriving it directly from the
         # single source of truth keeps the lockfile-write side (here)
         # in sync with the lockfile-read side (spawned claude) without
-        # a duplicated JSON path that can drift.
-        from services.claude_oauth import MACHINA_CLAUDE_DIR
+        # a duplicated JSON path that can drift. ``MACHINA_CLAUDE_DIR``
+        # is imported at module top from ``_oauth`` (the canonical
+        # source of truth for this plugin's filesystem layout).
         self.ide_lockfile_dir = MACHINA_CLAUDE_DIR / "ide"
         self._defaults = cfg.defaults
         self._supports = cfg.supports
@@ -105,7 +106,7 @@ class AnthropicClaudeProvider:
     def binary_path(self) -> Path:
         """Resolve the project-local `claude` binary.
 
-        Delegates to ``services.claude_oauth.claude_binary_path`` — same
+        Delegates to ``._oauth.claude_binary_path`` — same
         path used by the credentials Login button. Lazy-installs into
         ``<repo>/data/claude-machina/npm/`` on first miss. Raises
         ``FileNotFoundError`` if ``npm`` isn't on PATH.

@@ -427,7 +427,7 @@ class AICliService:
 
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         # Project-local claude auth dir — same as ``AICliSession.env``.
-        from services.claude_oauth import MACHINA_CLAUDE_DIR
+        from nodes.agent.claude_code_agent._oauth import MACHINA_CLAUDE_DIR
         env["CLAUDE_CONFIG_DIR"] = str(MACHINA_CLAUDE_DIR)
         # Composio-style parent-run-ID for MCP correlation.
         env["MACHINA_PARENT_RUN_ID"] = (

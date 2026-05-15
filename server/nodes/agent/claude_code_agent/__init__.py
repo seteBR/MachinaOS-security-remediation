@@ -37,6 +37,19 @@ logger = get_logger(__name__)
 from services.cli_agent import ClaudeTaskSpec  # noqa: E402
 from services.cli_agent.types import SessionResultModel  # noqa: E402
 
+# --- Self-registration -----------------------------------------------------
+#
+# Per the canonical plugin-folder pattern (see
+# ``docs-internal/plugin_system.md`` § "Self-contained plugin folders"),
+# the plugin folder owns its provider class + auth helpers + session
+# pool + skill materialiser. The generic framework
+# (``services/cli_agent/``) doesn't import from us — it asks the
+# ``register_provider`` registry for the provider class by name.
+from services.cli_agent.factory import register_provider  # noqa: E402
+from ._provider import AnthropicClaudeProvider  # noqa: E402
+
+register_provider("claude", AnthropicClaudeProvider)
+
 
 # Claude Code-supported models. Per
 # https://code.claude.com/docs/en/cli-reference the ``--model`` flag

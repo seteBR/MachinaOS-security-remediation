@@ -1,9 +1,13 @@
-"""Concrete `AICliProvider` implementations.
+"""Concrete `AICliProvider` implementations that still live under the
+generic framework (i.e. haven't been migrated to the canonical
+plugin-folder layout yet):
 
-- `anthropic_claude.AnthropicClaudeProvider` — full v1 surface
 - `openai_codex.OpenAICodexProvider` — sandbox-first, no session
 - `google_gemini.GoogleGeminiProvider` — v2 stub raising NotImplementedError
 
-Imports are intentionally not eager — `factory.create_cli_provider()`
-lazy-imports each one.
+The claude provider has moved to its plugin folder
+(``server/nodes/agent/claude_code_agent/_provider.py``) and is
+discovered via the ``register_provider`` registry. The codex
+provider will follow once `codex_agent` adopts the per-plugin
+folder structure.
 """

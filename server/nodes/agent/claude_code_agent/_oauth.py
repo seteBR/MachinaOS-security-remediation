@@ -18,6 +18,13 @@ The CLI owns its own credentials file; we never read or write it.
 ``login`` is a long-running one-shot (waits for the browser flow to
 complete) so callers schedule it as ``asyncio.create_task`` — same shape
 Stripe uses for ``stripe login --complete``.
+
+This module lives alongside the ``claude_code_agent`` plugin so all
+claude-specific code stays in one folder per the canonical plugin
+pattern. The single source of truth for ``MACHINA_CLAUDE_DIR`` lives
+here; consumers in ``services/cli_agent/`` (the generic framework)
+and the plugin's other modules (``_provider``, ``_pool``, ``_skills``)
+import it from this module.
 """
 
 from __future__ import annotations
@@ -35,8 +42,9 @@ from services.events.cli import run_cli_command
 
 logger = get_logger(__name__)
 
-# server/services/claude_oauth.py -> parents[2] is the repo root.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# This file: server/nodes/agent/claude_code_agent/_oauth.py
+# parents[4] is the repo root.
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 MACHINA_CLAUDE_DIR = (_PROJECT_ROOT / "data" / "claude-machina").resolve()
 MACHINA_NPM_DIR = MACHINA_CLAUDE_DIR / "npm"
@@ -50,10 +58,10 @@ ONESHOT_TIMEOUT_SECONDS = 30.0
 def claude_binary_path() -> str:
     """Return path to the project-local claude CLI, installing on miss.
 
-    Single source of truth shared by the auth handler
-    (``services/cli_agent/_handlers.py``) AND the agent spawn
-    (``services/cli_agent/providers/anthropic_claude.py``) so both surfaces
-    use the same binary + ``CLAUDE_CONFIG_DIR``-isolated credentials."""
+    Single source of truth shared by the auth handler (``_handlers.py``)
+    AND the agent spawn (``_provider.py``) so both surfaces use the
+    same binary + ``CLAUDE_CONFIG_DIR``-isolated credentials.
+    """
     if sys.platform == "win32":
         bin_path = MACHINA_NPM_DIR / "node_modules" / ".bin" / "claude.cmd"
     else:

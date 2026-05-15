@@ -207,7 +207,7 @@ class AICliSession(BaseProcessSupervisor):
         # instead of the ones the credentials modal's Login button wrote.
         e: Dict[str, str] = {**os.environ, "PYTHONUNBUFFERED": "1"}
         if self._provider.name == "claude":
-            from services.claude_oauth import MACHINA_CLAUDE_DIR
+            from nodes.agent.claude_code_agent._oauth import MACHINA_CLAUDE_DIR
             e["CLAUDE_CONFIG_DIR"] = str(MACHINA_CLAUDE_DIR)
         if self._lockfile_path and self._provider.ide_lock_env_var:
             e[self._provider.ide_lock_env_var] = str(self._lockfile_path)
@@ -403,7 +403,7 @@ class AICliSession(BaseProcessSupervisor):
         ``data/claude-machina/projects/`` listing in the memory-bridge
         research.
         """
-        from services.claude_oauth import MACHINA_CLAUDE_DIR
+        from nodes.agent.claude_code_agent._oauth import MACHINA_CLAUDE_DIR
 
         cwd = self.cwd() or self._repo_root
         project_key = _PROJECT_KEY_RE.sub("-", str(cwd))

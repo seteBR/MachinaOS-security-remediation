@@ -88,7 +88,7 @@ class AICliProvider(Protocol):
     """Structural Protocol for an AI CLI provider.
 
     Concrete classes:
-      - `providers.anthropic_claude.AnthropicClaudeProvider`
+      - `nodes.agent.claude_code_agent._provider.AnthropicClaudeProvider`
       - `providers.openai_codex.OpenAICodexProvider`
       - `providers.google_gemini.GoogleGeminiProvider` (v2 stub)
     """
