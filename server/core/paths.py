@@ -66,27 +66,15 @@ def project_root() -> Path:
 def machina_root() -> Path:
     """Absolute path of ``~/.machina/`` (or the configured DATA_DIR).
 
-    Resolves :class:`core.config.Settings.data_dir` per the rules in
-    the module docstring. Default expands to ``~/.machina/``, i.e.
-    the user's home dir — same shape on Windows
-    (``%USERPROFILE%/.machina``), macOS, and Linux.
-
-    Settings is instantiated lazily so this module stays a leaf
-    dependency. The Settings class itself reads ``../.env`` at
-    construction; subsequent calls are cheap (Pydantic caches).
+    ``Path.expanduser()`` is a no-op when there's no ``~`` to expand,
+    so we can always call it unconditionally. After expansion: if
+    absolute, use verbatim; if relative, resolve under repo root
+    (back-compat with ``DATA_DIR=data`` etc.). Settings is
+    instantiated lazily — Pydantic caches the result.
     """
     from core.config import Settings
-    settings = Settings()
-    raw = settings.data_dir
-    p = Path(raw)
-    # ``~/...`` shape: expand to the user's home dir cross-platform.
-    if raw.startswith("~"):
-        return p.expanduser().resolve()
-    # Absolute (POSIX or drive-rooted on Windows): use verbatim.
-    if p.is_absolute():
-        return p.resolve()
-    # Relative: keep the pre-cutover repo-local back-compat path.
-    return (project_root() / p).resolve()
+    p = Path(Settings().data_dir).expanduser()
+    return p.resolve() if p.is_absolute() else (project_root() / p).resolve()
 
 
 def claude_config_dir() -> Path:

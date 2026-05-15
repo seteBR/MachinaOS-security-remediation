@@ -264,14 +264,34 @@ class Settings(BaseSettings):
     gunicorn_max_requests: int = Field(default=10000, env="GUNICORN_MAX_REQUESTS", ge=0)
     gunicorn_max_requests_jitter: int = Field(default=1000, env="GUNICORN_MAX_REQUESTS_JITTER", ge=0)
 
-    @field_validator("database_url")
+    # Filesystem-path fields that may use ``~`` in ``.env``. Expanded
+    # once at load time so every downstream consumer
+    # (``core.paths.machina_root``, ``Settings._resolve_under_data``,
+    # the Temporal pgserver data dir, WhatsApp runtime dir, ...) sees
+    # a real path. ``Path.expanduser()`` is a no-op when ``~`` isn't
+    # present, so we can run it unconditionally.
+    @field_validator("data_dir", "log_file", mode="after")
     @classmethod
-    def validate_database_url(cls, v):
-        """Ensure database directory exists for SQLite."""
-        if v and v.startswith("sqlite"):
-            if ":///" in v:
-                db_path = v.split("///")[1]
-                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    def _expanduser_path(cls, v: Optional[str]) -> Optional[str]:
+        return str(Path(v).expanduser()) if v else v
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Expand ``~`` in sqlite paths + ensure parent dir exists.
+
+        Parses the URL via SQLAlchemy's canonical parser instead of
+        string surgery on ``:///``.
+        """
+        if not v:
+            return v
+        from sqlalchemy.engine.url import make_url
+        url = make_url(v)
+        if url.drivername.startswith("sqlite") and url.database:
+            db_path = Path(url.database).expanduser()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            if str(db_path) != url.database:
+                v = url.set(database=str(db_path)).render_as_string(hide_password=False)
         return v
 
 
