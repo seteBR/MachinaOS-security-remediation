@@ -4,7 +4,7 @@ Multi-instance, multi-provider runtime for AI CLI agents (Claude Code, Codex, Ge
 
 | Provider | Status | Login flow |
 |---|---|---|
-| Claude Code (`@anthropic-ai/claude-code`) | shipping | Local-install + spawn (`services/claude_oauth.py:initiate_claude_oauth`) |
+| Claude Code (`@anthropic-ai/claude-code`) | shipping | Local-install + spawn (`nodes/agent/claude_code_agent/_oauth.py:initiate_claude_oauth`) |
 | OpenAI Codex (`@openai/codex`) | shipping (no login flow yet) | User runs `codex login` manually; UI returns a graceful "not yet wired" error |
 | Google Gemini (`@google/gemini-cli`) | v2 stub | factory raises `NotImplementedError` |
 
@@ -49,7 +49,7 @@ Reuses (do not duplicate):
 - `services/skill_loader.py` — `scan_skills` / `load_skill` consumed by MCP `listSkills` / `getSkill`
 - `services/auth.py` — `AuthService.get_api_key` consumed by MCP `getCredential`
 - `services/credential_registry.py` — deep-merge `extends` for `_cli_base` entry
-- `services/claude_oauth.py` — Claude `auth login` / `auth status` / `auth logout` wrappers, project-local npm install at `<repo>/data/claude-machina/npm/`, inherited stdio so the CLI opens the browser itself
+- `nodes/agent/claude_code_agent/_oauth.py` — Claude `auth login` / `auth status` / `auth logout` wrappers, project-local npm install at `<repo>/data/claude-machina/npm/`, inherited stdio so the CLI opens the browser itself
 - `nodes/stripe/_handlers.py` — pattern reference for marker-token + catalogue broadcast
 
 ## Provider abstraction (mirrors `services/llm/`)
@@ -263,30 +263,55 @@ Lifespan: `main.py` enters `mcp_app.router.lifespan_context()` so `StreamableHTT
 
 ## Files (current state)
 
+### Generic framework — `server/services/cli_agent/`
+
+Shared by every CLI provider plugin. Imports nothing from `nodes/`.
+
 | File | Purpose |
 |---|---|
-| `server/services/cli_agent/__init__.py` | Public re-exports + self-registers WS handlers via `services.ws_handler_registry` (telegram-style plugin-folder pattern). |
-| `server/services/cli_agent/protocol.py` | `AICliProvider` Protocol + `CanonicalUsage` / `SessionResult` / `BatchResult` dataclasses. |
-| `server/services/cli_agent/types.py` | Pydantic discriminated-union task specs + `BatchResultModel` for serialisation. |
-| `server/services/cli_agent/config.py` | Loads `server/config/ai_cli_providers.json` (binary, package, defaults, supports flags per provider). |
-| `server/services/cli_agent/factory.py` | `create_cli_provider(name)` lazy-import factory. |
-| `server/services/cli_agent/lockfile.py` | VSCode-style IDE lockfile read/write/sweep. |
-| `server/services/cli_agent/mcp_server.py` | FastMCP sub-app at `/mcp/ide` with bearer-token middleware + 5 tools. |
-| `server/services/cli_agent/session.py` | `AICliSession(BaseProcessSupervisor)` per task — heart of framework. |
-| `server/services/cli_agent/service.py` | `AICliService.run_batch()` — `asyncio.gather` under `Semaphore(5)` (no separate pool class), cancel hooks. |
-| `server/services/cli_agent/_handlers.py` | Per-provider login/logout WS handlers (`claude_code_*`, `codex_cli_*`). |
-| `server/services/cli_agent/providers/anthropic_claude.py` | Reference Claude provider — full feature surface. |
-| `server/services/cli_agent/providers/openai_codex.py` | Codex provider — sandbox-first. |
-| `server/services/cli_agent/providers/google_gemini.py` | v2 stub. |
-| `server/config/ai_cli_providers.json` | Per-provider config (binary names, npm packages, login/auth_status argvs, lockfile dirs, supports flags). |
-| `server/nodes/agent/claude_code_agent.py` | Refactored — `Params.tasks: list[ClaudeTaskSpec]` + legacy single-prompt fallback. |
-| `server/nodes/agent/codex_agent.py` | New plugin — `Params.tasks: list[CodexTaskSpec]` + sandbox-focused defaults. |
+| `__init__.py` | Imports `_handlers.py` (codex WS handlers) + registers codex provider; framework-level self-registration only. Claude self-registers from its own plugin folder. |
+| `protocol.py` | `AICliProvider` Protocol + `CanonicalUsage` / `SessionResult` / `BatchResult` dataclasses. |
+| `types.py` | Pydantic discriminated-union task specs + `BatchResultModel` for serialisation. |
+| `config.py` | Loads `server/config/ai_cli_providers.json` (binary, package, defaults, supports flags per provider). |
+| `factory.py` | Three registries (`register_provider`, `register_session_pool`, `register_skill_materialiser`) + lookups + `create_cli_provider(name)`. |
+| `lockfile.py` | VSCode-style IDE lockfile read/write/sweep. |
+| `mcp_server.py` | FastMCP sub-app at `/mcp/ide` with bearer-token middleware + 5 tools + `rebind_batch` for warm-reuse context updates. |
+| `workflow_tools.py` | Per-batch MCP tool exposure (`mcp__machinaos__<node_type>`) + handler scope check + `tools/list_changed` notify. |
+| `session.py` | `AICliSession(BaseProcessSupervisor)` — generic non-pool path (still PTY on POSIX). |
+| `service.py` | `AICliService.run_batch()` — dispatcher; routes to pool when memory-bound via `factory.get_session_pool(provider_name)`. |
+| `_cli_auth.py` | CLI-agnostic `mark_logged_in` / `mark_logged_out` / `broadcast_credential_event` + `"cli-managed"` marker token. Shared by claude + codex handlers. |
+| `_handlers.py` | Codex WS handlers (`codex_cli_login` / `codex_cli_logout`). Claude's moved to the plugin folder. |
+| `providers/openai_codex.py` | Codex provider — sandbox-first, no session continuity. Will move when codex_agent adopts the per-folder layout. |
+| `providers/google_gemini.py` | v2 stub. |
+| `jsonl_watcher.py` | Still used by the non-pooled `AICliSession` (out-of-scope path). |
+
+### Claude plugin — `server/nodes/agent/claude_code_agent/`
+
+Self-contained per the canonical plugin-folder pattern (telegram is
+the reference implementation). Four self-registration calls in
+`__init__.py` wire it into the framework — zero changes to
+`services/cli_agent/` when claude internals change.
+
+| File | Purpose |
+|---|---|
+| `__init__.py` | `ClaudeCodeAgentNode(ActionNode)` + 4 self-registration calls: `register_provider`, `register_session_pool`, `register_skill_materialiser`, `register_ws_handlers`. |
+| `_provider.py` | `AnthropicClaudeProvider` — full claude argv builder + stream-json event parsers + ide_lockfile_dir derivation. |
+| `_pool.py` | `ClaudeSessionPool` — subprocess + stream-json warm-reuse pool, MCP rebind on acquire, skill diff on warm reuse. |
+| `_skills.py` | `materialise_skills(workspace_dir, names, previous_skill_names)` — per-workflow SKILL.md materialisation + diff-based add/remove. |
+| `_oauth.py` | `MACHINA_CLAUDE_DIR`, `claude_binary_path`, `claude_auth_*` — project-local install + the documented CLI subcommands. |
+| `_handlers.py` | `claude_code_login` / `claude_code_logout` WS handlers (registered from `__init__.py` via `register_ws_handlers`). |
+
+### Other touchpoints
+
+| File | Purpose |
+|---|---|
+| `server/config/ai_cli_providers.json` | Per-provider config (binary names, npm packages, login/auth_status argvs, supports flags). |
+| `server/nodes/agent/codex_agent/__init__.py` | Codex node plugin — `Params.tasks: list[CodexTaskSpec]`. (Provider class still lives in `services/cli_agent/providers/openai_codex.py` until this folder adopts the per-folder layout.) |
 | `server/nodes/visuals.json` | `claude_code_agent` + `codex_agent` icon/color entries. |
 | `server/config/credential_providers.json` | `_cli_base` abstract + `claude_code` + `codex_cli` entries. |
-| `server/services/claude_code_service.py` | Slimmed to a back-compat shim that builds one `ClaudeTaskSpec` and calls `AICliService.run_batch("claude", ...)`. Kept for legacy callers; eventually deletable. |
-| `server/services/claude_oauth.py` | Unchanged. The new framework's Claude login handler reuses this directly. |
-| `server/services/workflow.py` | `cancel_deployment` also calls `get_ai_cli_service().cancel_workflow(workflow_id)`. |
-| `server/main.py` | Mounts `/mcp/ide` sub-app, composes its lifespan, runs stale-lockfile sweep on startup. Side-effect imports `services.cli_agent` so its WS handlers self-register. |
+| `server/services/claude_code_service.py` | Slimmed back-compat shim — builds one `ClaudeTaskSpec` and calls `AICliService.run_batch("claude", ...)`. Eventually deletable. |
+| `server/services/workflow.py` | `cancel_deployment` calls `get_ai_cli_service().cancel_workflow(workflow_id)`. |
+| `server/main.py` | Mounts `/mcp/ide` sub-app, composes its lifespan, runs stale-lockfile sweep on startup. Side-effect imports `services.cli_agent` so its WS handlers self-register. Claude's plugin folder is discovered separately by the node registry. |
 | `server/routers/websocket.py` | No CLI handlers inline — discovered via `services.ws_handler_registry.get_ws_handlers()`. |
 
 ## Output contract
@@ -365,7 +390,7 @@ finds its own JSONL.
 | Crash recovery (subprocess died between batches) | `--resume <captured_uuid>` | `ClaudeSessionPool.acquire` detects `process.returncode is not None`, captures the dead session's `current_session_uuid`, and respawns with `--resume`. Same `cwd=repo_root` → same `project_key` → claude finds the same JSONL it was writing before the crash. Mutually exclusive with `--continue`. |
 
 Argv emission lives in
-[`providers/anthropic_claude.py:interactive_argv`](../server/services/cli_agent/providers/anthropic_claude.py).
+[`nodes/agent/claude_code_agent/_provider.py:interactive_argv`](../server/nodes/agent/claude_code_agent/_provider.py).
 The `ClaudeTaskSpec` carries `continue_session: bool` and
 `resume_session_id: Optional[str]`. `claude_code_agent.execute_op` sets
 `continue_session = bool(memory_data)` for the cold-spawn case; the

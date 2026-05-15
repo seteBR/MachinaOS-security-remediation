@@ -45,21 +45,35 @@ A background `stdout_reader_task` parses each line and dispatches via
 | **Context reset (`/clear` equivalent)** | kill subprocess + drop captured UUID — stream-json input has no slash-command path (confirmed in VSCode extension source) |
 | **Crash recovery** | `acquire()` checks `process.returncode`; respawns with `--resume <captured_uuid>` so the same on-disk JSONL keeps growing |
 
-### Code layout (`server/services/cli_agent/`)
+### Code layout
+
+Per the canonical plugin-folder pattern, every claude-specific
+module lives under `server/nodes/agent/claude_code_agent/`. The
+generic framework under `server/services/cli_agent/` owns only
+the shared dispatcher + per-provider registries that the plugin
+self-registers into on import.
 
 ```
-cli_agent/
-├── providers/
-│   └── anthropic_claude.py   # interactive_argv — emits the four VSCode-pattern flags
-├── jsonl_watcher.py          # still used by the non-pooled AICliSession; NOT used by the pool
-├── session.py                # AICliSession — one-shot non-pooled path (PTY on POSIX; out of scope for this refactor)
-├── session_pool.py           # ClaudeSessionPool — subprocess-based warm-process reuse
-└── service.py                # AICliService.run_batch — entry point; routes to pool when memory-bound
+server/nodes/agent/claude_code_agent/
+├── __init__.py    # plugin class + 4 self-registration lines (provider, pool, materialiser, ws handlers)
+├── _provider.py   # AnthropicClaudeProvider — interactive_argv emits the four VSCode-pattern flags
+├── _pool.py       # ClaudeSessionPool — subprocess-based warm-process reuse
+├── _skills.py     # materialise_skills — per-workflow SKILL.md materialisation + live diff
+├── _oauth.py      # claude_binary_path, claude_auth_* — project-local install + the documented CLI subcommands
+└── _handlers.py   # claude_code_login / claude_code_logout WS handlers
+
+server/services/cli_agent/  (generic framework — shared by all CLI plugins)
+├── factory.py     # register_provider / register_session_pool / register_skill_materialiser registries
+├── service.py     # AICliService.run_batch — dispatcher; routes to pool when memory-bound (registry lookup)
+├── session.py     # AICliSession — one-shot non-pooled path (still PTY on POSIX; out of scope)
+├── mcp_server.py  # BatchContext + FastMCP bridge (shared by every CLI provider)
+├── workflow_tools.py / lockfile.py / jsonl_watcher.py / config.py / protocol.py / types.py / _cli_auth.py
+└── _handlers.py   # codex WS handlers only (will move once codex_agent migrates)
 ```
 
 ## argv shape
 
-Built by [`AnthropicClaudeProvider.interactive_argv`](../server/services/cli_agent/providers/anthropic_claude.py).
+Built by [`AnthropicClaudeProvider.interactive_argv`](../server/nodes/agent/claude_code_agent/_provider.py).
 Stable head, task-driven tail:
 
 ```
@@ -107,7 +121,7 @@ allowlist gate.
 
 ## Session pool — warm-process reuse
 
-[`ClaudeSessionPool`](../server/services/cli_agent/session_pool.py) is
+[`ClaudeSessionPool`](../server/nodes/agent/claude_code_agent/_pool.py) is
 keyed by `simpleMemory.node_id`. Each entry is a
 `PooledClaudeSession` carrying the live `asyncio.subprocess.Process`,
 the captured session UUID (filled in from the first event that has
@@ -187,7 +201,7 @@ ferried UUID).
 lifetime of its process — the JSON blob (token included) is frozen
 into argv and can never be rotated without respawning. The pool
 stashes the spawn-time token on
-[`PooledClaudeSession.batch_token`](../server/services/cli_agent/session_pool.py)
+[`PooledClaudeSession.batch_token`](../server/nodes/agent/claude_code_agent/_pool.py)
 so subsequent batches can find and update its bound `BatchContext`.
 
 Token lifecycle, three phases:
@@ -294,7 +308,7 @@ actually enforced (see "argv shape" above for why `bypassPermissions`
 was the wrong default).
 
 **Skills — per-workflow workspace, live-watched, diff-based.**
-[`services/cli_agent/_skills.py::materialise_skills`](../server/services/cli_agent/_skills.py)
+[`nodes/agent/claude_code_agent/_skills.py::materialise_skills`](../server/nodes/agent/claude_code_agent/_skills.py)
 writes one `SKILL.md` tree per connected-and-enabled skill under
 `<workspace_dir>/.claude/skills/<name>/`. The workspace dir
 (`data/workspaces/<workflow_id>/`) is already passed via
