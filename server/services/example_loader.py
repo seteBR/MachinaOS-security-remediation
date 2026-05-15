@@ -7,23 +7,22 @@ handler. This module is the first-launch-only convenience wrapper.
 """
 import json
 import logging
-from pathlib import Path
 from typing import List, Dict, Any
 
-logger = logging.getLogger(__name__)
+from core.paths import workflows_dir
 
-# Workflows folder at project root (parent of server/)
-EXAMPLES_DIR = Path(__file__).parent.parent.parent / "workflows"
+logger = logging.getLogger(__name__)
 
 
 def get_example_workflows() -> List[Dict[str, Any]]:
     """Load all example workflow JSON files from disk."""
     examples = []
-    if not EXAMPLES_DIR.exists():
-        logger.warning(f"Examples directory not found: {EXAMPLES_DIR}")
+    examples_dir = workflows_dir()
+    if not examples_dir.exists():
+        logger.warning(f"Examples directory not found: {examples_dir}")
         return examples
 
-    for file in sorted(EXAMPLES_DIR.glob("*.json")):
+    for file in sorted(examples_dir.glob("*.json")):
         try:
             with open(file, encoding="utf-8") as f:
                 workflow = json.load(f)

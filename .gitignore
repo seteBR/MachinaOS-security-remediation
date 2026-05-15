@@ -129,13 +129,28 @@ pnpm-store/
 # =============================================================================
 # Claude Code's local config / session state / scheduled tasks.
 .claude/
-# Per-workflow runtime workspace (CLAUDE.md "Per-Workflow Workspace
-# Directory" — `data/workspaces/<workflow_id>/`). User-uploaded files,
-# downloaded artifacts, agent-shell state. Always machine-local.
+# MachinaOs runtime root (`server/core/paths.py::machina_root`). Holds
+# claude/, workspaces/, workflows/, whatsapp/, credentials.db,
+# machina.db — every machine-local artefact. Override path via
+# `DATA_DIR` env var in `.env`. Auto-migrated from the legacy `data/`
+# + `workflows/` layout on first boot.
+/.machina/
+# Legacy data dir (pre-cutover layout). Auto-migrated into `.machina/`
+# on first boot but the empty husk may linger if rmdir failed; keep
+# ignored so partial state can't accidentally land in commits.
 /data/
+# Legacy workflows dir (pre-cutover layout). Auto-migrated into
+# `.machina/workflows/` on first boot.
+/workflows/
 # Patch archive left behind by `git format-patch` during one-off
 # merges (see ../.merge-archive cleanup commits). Never committed.
 .merge-archive/
+
+# Test side-effect dir from conftest's core.paths stub
+# (server/core/paths.py). conftest points the stub's machina_root
+# at this dir so plugin module imports don't touch the real user
+# home during tests. Re-created on each test run.
+server/tests/_test_machina_root/
 
 # =============================================================================
 # Documentation (docs-MachinaOs is a separate GitHub project)

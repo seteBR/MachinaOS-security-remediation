@@ -1,10 +1,13 @@
 """Claude OAuth — project-local install + the documented `claude auth` subcommands.
 
-The Claude Code CLI lives at ``<repo>/data/claude-machina/npm/`` (on-demand
+The Claude Code CLI lives at ``<machina_root>/claude/npm/`` (on-demand
 ``npm install`` on first use, mirroring the WhatsApp project-local layout).
-``CLAUDE_CONFIG_DIR`` points at ``<repo>/data/claude-machina/`` so the CLI
+``CLAUDE_CONFIG_DIR`` points at ``<machina_root>/claude/`` so the CLI
 manages its own credentials inside the project tree, isolated from the
-user's own ``~/.claude/`` session.
+user's own ``~/.claude/`` session. Path resolution is centralised in
+:mod:`core.paths` — this module just re-exports the constants for
+back-compat with consumers that still ``import MACHINA_CLAUDE_DIR``
+directly.
 
 Every subprocess call goes through ``services.events.cli.run_cli_command``
 — the canonical one-shot CLI helper used by Stripe / future plugins. Auth
@@ -21,10 +24,9 @@ Stripe uses for ``stripe login --complete``.
 
 This module lives alongside the ``claude_code_agent`` plugin so all
 claude-specific code stays in one folder per the canonical plugin
-pattern. The single source of truth for ``MACHINA_CLAUDE_DIR`` lives
-here; consumers in ``services/cli_agent/`` (the generic framework)
+pattern. Consumers in ``services/cli_agent/`` (the generic framework)
 and the plugin's other modules (``_provider``, ``_pool``, ``_skills``)
-import it from this module.
+import ``MACHINA_CLAUDE_DIR`` from here.
 """
 
 from __future__ import annotations
@@ -34,20 +36,23 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any, Dict
 
 from core.logging import get_logger
+from core.paths import claude_config_dir, claude_npm_dir
 from services.events.cli import run_cli_command
 
 logger = get_logger(__name__)
 
-# This file: server/nodes/agent/claude_code_agent/_oauth.py
-# parents[4] is the repo root.
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-
-MACHINA_CLAUDE_DIR = (_PROJECT_ROOT / "data" / "claude-machina").resolve()
-MACHINA_NPM_DIR = MACHINA_CLAUDE_DIR / "npm"
+# Single source of truth for path resolution lives in ``core.paths``;
+# we re-export as module constants so existing imports
+# (``from ._oauth import MACHINA_CLAUDE_DIR``) keep working without a
+# function-call indirection at every call site. Call ``machina_root``
+# / ``claude_config_dir`` at module load — Settings is already
+# initialised by the time this module is first imported (node registry
+# discovery runs after the FastAPI app is built).
+MACHINA_CLAUDE_DIR = claude_config_dir()
+MACHINA_NPM_DIR = claude_npm_dir()
 
 # Generous timeout for browser-flow login; Stripe uses the same window.
 LOGIN_TIMEOUT_SECONDS = 600.0

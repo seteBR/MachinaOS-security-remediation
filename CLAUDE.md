@@ -1470,7 +1470,7 @@ Residential proxy provider management with geo-targeting, session control, and a
 - **typescriptExecutor**: **Dual-purpose node** - Execute TypeScript code via persistent Node.js server with type safety, syntax-highlighted editor and console output. Works as workflow node OR AI Agent tool (`typescript_code`).
 
 ### Filesystem & Shell Nodes (4 nodes)
-Dual-purpose tool nodes wrapping `deepagents.backends.LocalShellBackend`. Per-workflow workspace from execution context (`context["workspace_dir"]` = `data/workspaces/<workflow_id>/`). Fallback uses `Settings().workspace_base_dir` (never `os.getcwd()`).
+Dual-purpose tool nodes wrapping `deepagents.backends.LocalShellBackend`. Per-workflow workspace from execution context (`context["workspace_dir"]` = `~/.machina/workspaces/<workflow_id>/`). Fallback uses `Settings().workspace_base_dir` (never `os.getcwd()`).
 
 **Path safety**: `nodes/filesystem/_backend.py` exposes `normalize_virtual_path()` which uses `pathlib.PureWindowsPath` (host-OS independent) to strip Windows drives, POSIX root, and UNC anchors uniformly, then delegates to `deepagents.backends.utils.validate_path` for `..`/`~` rejection. Wired into `file_read`, `file_modify`, and `fs_search` so LLM-emitted paths in any flavour (`C:\foo`, `/tmp/foo`, `\\server\share\x`, `foo\bar`) all map to a virtual path under the workspace. `virtual_mode=True` only sandboxes filesystem ops — `execute()` itself is never path-restricted (deepagents documents this).
 
@@ -2023,7 +2023,7 @@ Console logs are persisted to SQLite database and loaded on page refresh.
 ### Per-Workflow Workspace Directory
 Each workflow execution gets a persistent workspace directory where nodes save output files and AI agents (especially Deep Agent) access them via filesystem tools.
 
-**Directory**: `data/workspaces/<workflow_id>/`
+**Directory**: `~/.machina/workspaces/<workflow_id>/`
 
 **Configuration** (`server/core/config.py`):
 ```python
@@ -3486,7 +3486,7 @@ When `simpleMemory` is connected to `claude_code_agent`, memory continuity is ha
 
 **Live UI refresh — CloudEvents v1.0 envelope.** `_persist_memory` calls `broadcaster.broadcast_node_parameters_updated(...)` after `save_node_parameters`. The broadcast carries a `WorkflowEvent` envelope (`type: "com.machinaos.node.parameters.updated"`, `subject: <memory_node_id>`, `data: {node_id, parameters, version, source: "cli"}`) wrapped in the wire-key `{type: "node_parameters_updated", data: <envelope>}`. The FE handler in `client/src/contexts/WebSocketContext.tsx` casts to `WorkflowEvent<{node_id, parameters, version, source}>`, reads `inner.node_id || envelope.subject`, and routes the inner payload to `setNodeParameters` + `queryClient.setQueryData` so the simpleMemory parameter panel auto-refreshes the moment the turn completes. Pre-cutover the FE read the old flat top-level keys (`message.parameters`, `message.node_id`) and silently dropped every broadcast — symptom was "memory only updates after a page reload."
 
-**Workspace dir routed via `--add-dir`.** The per-workflow workspace (`data/workspaces/<workflow_id>/`, injected into `ctx.raw` by `workflow.py:_get_workspace_dir`) is spliced into each task's `add_dir` list in `AICliService.run_batch` so the spawned claude can read files dropped by upstream nodes (`fileDownloader`, `documentParser`, code executors). Without this the workspace is invisible: memory-bound runs spawn with `cwd=repo_root` (stable for `--continue`'s `project_key`) and non-memory runs with `cwd=worktree`, neither of which sees the workspace files. Mirrors the ai_agent pattern (`services/ai.py:1899` — `config['workspace_dir'] = context.get('workspace_dir', '')`) but uses claude's native `--add-dir` instead of MCP-tool-config injection because claude has its own filesystem tools.
+**Workspace dir routed via `--add-dir`.** The per-workflow workspace (`~/.machina/workspaces/<workflow_id>/`, injected into `ctx.raw` by `workflow.py:_get_workspace_dir`) is spliced into each task's `add_dir` list in `AICliService.run_batch` so the spawned claude can read files dropped by upstream nodes (`fileDownloader`, `documentParser`, code executors). Without this the workspace is invisible: memory-bound runs spawn with `cwd=repo_root` (stable for `--continue`'s `project_key`) and non-memory runs with `cwd=worktree`, neither of which sees the workspace files. Mirrors the ai_agent pattern (`services/ai.py:1899` — `config['workspace_dir'] = context.get('workspace_dir', '')`) but uses claude's native `--add-dir` instead of MCP-tool-config injection because claude has its own filesystem tools.
 
 **Stale-model coercion.** `ClaudeCodeAgentParams.model` is a `Literal` of supported model IDs + aliases — strict validation would reject legacy saved values like `"claude-sonnet-4.6"` (dot-spelled), `"claude-3-5-sonnet-20241022"` (date-suffixed), `""`. A `field_validator("model", "fallback_model", mode="before")` coerces unknown values to the default (`"claude-sonnet-4-6"` for `model`, `None` for `fallback_model`) so old workflows keep loading; the UI dropdown still constrains new edits.
 

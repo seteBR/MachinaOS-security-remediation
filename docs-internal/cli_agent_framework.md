@@ -49,7 +49,7 @@ Reuses (do not duplicate):
 - `services/skill_loader.py` — `scan_skills` / `load_skill` consumed by MCP `listSkills` / `getSkill`
 - `services/auth.py` — `AuthService.get_api_key` consumed by MCP `getCredential`
 - `services/credential_registry.py` — deep-merge `extends` for `_cli_base` entry
-- `nodes/agent/claude_code_agent/_oauth.py` — Claude `auth login` / `auth status` / `auth logout` wrappers, project-local npm install at `<repo>/data/claude-machina/npm/`, inherited stdio so the CLI opens the browser itself
+- `nodes/agent/claude_code_agent/_oauth.py` — Claude `auth login` / `auth status` / `auth logout` wrappers, project-local npm install at `~/.machina/claude/npm/`, inherited stdio so the CLI opens the browser itself
 - `nodes/stripe/_handlers.py` — pattern reference for marker-token + catalogue broadcast
 
 ## Provider abstraction (mirrors `services/llm/`)
@@ -98,7 +98,7 @@ the interactive billing bucket (entrypoint `claude-vscode`, NOT
 `sdk-cli`) since `-p` / `--print` is never emitted.
 
 ```
-<repo>/data/claude-machina/npm/node_modules/.bin/claude[.cmd]
+~/.machina/claude/npm/node_modules/.bin/claude[.cmd]
   --output-format stream-json     # events on stdout
   --input-format stream-json      # user turns to stdin as JSON
   --verbose                       # required with stream-json for full event detail
@@ -219,7 +219,7 @@ Steps:
 
 1. Run `claude auth status`. If it exits 0, write the marker + broadcast and return immediately (idempotent re-click).
 2. Otherwise call `services.claude_oauth.initiate_claude_oauth()`:
-   - Project-local install of `@anthropic-ai/claude-code` into `<repo>/data/claude-machina/npm/` via `npm install --prefix` (mirrors WhatsApp's `<repo>/node_modules/edgymeow/` layout; skipped if already installed).
+   - Project-local install of `@anthropic-ai/claude-code` into `~/.machina/claude/npm/` via `npm install --prefix` (mirrors WhatsApp's `<repo>/node_modules/edgymeow/` layout; skipped if already installed).
    - `asyncio.create_subprocess_exec(claude, "auth", "login", env={..., CLAUDE_CONFIG_DIR=<repo>/data/claude-machina})` with **inherited stdio** — same way the VSCode Claude Code extension delegates to the binary. Anthropic doesn't expose `--print-url` or a programmatic OAuth helper (issue [anthropics/claude-code#7100](https://github.com/anthropics/claude-code/issues/7100), closed "not planned"), so we let the CLI open the user's browser via its own OS-level call. Returns `{success: True, pid}` immediately.
 3. Schedule a background task that polls `claude auth status` every 2s up to 600s. On exit-0, write the synthetic `"cli-managed"` marker via `auth_service.store_oauth_tokens("claude_code", ...)` and broadcast `credential_catalogue_updated`. The catalogue's `stored` flag flips and the existing `OAuthConnect.tsx` primitive renders the modal as Connected.
 
@@ -370,7 +370,7 @@ key doesn't drift.
 
 Claude derives `project_key` from cwd via `re.sub(r"[^a-zA-Z0-9.-]", "-", str(cwd))`
 — every `:`, `\`, `/`, `_` becomes `-`. Verified against the on-disk
-`data/claude-machina/projects/` listing — Python reproduces three
+`~/.machina/claude/projects/` listing — Python reproduces three
 encoded directory names byte-for-byte. The pre-bridge per-task
 worktree (`<workspace>/<node_id>/wt_t_<random_8hex>`) changed cwd on
 every spawn → fresh project_key every run → `--resume <UUID>` looked
@@ -548,7 +548,7 @@ Plugin contract: `tests/test_plugin_contract.py` + `tests/test_node_spec.py` —
 
 Live verification (needs a real Claude install + auth):
 
-1. Empty `<repo>/data/claude-machina/`. Open Credentials Modal → click "Login with Claude Code CLI". Confirm the npm install runs (visible in backend logs), `<repo>/data/claude-machina/npm/node_modules/.bin/claude[.cmd]` appears, browser opens for Anthropic OAuth. Modal flips Connected within ~2s of CLI exit (background `claude auth status` poll detects success).
+1. Empty `~/.machina/claude/`. Open Credentials Modal → click "Login with Claude Code CLI". Confirm the npm install runs (visible in backend logs), `~/.machina/claude/npm/node_modules/.bin/claude[.cmd]` appears, browser opens for Anthropic OAuth. Modal flips Connected within ~2s of CLI exit (background `claude auth status` poll detects success).
 2. Refresh the page. Modal stays Connected (`auth_service.get_oauth_tokens("claude_code")` still returns the marker; idempotent re-click also stays Connected).
 3. Click Disconnect. Modal flips Disconnected (`claude auth logout` clears CLI creds + marker dropped).
 4. Add a `claude_code_agent` node, set `tasks=[{prompt:"echo A"},{prompt:"echo B"},{prompt:"echo C"}]`, run. Three distinct `claude:<task_id>` Terminal streams interleaved. Three distinct session_ids. Three worktrees created and removed. `summary.wall_clock_ms < sum(duration_ms)` (proves parallelism).

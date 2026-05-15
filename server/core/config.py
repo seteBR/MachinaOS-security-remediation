@@ -174,8 +174,16 @@ class Settings(BaseSettings):
     api_key_encryption_key: str = Field(env="API_KEY_ENCRYPTION_KEY", min_length=32)
     api_key_cache_ttl: int = Field(default=2592000, env="API_KEY_CACHE_TTL", ge=3600)
 
-    # Data directory (base for all persistent storage: DBs, workspaces, logs)
-    data_dir: str = Field(default="data", env="DATA_DIR")
+    # Data directory (base for all persistent storage: DBs, workspaces,
+    # workflows, claude state). Default is the user's home dir
+    # (``~/.machina``) — same convention claude code itself uses
+    # (``~/.claude/``), Stripe (``~/.config/stripe/``), ngrok
+    # (``~/.ngrok2/``). Survives ``rm -rf`` of the repo. Resolution
+    # rules (``~``, absolute, repo-relative) live in
+    # :func:`core.paths.machina_root`. One-time auto-migration of
+    # the pre-cutover ``data/`` + ``workflows/`` layout runs on
+    # startup via :func:`core.paths.migrate_legacy_layout`.
+    data_dir: str = Field(default="~/.machina", env="DATA_DIR")
 
     # Credentials Database (separate encrypted database for API keys and OAuth tokens)
     # Resolved relative to data_dir unless absolute

@@ -93,6 +93,26 @@ _make_submodule("core", "container", {"container": MagicMock()})
 _make_submodule("core", "database", {"Database": MagicMock})
 _make_submodule("core", "config", {"Settings": MagicMock})
 
+# core.paths — central path resolution. Stub the public surface with
+# tmpdir-rooted Paths so plugin module imports don't trip over the
+# real ``Path.home()`` lookup during test collection. Tests that
+# actually exercise on-disk behaviour use ``tempfile.TemporaryDirectory``
+# locally; the stub just keeps import-time ``MACHINA_CLAUDE_DIR =
+# claude_config_dir()`` calls from blowing up.
+_TEST_MACHINA_ROOT = Path(__file__).parent / "_test_machina_root"
+_make_submodule("core", "paths", {
+    "project_root": lambda: _TEST_MACHINA_ROOT.parent,
+    "machina_root": lambda: _TEST_MACHINA_ROOT,
+    "claude_config_dir": lambda: _TEST_MACHINA_ROOT / "claude",
+    "claude_npm_dir": lambda: _TEST_MACHINA_ROOT / "claude" / "npm",
+    "workspaces_dir": lambda: _TEST_MACHINA_ROOT / "workspaces",
+    "workspace_dir": lambda wf: _TEST_MACHINA_ROOT / "workspaces" / wf,
+    "workflows_dir": lambda: _TEST_MACHINA_ROOT / "workflows",
+    "whatsapp_dir": lambda: _TEST_MACHINA_ROOT / "whatsapp",
+    "credentials_db_path": lambda: _TEST_MACHINA_ROOT / "credentials.db",
+    "migrate_legacy_layout": lambda: 0,
+})
+
 
 # services.pricing -- pre-stub the singleton so handler modules that do
 # `from services.pricing import get_pricing_service` at module load time
