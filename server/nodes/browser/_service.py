@@ -1,23 +1,19 @@
 """Thin wrapper around agent-browser CLI.
 
-Stateless client — finds the binary via npx, runs commands via subprocess,
-parses JSON output. The agent-browser daemon manages its own lifecycle
-(auto-starts, persists between commands).
+Stateless client — finds the binary via :mod:`nodes.browser._install`,
+runs commands via subprocess, parses JSON output. The agent-browser
+daemon manages its own lifecycle (auto-starts, persists between
+commands).
 
 Invocation strategy
 -------------------
-agent-browser is a pinned project dependency (see package.json). Rather than
-locating its shim manually per-platform, we invoke it via ``npx --no-install``:
-
-    [shutil.which("npx"), "--no-install", "agent-browser", ...args]
-
-This matches the pattern used by ``claude_code_service.py`` and is how npm
-intends locally-pinned CLIs to be invoked. npx handles all the
-cross-platform concerns (local ``node_modules/.bin/`` resolution, Windows
-.CMD vs POSIX shell shim, shebang interpretation) so we don't have to.
-
-``--no-install`` makes the call fail loudly if agent-browser isn't in the
-lockfile, instead of silently pulling from the registry at runtime.
+agent-browser is a MachinaOs-managed local install (see
+``nodes/browser/_install.py``) — same pattern as Claude Code's
+project-local CLI. The binary lives at
+``<package_dir("browser")>/npm/node_modules/.bin/agent-browser[.cmd]``
+and is installed via ``npm install agent-browser --prefix <...>`` on
+first use. No dependency on the workspace ``package.json`` /
+``node_modules`` / pnpm lockfile.
 
 All subprocess calls use ``shell=False`` with list argv — Python handles
 Windows .CMD files natively via ``CreateProcessW``, avoiding the BatBadBut
@@ -26,11 +22,11 @@ Windows .CMD files natively via ``CreateProcessW``, avoiding the BatBadBut
 
 import asyncio
 import json
-import shutil
 import subprocess
 from typing import Any, Dict, List, Optional
 
 from core.logging import get_logger
+from nodes.browser._install import agent_browser_binary_path
 from services._supervisor.util import kill_tree
 
 logger = get_logger(__name__)
@@ -156,16 +152,15 @@ _instance: Optional[BrowserService] = None
 
 
 def _find_agent_browser_cmd() -> Optional[List[str]]:
-    """Locate agent-browser via npx (pinned to project lockfile).
+    """Resolve agent-browser via the local-install helper.
 
-    Uses ``npx --no-install`` so the call fails loudly if the package is
-    missing, rather than silently pulling from the registry at runtime.
-    Returns None if npx itself is not on PATH (Node.js not installed).
+    Calls :func:`nodes.browser._install.agent_browser_binary_path`,
+    which installs the npm package into :func:`core.paths.package_dir`
+    on first use (mirroring the claude_code_agent precedent). Returns
+    None when ``npm`` is unavailable (Node toolchain missing).
     """
-    npx = shutil.which("npx")
-    if not npx:
-        return None
-    return [npx, "--no-install", "agent-browser"]
+    binary = agent_browser_binary_path()
+    return [binary] if binary else None
 
 
 def get_browser_service() -> Optional[BrowserService]:

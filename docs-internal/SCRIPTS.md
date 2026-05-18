@@ -171,8 +171,7 @@ Removes build artifacts and dependencies.
 - `client/dist/` - Built frontend
 - `client/.vite/` - Vite cache
 - `server/.venv/` - Python virtual environment
-- `server/data/` - Server data
-- `server/data/whatsapp/` - WhatsApp session DB + edgymeow logs (managed by [server/nodes/whatsapp/_runtime.py](../server/nodes/whatsapp/_runtime.py))
+- `.machina/` - Repo-local DATA_DIR opt-out (only present when `DATA_DIR=.machina`; the default `~/.machina/` lives in your home dir and is never touched)
 
 ---
 

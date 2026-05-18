@@ -9,7 +9,7 @@ import json
 import logging
 from typing import List, Dict, Any
 
-from core.paths import workflows_dir
+from core.paths import example_workflows_dir
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def get_example_workflows() -> List[Dict[str, Any]]:
     """Load all example workflow JSON files from disk."""
     examples = []
-    examples_dir = workflows_dir()
+    examples_dir = example_workflows_dir()
     if not examples_dir.exists():
         logger.warning(f"Examples directory not found: {examples_dir}")
         return examples

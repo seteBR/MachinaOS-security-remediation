@@ -1,9 +1,9 @@
 {
-  "id": "workflow-1778380124051-mdibn807c",
+  "id": "workflow-1779095939967-2369cff4",
   "name": "Claude Assistant",
   "nodes": [
     {
-      "id": "chatTrigger-1776209118671",
+      "id": "chatTrigger-17790959399670-5e1402",
       "type": "chatTrigger",
       "position": {
         "x": 920,
@@ -22,7 +22,7 @@
       "dragging": true
     },
     {
-      "id": "console-1776209125037",
+      "id": "console-17790959399671-5e1402",
       "type": "console",
       "position": {
         "x": 1760,
@@ -41,7 +41,7 @@
       "dragging": false
     },
     {
-      "id": "simpleMemory-1776209197835",
+      "id": "simpleMemory-17790959399672-5e1402",
       "type": "simpleMemory",
       "position": {
         "x": 1160,
@@ -51,16 +51,16 @@
         "label": "Simple Memory"
       },
       "width": 120,
-      "height": 95,
+      "height": 96,
       "selected": false,
       "positionAbsolute": {
         "x": 1160,
         "y": 720
       },
-      "dragging": false
+      "dragging": true
     },
     {
-      "id": "writeTodos-1776209200927",
+      "id": "writeTodos-17790959399673-5e1402",
       "type": "writeTodos",
       "position": {
         "x": 1480,
@@ -79,7 +79,7 @@
       "dragging": true
     },
     {
-      "id": "telegramReceive-1777443980609",
+      "id": "telegramReceive-17790959399674-5e1402",
       "type": "telegramReceive",
       "position": {
         "x": 920,
@@ -89,7 +89,7 @@
         "label": "Telegram Receive"
       },
       "width": 120,
-      "height": 95,
+      "height": 96,
       "selected": false,
       "positionAbsolute": {
         "x": 920,
@@ -98,7 +98,7 @@
       "dragging": false
     },
     {
-      "id": "telegramSend-1777443981868",
+      "id": "telegramSend-17790959399675-5e1402",
       "type": "telegramSend",
       "position": {
         "x": 1720,
@@ -108,7 +108,7 @@
         "label": "Telegram Send"
       },
       "width": 120,
-      "height": 95,
+      "height": 96,
       "selected": false,
       "positionAbsolute": {
         "x": 1720,
@@ -117,7 +117,7 @@
       "dragging": false
     },
     {
-      "id": "masterSkill-1778380286486-616",
+      "id": "masterSkill-17790959399676-5e1402",
       "type": "masterSkill",
       "position": {
         "x": 1280,
@@ -126,7 +126,7 @@
       "data": {
         "label": "Master Skill"
       },
-      "width": 109,
+      "width": 110,
       "height": 82,
       "selected": false,
       "positionAbsolute": {
@@ -136,7 +136,7 @@
       "dragging": true
     },
     {
-      "id": "claude_code_agent-1778411902299",
+      "id": "claude_code_agent-17790959399677-5e1402",
       "type": "claude_code_agent",
       "position": {
         "x": 1300,
@@ -155,7 +155,7 @@
       "dragging": false
     },
     {
-      "id": "duckduckgoSearch-1778506339533",
+      "id": "duckduckgoSearch-17790959399678-5e1402",
       "type": "duckduckgoSearch",
       "position": {
         "x": 1680,
@@ -165,7 +165,7 @@
         "label": "DuckDuckGo Search"
       },
       "width": 120,
-      "height": 95,
+      "height": 96,
       "selected": false,
       "positionAbsolute": {
         "x": 1680,
@@ -174,7 +174,7 @@
       "dragging": false
     },
     {
-      "id": "processManager-1778506349726",
+      "id": "processManager-17790959399679-5e1402",
       "type": "processManager",
       "position": {
         "x": 1580,
@@ -184,7 +184,7 @@
         "label": "Process Manager"
       },
       "width": 120,
-      "height": 95,
+      "height": 96,
       "selected": false,
       "positionAbsolute": {
         "x": 1580,
@@ -193,7 +193,7 @@
       "dragging": false
     },
     {
-      "id": "browser-1778506353729",
+      "id": "browser-177909593996710-5e1402",
       "type": "browser",
       "position": {
         "x": 1820,
@@ -212,7 +212,7 @@
       "dragging": false
     },
     {
-      "id": "fileModify-1778506360537",
+      "id": "fileModify-177909593996711-5e1402",
       "type": "fileModify",
       "position": {
         "x": 1920,
@@ -231,7 +231,7 @@
       "dragging": false
     },
     {
-      "id": "fileRead-1778506361175",
+      "id": "fileRead-177909593996712-5e1402",
       "type": "fileRead",
       "position": {
         "x": 2040,
@@ -250,7 +250,7 @@
       "dragging": false
     },
     {
-      "id": "fsSearch-1778506361835",
+      "id": "fsSearch-177909593996713-5e1402",
       "type": "fsSearch",
       "position": {
         "x": 2140,
@@ -269,7 +269,7 @@
       "dragging": false
     },
     {
-      "id": "shell-1778506362485",
+      "id": "shell-177909593996714-5e1402",
       "type": "shell",
       "position": {
         "x": 2240,
@@ -296,11 +296,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "telegramReceive-1777443980609",
+      "source": "telegramReceive-17790959399674-5e1402",
       "sourceHandle": "output-main",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-main",
-      "id": "reactflow__edge-telegramReceive-1777443980609output-main-claude_code_agent-1778411902299input-main",
+      "id": "e-telegramReceive-17790959399674-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -310,11 +310,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "chatTrigger-1776209118671",
+      "source": "chatTrigger-17790959399670-5e1402",
       "sourceHandle": "output-main",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-main",
-      "id": "reactflow__edge-chatTrigger-1776209118671output-main-claude_code_agent-1778411902299input-main",
+      "id": "e-chatTrigger-17790959399670-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -324,11 +324,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "claude_code_agent-1778411902299",
+      "source": "claude_code_agent-17790959399677-5e1402",
       "sourceHandle": "output-main",
-      "target": "telegramSend-1777443981868",
+      "target": "telegramSend-17790959399675-5e1402",
       "targetHandle": "input-main",
-      "id": "reactflow__edge-claude_code_agent-1778411902299output-main-telegramSend-1777443981868input-main",
+      "id": "e-claude_code_agent-17790959399677-5e1402-telegramSend-17790959399675-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -338,11 +338,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "claude_code_agent-1778411902299",
+      "source": "claude_code_agent-17790959399677-5e1402",
       "sourceHandle": "output-main",
-      "target": "console-1776209125037",
+      "target": "console-17790959399671-5e1402",
       "targetHandle": "input-main",
-      "id": "reactflow__edge-claude_code_agent-1778411902299output-main-console-1776209125037input-main",
+      "id": "e-claude_code_agent-17790959399677-5e1402-console-17790959399671-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -352,11 +352,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "simpleMemory-1776209197835",
+      "source": "simpleMemory-17790959399672-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-memory",
-      "id": "reactflow__edge-simpleMemory-1776209197835output-tool-claude_code_agent-1778411902299input-memory",
+      "id": "e-simpleMemory-17790959399672-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -366,11 +366,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "masterSkill-1778380286486-616",
+      "source": "masterSkill-17790959399676-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-skill",
-      "id": "reactflow__edge-masterSkill-1778380286486-616output-tool-claude_code_agent-1778411902299input-skill",
+      "id": "e-masterSkill-17790959399676-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -380,11 +380,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "writeTodos-1776209200927",
+      "source": "writeTodos-17790959399673-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-writeTodos-1776209200927output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-writeTodos-17790959399673-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -394,11 +394,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "browser-1778506353729",
+      "source": "browser-177909593996710-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-browser-1778506353729output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-browser-177909593996710-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -408,11 +408,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "processManager-1778506349726",
+      "source": "processManager-17790959399679-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-processManager-1778506349726output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-processManager-17790959399679-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -422,11 +422,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "duckduckgoSearch-1778506339533",
+      "source": "duckduckgoSearch-17790959399678-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-duckduckgoSearch-1778506339533output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-duckduckgoSearch-17790959399678-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -436,11 +436,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "fileModify-1778506360537",
+      "source": "fileModify-177909593996711-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-fileModify-1778506360537output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-fileModify-177909593996711-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -450,11 +450,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "fileRead-1778506361175",
+      "source": "fileRead-177909593996712-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-fileRead-1778506361175output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-fileRead-177909593996712-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -464,11 +464,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "fsSearch-1778506361835",
+      "source": "fsSearch-177909593996713-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-fsSearch-1778506361835output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-fsSearch-177909593996713-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     },
     {
@@ -478,39 +478,39 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "shell-1778506362485",
+      "source": "shell-177909593996714-5e1402",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-1778411902299",
+      "target": "claude_code_agent-17790959399677-5e1402",
       "targetHandle": "input-tools",
-      "id": "reactflow__edge-shell-1778506362485output-tool-claude_code_agent-1778411902299input-tools",
+      "id": "e-shell-177909593996714-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
       "selected": false
     }
   ],
-  "createdAt": "2026-05-09T20:58:45.194Z",
-  "lastModified": "2026-05-11T13:33:48.934Z",
+  "createdAt": "2026-05-18T03:48:59.969Z",
+  "lastModified": "2026-05-18T05:03:13.000Z",
   "version": "0.0.72",
   "nodeParameters": {
-    "console-1776209125037": {
+    "console-17790959399671-5e1402": {
       "label": "Console",
       "log_mode": "field",
-      "field_path": "{{aiagent.response}}",
+      "field_path": "{{claudecode.response}}",
       "expression": "",
       "format": "json",
       "fieldPath": ""
     },
-    "simpleMemory-1776209197835": {
+    "simpleMemory-17790959399672-5e1402": {
       "session_id": "",
       "window_size": 100,
       "memory_content": "# Conversation History\n\n*No messages yet.*\n",
       "long_term_enabled": false,
       "retrieval_count": 3,
-      "last_session_id": null,
+      "last_session_id": "45dbf1ac-1221-495d-9207-61b3559713ee",
       "sessionId": "",
       "windowSize": 100,
       "longTermEnabled": false,
       "retrievalCount": 3
     },
-    "telegramReceive-1777443980609": {
+    "telegramReceive-17790959399674-5e1402": {
       "content_type_filter": "text",
       "sender_filter": "self",
       "chat_id": "",
@@ -519,11 +519,11 @@
       "ignore_bots": true,
       "label": "Telegram Receive"
     },
-    "telegramSend-1777443981868": {
+    "telegramSend-17790959399675-5e1402": {
       "recipient_type": "self",
       "chat_id": "",
       "message_type": "text",
-      "text": "{{aiagent.response}}",
+      "text": "{{claudecode.response}}",
       "media_url": "",
       "caption": "",
       "latitude": null,
@@ -536,7 +536,7 @@
       "reply_to_message_id": 0,
       "label": "Telegram Send"
     },
-    "masterSkill-1778380286486-616": {
+    "masterSkill-17790959399676-5e1402": {
       "skills_config": {
         "perplexity-search-skill": {
           "enabled": true,
@@ -630,7 +630,7 @@
         }
       }
     },
-    "claude_code_agent-1778411902299": {
+    "claude_code_agent-17790959399677-5e1402": {
       "tasks": null,
       "prompt": "{{telegramreceive.text}}",
       "model": "claude-sonnet-4-6",
@@ -640,11 +640,11 @@
       "allowed_credentials": null,
       "label": "Claude Code"
     },
-    "duckduckgoSearch-1778506339533": {
+    "duckduckgoSearch-17790959399678-5e1402": {
       "max_results": 5,
       "label": "DuckDuckGo Search"
     },
-    "processManager-1778506349726": {
+    "processManager-17790959399679-5e1402": {
       "operation": "list",
       "name": "",
       "command": "",
@@ -654,7 +654,7 @@
       "tail": 100,
       "label": "Process Manager"
     },
-    "browser-1778506353729": {
+    "browser-177909593996710-5e1402": {
       "operation": "navigate",
       "url": "",
       "selector": "",
@@ -681,7 +681,7 @@
       "timeout": 30,
       "label": "Browser"
     },
-    "fileModify-1778506360537": {
+    "fileModify-177909593996711-5e1402": {
       "operation": "write",
       "content": "",
       "old_string": "",
@@ -689,21 +689,90 @@
       "replace_all": false,
       "label": "File Modify"
     },
-    "fileRead-1778506361175": {
+    "fileRead-177909593996712-5e1402": {
       "offset": 0,
       "limit": 2000,
       "label": "File Read"
     },
-    "fsSearch-1778506361835": {
+    "fsSearch-177909593996713-5e1402": {
       "mode": "ls",
       "path": ".",
       "pattern": "",
       "label": "FS Search"
     },
-    "shell-1778506362485": {
+    "shell-177909593996714-5e1402": {
       "cwd": "",
       "timeout": 30,
       "label": "Shell"
     }
+  },
+  "requirements": {
+    "credentials": [
+      {
+        "provider_id": "telegram"
+      }
+    ],
+    "nodes": [
+      {
+        "type": "chatTrigger",
+        "version": 1
+      },
+      {
+        "type": "console",
+        "version": 1
+      },
+      {
+        "type": "simpleMemory",
+        "version": 1
+      },
+      {
+        "type": "writeTodos",
+        "version": 1
+      },
+      {
+        "type": "telegramReceive",
+        "version": 1
+      },
+      {
+        "type": "telegramSend",
+        "version": 1
+      },
+      {
+        "type": "masterSkill",
+        "version": 1
+      },
+      {
+        "type": "claude_code_agent",
+        "version": 1
+      },
+      {
+        "type": "duckduckgoSearch",
+        "version": 1
+      },
+      {
+        "type": "processManager",
+        "version": 1
+      },
+      {
+        "type": "browser",
+        "version": 1
+      },
+      {
+        "type": "fileModify",
+        "version": 1
+      },
+      {
+        "type": "fileRead",
+        "version": 1
+      },
+      {
+        "type": "fsSearch",
+        "version": 1
+      },
+      {
+        "type": "shell",
+        "version": 1
+      }
+    ]
   }
 }

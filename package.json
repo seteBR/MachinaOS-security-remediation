@@ -35,7 +35,7 @@
   "files": [
     "bin/",
     "scripts/",
-    "workflows/",
+    ".machina/workflows/",
     "cli/",
     "!cli/tests/",
     "!cli/**/__pycache__/",
@@ -50,7 +50,6 @@
     "server/",
     "!server/.venv/",
     "!server/**/__pycache__/",
-    "!server/data/",
     "!**/node_modules/",
     "!**/.vite/",
     ".env.template",
@@ -95,7 +94,6 @@
   },
   "dependencies": {
     "cross-env": "^7.0.3",
-    "agent-browser": "latest",
     "edgymeow": "0.0.20"
   },
   "pnpm": {

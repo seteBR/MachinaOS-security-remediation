@@ -130,19 +130,11 @@ console.log(
     : '  temporal: managed by Python backend (pooch download on first boot)',
 );
 
-// agent-browser is a project dependency (see package.json); pnpm/npm
-// already placed it in node_modules/.pnpm/ before this postinstall ran.
-// Download its Chromium runtime once via `npx agent-browser install`.
-// This is version-pinned via the lockfile; no global state.
-const agentBrowserVersion = getVersion('npx --no-install agent-browser --version');
-if (agentBrowserVersion) {
-  console.log(`  agent-browser: ${agentBrowserVersion} (local)`);
-  if (!runSilent('npx --no-install agent-browser install')) {
-    console.log('  Warning: agent-browser runtime install failed. Browser automation may be unavailable.');
-  }
-} else {
-  console.log('  Warning: agent-browser not found in node_modules. Run `pnpm install` first.');
-}
+// agent-browser is managed by the Python backend
+// (server/nodes/browser/_install.py) — npm-installed into
+// platformdirs.user_cache_path("MachinaOs")/browser/npm/ on first
+// use, with the Chromium runtime fetched by ``agent-browser install``
+// when the browser node first spawns. No npm dep, no postinstall step.
 
 console.log('');
 console.log('Installing...');

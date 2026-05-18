@@ -15,10 +15,16 @@ def test_targets_list_is_stable():
         "client/node_modules",
         "client/dist",
         "client/.vite",
-        "server/data",
         "server/.venv",
         ".venv",
     ]
+
+
+def test_machina_keep_preserves_workflows():
+    """``workflows/`` lives under ``.machina/`` (shipped example seeds);
+    ``clean`` must never wipe it. Pin the keep list so accidental
+    additions/removals surface in review."""
+    assert clean._MACHINA_KEEP == frozenset({"workflows"})
 
 
 def test_rmtree_with_retry_handles_oserror(tmp_path: Path):

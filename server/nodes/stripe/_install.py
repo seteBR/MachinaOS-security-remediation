@@ -2,9 +2,10 @@
 
 On first use, downloads the official Stripe CLI binary from GitHub
 releases (https://github.com/stripe/stripe-cli/releases) and caches
-it under the workspace dir at ``_stripe/bin/stripe[.exe]``. A system
-install on PATH (brew / scoop / apt / direct binary) is preferred —
-the download path only fires when no system binary is found.
+it under :func:`core.paths.package_dir` (``<OS cache>/MachinaOs/stripe/
+bin/stripe[.exe]``). A system install on PATH (brew / scoop / apt /
+direct binary) is preferred — the download path only fires when no
+system binary is found.
 
 Pin a version here when bumping; pre-built archives are signed by
 Stripe and served over GitHub's CDN.
@@ -48,8 +49,8 @@ _install_lock = asyncio.Lock()
 
 
 def _bin_dir() -> Path:
-    from core.config import Settings
-    p = Path(Settings().workspace_base_resolved).resolve() / "_stripe" / "bin"
+    from core.paths import package_dir
+    p = package_dir("stripe") / "bin"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

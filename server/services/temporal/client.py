@@ -69,8 +69,7 @@ class TemporalClientWrapper:
                     DescribeNamespaceRequest(namespace=self.namespace)
                 )
                 self._client = client
-                print(f"[Temporal] Connected to {self.server_address}", flush=True)
-                logger.info("Connected to Temporal server")
+                logger.info(f"Connected to Temporal server at {self.server_address}")
                 # Wave 12 A4: idempotently register the event-framework
                 # Search Attributes. Failure here is non-fatal — the
                 # framework still works without them, dispatch.emit just
@@ -87,14 +86,12 @@ class TemporalClientWrapper:
                     )
                 return self._client
             except Exception as e:
-                print(f"[Temporal] Connection attempt {attempt}/{retries} failed: {e}", flush=True)
                 logger.warning(
                     f"Temporal connection attempt {attempt}/{retries} failed: {e}"
                 )
                 if attempt < retries:
                     await asyncio.sleep(delay)
 
-        print(f"[Temporal] Failed to connect after {retries} attempts", flush=True)
         logger.error(
             f"Failed to connect to Temporal server at {self.server_address} after {retries} attempts"
         )

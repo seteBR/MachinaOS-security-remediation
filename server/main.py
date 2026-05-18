@@ -358,7 +358,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(get_status_broadcaster()._refresh_all_services())
 
     _startup_log("All services initialized")
-    print("Application startup complete", flush=True)
+    _startup_log("Application startup complete")
     yield
 
     # Shutdown

@@ -26,14 +26,20 @@ _TARGETS = [
     "client/node_modules",
     "client/dist",
     "client/.vite",
-    # Repo-local DATA_DIR target. Only present when the operator opts
-    # out of the user-home default by setting ``DATA_DIR=.machina``
-    # in ``.env`` (per the resolution rules in ``cli/config.py``).
-    ".machina",
     # Python venvs
     "server/.venv",
     ".venv",             # stale root venv (should not exist)
 ]
+
+
+# Children of ``<repo>/.machina/`` to wipe selectively. The bare
+# ``.machina`` entry can't go in ``_TARGETS`` anymore because the
+# ``workflows/`` subtree holds shipped example seeds (git-tracked,
+# imported on first launch by ``services.example_loader``) — wiping it
+# would force the operator to re-clone to recover. Anything else under
+# ``.machina/`` (claude state, workspaces, credentials.db, …) is
+# transient runtime state and is fair game.
+_MACHINA_KEEP = frozenset({"workflows"})
 
 
 def _rmtree_with_retry(path: Path, *, attempts: int = 3, delay: float = 0.1) -> bool:
@@ -86,5 +92,24 @@ def clean_command() -> None:
         if path.exists():
             console.print(f"  Removing: {target}")
             _rmtree_with_retry(path)
+
+    # Step 4: selectively clean ``<repo>/.machina/`` — preserve
+    # ``workflows/`` (shipped example seeds, see ``_MACHINA_KEEP``);
+    # wipe everything else (claude/, workspaces/, *.db, …) so the
+    # repo-local DATA_DIR opt-out gets the same fresh-state treatment.
+    machina_dir = root / ".machina"
+    if machina_dir.is_dir():
+        for child in machina_dir.iterdir():
+            if child.name in _MACHINA_KEEP:
+                continue
+            rel = f".machina/{child.name}"
+            console.print(f"  Removing: {rel}")
+            if child.is_dir():
+                _rmtree_with_retry(child)
+            else:
+                try:
+                    child.unlink()
+                except OSError as exc:
+                    console.print(f"  [yellow]Warning: Could not remove {rel}: {exc}[/]")
 
     console.print("\n[green]Done.[/]")

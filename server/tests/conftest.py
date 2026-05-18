@@ -108,7 +108,7 @@ _make_submodule("core", "paths", {
     "claude_npm_dir": lambda: _TEST_MACHINA_ROOT / "claude" / "npm",
     "workspaces_dir": lambda: _TEST_MACHINA_ROOT / "workspaces",
     "workspace_dir": lambda wf: _TEST_MACHINA_ROOT / "workspaces" / wf,
-    "workflows_dir": lambda: _TEST_MACHINA_ROOT / "workflows",
+    "example_workflows_dir": lambda: _TEST_MACHINA_ROOT / "workflows",
     "whatsapp_dir": lambda: _TEST_MACHINA_ROOT / "whatsapp",
     "credentials_db_path": lambda: _TEST_MACHINA_ROOT / "credentials.db",
 })

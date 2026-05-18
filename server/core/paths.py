@@ -12,14 +12,42 @@ same machine share state instead of each carrying its own copy. The
 ``~/.machina/`` convention matches Stripe's ``~/.config/stripe/``,
 ngrok's ``~/.ngrok2/``, and claude code's own ``~/.claude/``.
 
-Layout (flat, no redundant nesting):
+State layout under ``~/.machina/`` (flat, no redundant nesting):
 
-  - ``~/.machina/claude/``       (was ``<repo>/data/claude-machina/``)
-  - ``~/.machina/workspaces/``   (was ``<repo>/data/workspaces/``)
-  - ``~/.machina/workflows/``    (was ``<repo>/workflows/``)
-  - ``~/.machina/whatsapp/``     (was ``<repo>/data/whatsapp/``)
-  - ``~/.machina/credentials.db``
-  - ``~/.machina/machina.db``
+  - ``~/.machina/claude/``       OAuth state for spawned claude subprocesses
+  - ``~/.machina/workspaces/``   per-workflow scratch dirs
+  - ``~/.machina/whatsapp/``     persistent WhatsApp session DB
+  - ``~/.machina/credentials.db``  Fernet-encrypted secrets
+  - ``~/.machina/workflow.db``     SQLite app DB
+
+Binaries that MachinaOs downloads on first use (Stripe CLI, the
+``@anthropic-ai/claude-code`` npm tree, ``agent-browser``'s npm tree)
+live separately, under the OS-conventional cache dir (see
+:func:`packages_dir`). Resolved via :func:`platformdirs.user_cache_path`
+— the standard cross-platform resolver every XDG-aware tool already
+uses:
+
+  - Linux:   ``~/.cache/MachinaOs/<service>/``
+  - macOS:   ``~/Library/Caches/MachinaOs/<service>/``
+  - Windows: ``%LOCALAPPDATA%\\MachinaOs\\Cache\\<service>\\``
+
+Out of scope here: ``temporal`` (separate ``pooch`` cache, postgres
+backend only — see ``services/temporal/_install.py``), Himalaya
+(``cargo``/``brew`` system install), and npm packages declared in
+``package.json`` whose binaries pnpm manages directly under
+``node_modules/`` (e.g. ``whatsapp-rpc``'s ``edgymeow``).
+
+The split keeps ``machina clean`` semantics clear: wiping
+:func:`packages_dir` forces a fresh redownload of MachinaOs-managed
+binaries without touching auth tokens, session DBs, or workspaces.
+
+Shipped example workflows live at ``<repo>/.machina/workflows/`` —
+git-tracked seed JSONs auto-imported on first launch by
+``services.example_loader``. The path is namespaced under ``.machina``
+to share the runtime convention; the rest of ``<repo>/.machina/`` is
+gitignored. ``example_workflows_dir()`` resolves to that fixed seed
+location regardless of ``DATA_DIR`` — operators do NOT relocate the
+shipped seeds.
 
 Importable as ``from core.paths import claude_config_dir, workspace_dir, …``
 so consumers never have to recompute the root themselves (the old
@@ -33,21 +61,22 @@ DATA_DIR resolution rules (see :func:`machina_root`):
   - Relative path → resolved under the repo root (back-compat for
     callers who set ``DATA_DIR=data`` to keep the pre-cutover layout).
 
-Migration of pre-cutover ``<repo>/data/`` + ``<repo>/workflows/``
-trees is the operator's responsibility — set ``DATA_DIR`` to the
-legacy path (e.g. ``DATA_DIR=data``) to keep using the old layout,
-or move the contents manually:
+Migration of pre-cutover ``<repo>/data/`` trees is the operator's
+responsibility — set ``DATA_DIR`` to the legacy path (e.g.
+``DATA_DIR=data``) to keep using the old layout, or move the
+contents manually:
 
   mv server/data/claude-machina  ~/.machina/claude
   mv server/data/workspaces      ~/.machina/workspaces
   mv server/data/workflow.db     ~/.machina/workflow.db
   mv server/data/credentials.db  ~/.machina/credentials.db
-  mv workflows                   ~/.machina/workflows
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+import platformdirs
 
 from core.logging import get_logger
 
@@ -77,12 +106,56 @@ def machina_root() -> Path:
     return p.resolve() if p.is_absolute() else (project_root() / p).resolve()
 
 
+def packages_dir() -> Path:
+    """OS-conventional cache root for binaries we download on first use.
+
+    Delegates to :func:`platformdirs.user_cache_path` — the standard
+    cross-platform resolver (used internally by ``pooch.os_cache``,
+    which is how the Temporal binary downloader already finds its
+    cache). Resolves to:
+
+      - Linux:   ``$XDG_CACHE_HOME/MachinaOs/`` or ``~/.cache/MachinaOs/``
+      - macOS:   ``~/Library/Caches/MachinaOs/``
+      - Windows: ``%LOCALAPPDATA%\\MachinaOs\\Cache``
+
+    Why OS cache (not :func:`machina_root`): downloaded binaries are
+    pure cache — wiping them forces a clean redownload, never
+    drops auth tokens or session state. The OS-conventional cache
+    location is the standard place tools like Stripe CLI, Temporal,
+    and Claude Code expect their binaries to land; matches every
+    XDG-aware system installer.
+
+    See :func:`package_dir` for the per-service accessor.
+    """
+    return platformdirs.user_cache_path("MachinaOs", appauthor=False)
+
+
+def package_dir(name: str) -> Path:
+    """Per-service install folder under :func:`packages_dir`.
+
+    Canonical layout — each plugin's installer (``ensure_stripe_cli``,
+    ``ensure_temporal_binaries``, ``ensure_local_claude_install``, …)
+    drops its tree here. Examples::
+
+        package_dir("stripe")   -> ~/.cache/MachinaOs/stripe/        (Linux)
+        package_dir("temporal") -> ~/Library/Caches/MachinaOs/temporal/  (macOS)
+        package_dir("claude")   -> %LOCALAPPDATA%\\MachinaOs\\Cache\\claude\\  (Windows)
+
+    Caller is responsible for ``mkdir(parents=True, exist_ok=True)``
+    so this helper stays side-effect-free and safe to call during
+    import-time path resolution.
+    """
+    return packages_dir() / name
+
+
 def claude_config_dir() -> Path:
     """``CLAUDE_CONFIG_DIR`` for spawned claude subprocesses.
 
     Resolves to ``<machina_root>/claude/``. Single source of truth for
     the plugin's ``MACHINA_CLAUDE_DIR`` constant (re-exported from
     ``nodes/agent/claude_code_agent/_oauth.py`` for back-compat).
+    Stores OAuth tokens + session state — distinct from
+    :func:`claude_npm_dir`, which holds the downloaded CLI binary.
     """
     return machina_root() / "claude"
 
@@ -90,10 +163,12 @@ def claude_config_dir() -> Path:
 def claude_npm_dir() -> Path:
     """Where ``npm install @anthropic-ai/claude-code`` lands.
 
-    ``<claude_config_dir>/npm/`` — keeps the project-local node_modules
-    tree co-located with the rest of claude state.
+    Resolves to ``<packages_dir>/claude/npm/`` — under the unified
+    install root (see :func:`packages_dir`). Separate from
+    :func:`claude_config_dir` (auth state) so ``machina clean`` can
+    wipe binaries without dropping auth.
     """
-    return claude_config_dir() / "npm"
+    return package_dir("claude") / "npm"
 
 
 def workspaces_dir() -> Path:
@@ -114,14 +189,17 @@ def workspace_dir(workflow_id: str) -> Path:
     return workspaces_dir() / workflow_id
 
 
-def workflows_dir() -> Path:
-    """Where workflow JSON exports live (auto-loaded by example_loader).
+def example_workflows_dir() -> Path:
+    """Shipped example workflow JSONs, auto-imported on first launch.
 
-    Moved from ``<repo>/workflows/`` to ``<machina_root>/workflows/``
-    so the entire MachinaOs working set is contained in one dotted
-    directory the user can ignore from their VCS / file browser.
+    Fixed at ``<repo>/.machina/workflows/`` — these are git-tracked
+    seed JSONs that ship with the repo (see ``services.example_loader``
+    for the import flow). The path is intentionally NOT under
+    :func:`machina_root` because the seeds must survive ``machina
+    clean`` (which wipes the rest of ``.machina/``) and must be the
+    same location regardless of the operator's ``DATA_DIR`` setting.
     """
-    return machina_root() / "workflows"
+    return project_root() / ".machina" / "workflows"
 
 
 def whatsapp_dir() -> Path:
@@ -137,11 +215,13 @@ def credentials_db_path() -> Path:
 __all__ = [
     "project_root",
     "machina_root",
+    "packages_dir",
+    "package_dir",
     "claude_config_dir",
     "claude_npm_dir",
     "workspaces_dir",
     "workspace_dir",
-    "workflows_dir",
+    "example_workflows_dir",
     "whatsapp_dir",
     "credentials_db_path",
 ]

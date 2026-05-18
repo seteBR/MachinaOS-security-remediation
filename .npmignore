@@ -32,7 +32,14 @@ venv/
 **/venv/
 *.egg-info/
 
-# Server data directories
+# Runtime data dirs — transient, never ship. The lone exception is
+# ``.machina/workflows/`` (git-tracked shipped example seeds — see
+# ``server/services/example_loader.py``), explicitly un-ignored below.
+.machina/*
+!.machina/workflows/
+
+# Legacy data dir from the pre-cutover layout. Kept as a sentinel so
+# stale checkouts from older releases don't accidentally ship.
 server/data/
 
 # Node modules (all locations)
