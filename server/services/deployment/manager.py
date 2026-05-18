@@ -283,6 +283,31 @@ class DeploymentManager:
         # (client.list_schedules vs client.list_workflows).
         cron_schedule_count = await self._cancel_canary_cron_schedules(workflow_id)
 
+        # Sweep any downstream nodes still glowing on the canvas. The
+        # cron + listener resets above only cover the trigger nodes the
+        # manager owns directly; if a child run was mid-execution when
+        # cancellation hit, downstream agents / tools / actions may have
+        # been broadcast ``executing`` and would otherwise stay glowing
+        # forever. ``include_waiting=True`` because explicit user-cancel
+        # is the "every indicator goes quiet" signal — matches the
+        # behaviour of the ``handle_cancel_execution`` WS path. The
+        # delegation guard inside ``_clear_stuck_node_statuses`` still
+        # protects in-flight fire-and-forget child agents.
+        await self._broadcaster._clear_stuck_node_statuses(
+            workflow_id, include_waiting=True,
+        )
+
+        # And broadcast a final ``executing=False`` for the deployment
+        # so the toolbar Start/Stop indicator reflects the cancel. The
+        # legacy path's run-counter eviction (``workflow_run_ended``)
+        # doesn't fire here because deployment-level cancel can race
+        # ahead of in-flight ``workflow_run_started`` callers — emit
+        # the terminal state directly to avoid a stuck ``executing=True``
+        # on the FE toolbar.
+        await self._broadcaster.update_workflow_status(
+            executing=False, workflow_id=workflow_id,
+        )
+
         # Clear cron iteration counters for this workflow's cron nodes
         for node_id in cron_node_ids:
             self._cron_iterations.pop(node_id, None)
@@ -675,8 +700,36 @@ class DeploymentManager:
         if state is None:
             raise RuntimeError(f"No deployment state for workflow {workflow_id}")
 
+        from services.deployment.canary_registry import cloudevent_type_for
+
         config = event_waiter.get_trigger_config(node_type)
+        # Legacy snake_case event_type — only used in the listener_args
+        # payload + node-status display strings. NOT the Search Attribute
+        # value; that has to be the CloudEvents reverse-DNS string the
+        # producer puts on outgoing envelopes (see EventType SA pair
+        # below).
         event_type = config.event_type if config else f"unknown_{node_type}"
+
+        # CloudEvents type the producer's _events.py factory emits on its
+        # outgoing envelope. Used as the EventType Search Attribute value
+        # so services.events.dispatch.emit's Visibility query
+        # ``ListWorkflows(query="EventType='<event.type>'")`` actually
+        # matches this listener.
+        #
+        # Pre-fix (2026-05-15) the EventType SA was set to ``event_type``
+        # (the legacy snake_case), but dispatch.emit queries with the
+        # producer's CloudEvents reverse-DNS string. The mismatch silently
+        # zeroed the signal fan-out — listener started OK, never reacted.
+        cloudevent_type = cloudevent_type_for(node_type)
+        if cloudevent_type is None:
+            logger.warning(
+                "Canary listener: no cloudevent_type registered for node_type; "
+                "falling back to legacy event_type for EventType SA. This will "
+                "silently fail dispatch.emit fan-out — register cloudevent_type "
+                "in the plugin's __init__.py.",
+                node_id=node_id, workflow_id=workflow_id, node_type=node_type,
+            )
+            cloudevent_type = event_type
 
         # Pick workflow type by plugin class. EventTriggerKind picks up
         # the "polling" classification for ops dashboards independent
@@ -730,7 +783,10 @@ class DeploymentManager:
             task_queue="machina-tasks",
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
             search_attributes=TypedSearchAttributes([
-                SearchAttributePair(event_type_key, event_type),
+                # MUST be the CloudEvents type the producer emits on
+                # outgoing envelopes — dispatch.emit's Visibility query
+                # substitutes ``event.type`` into the EventType filter.
+                SearchAttributePair(event_type_key, cloudevent_type),
                 SearchAttributePair(trigger_node_id_key, node_id),
                 SearchAttributePair(event_workflow_id_key, workflow_id),
                 SearchAttributePair(event_trigger_kind_key, trigger_kind),

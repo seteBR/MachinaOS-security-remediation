@@ -260,7 +260,16 @@ class PollingTriggerNode(TriggerNode, abstract=True):
                 except Exception:
                     pass
 
-            return {"events": events, "seen_ids": list(prior_seen | current)}
+            # OOM fix: bound ``seen_ids`` to what the provider currently
+            # reports as visible — old IDs that have dropped off the
+            # provider's window (archived / deleted / aged out) fall
+            # out of seen too. Pre-fix this was ``prior_seen | current``
+            # which grew forever (every poll appended new IDs; nothing
+            # ever got evicted). At Gmail's ~100 msgs/day cadence the
+            # set hit ~36K entries in a year — ~1.4MB just for IDs,
+            # serialised through Temporal payload on every cycle. Now
+            # bounded by the provider's natural window size.
+            return {"events": events, "seen_ids": list(current)}
 
         return _poll_cycle_activity
 
@@ -313,6 +322,11 @@ class PollingTriggerNode(TriggerNode, abstract=True):
                     current = await self.fetch_ids(service, params)
                     new_ids = current - seen
                     if not new_ids:
+                        # OOM fix: even when nothing new arrives we
+                        # still rebase ``seen`` to ``current`` so old
+                        # IDs that dropped off the provider's window
+                        # don't linger forever.
+                        seen = set(current)
                         continue
                     logger.debug(
                         "Polling trigger cycle",
@@ -321,7 +335,6 @@ class PollingTriggerNode(TriggerNode, abstract=True):
                         new=len(new_ids),
                     )
                     for msg_id in new_ids:
-                        seen.add(msg_id)
                         payload = await self.fetch_detail(
                             service, msg_id, params
                         )
@@ -333,6 +346,18 @@ class PollingTriggerNode(TriggerNode, abstract=True):
                             await self.post_emit(service, msg_id, params)
                         except Exception:
                             pass
+                    # OOM fix: rebase ``seen`` to the provider's current
+                    # window. Pre-fix this added every new ID to ``seen``
+                    # forever (``seen.add(msg_id)`` inside the loop, no
+                    # eviction). Long-running pollers (Gmail with the
+                    # default 60s interval) accumulated tens of thousands
+                    # of entries over weeks/months. Now bounded by the
+                    # provider's natural window size — items that have
+                    # been emitted are still in ``current`` until they
+                    # age/archive out, at which point dropping them is
+                    # correct (the provider will never re-surface them
+                    # under the same filter).
+                    seen = set(current)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 -- per-cycle isolation

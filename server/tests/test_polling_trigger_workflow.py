@@ -157,8 +157,52 @@ class TestAsPollActivity:
 
         new_ids = {e["id"] for e in result["events"]}
         assert new_ids == {"c", "d"}
-        # seen_ids is the union of prior + current.
+        # OOM fix: seen_ids is bounded by ``current`` — items the
+        # provider no longer reports drop out. Here ``current`` still
+        # includes a/b/c/d so all four stay.
         assert set(result["seen_ids"]) == {"a", "b", "c", "d"}
+
+    @pytest.mark.asyncio
+    async def test_seen_ids_bounded_by_current_window_no_unbounded_growth(self):
+        """OOM regression guard: when items drop off the provider's
+        ``current`` window (archived / aged out), they must drop out of
+        ``seen_ids`` too. Pre-fix this returned ``prior_seen | current``
+        which grew forever; a Gmail trigger polling every 60s with ~100
+        emails/day would accumulate ~36K IDs in a year (~1.4MB just for
+        the seen set, serialised through Temporal payload every cycle)."""
+        # Provider only reports {e, f} as currently visible — a/b/c/d
+        # have aged out (e.g. archived in Gmail, marked read+filter is
+        # ``is:unread``, paged off the latest-N window, etc.).
+        cls = _make_fake_polling_class("test.bound", current_ids={"e", "f"})
+        activity_fn = cls.as_poll_activity()
+        inner = self._underlying(activity_fn)
+
+        result = await inner({
+            "node_id": "n1",
+            "params": {},
+            # Carry-forward from an earlier cycle.
+            "seen_ids": ["a", "b", "c", "d", "e"],
+            "baseline_only": False,
+        })
+
+        # Only the genuinely new id (``f``) emits — ``e`` was already
+        # in prior_seen.
+        new_ids = {ev["id"] for ev in result["events"]}
+        assert new_ids == {"f"}, (
+            "Only items in ``current`` that weren't in ``prior_seen`` "
+            "should emit."
+        )
+        # And the returned seen_ids must NOT contain a/b/c/d — those
+        # are gone from the provider's window. If they linger, every
+        # subsequent cycle pays Temporal-payload cost for IDs that will
+        # never matter again, and the set grows without bound.
+        assert set(result["seen_ids"]) == {"e", "f"}, (
+            f"seen_ids must be bounded by the provider's current window "
+            f"(got {sorted(result['seen_ids'])!r}). Old IDs that have "
+            f"dropped off the provider must NOT be carried forward — "
+            f"pre-fix this returned ``list(prior_seen | current)`` and "
+            f"leaked unboundedly."
+        )
 
     @pytest.mark.asyncio
     async def test_detail_payload_id_fallback(self):
@@ -216,6 +260,71 @@ class TestAsPollActivity:
 # ---------------------------------------------------------------------------
 
 
+class TestPollCoroutineSeenSetBounded:
+    """OOM regression guard for the legacy poll coroutine path
+    (``_build_poll_coroutine``).
+
+    Pre-fix the coroutine maintained ``seen: Set[str]`` that grew on
+    every emit via ``seen.add(msg_id)`` with no eviction — long-running
+    pollers (Gmail with the default 60s interval) accumulated tens of
+    thousands of entries over weeks/months. The fix rebases ``seen``
+    to ``current`` at the end of every cycle so items that drop off
+    the provider's window drop out of ``seen`` too.
+    """
+
+    def test_coroutine_source_rebases_seen_to_current(self):
+        """Source-introspection lock: ``_build_poll_coroutine`` must
+        contain ``seen = set(current)`` (or equivalent rebase) and must
+        NOT contain ``seen.add(`` inside the new-id emit loop. Driving
+        the live coroutine through cycles is fragile because the
+        per-class ``poll_interval_clamp`` enforces a 10s minimum
+        sleep — and the bug is in single-line state mutation that
+        source introspection catches reliably."""
+        import inspect
+
+        from services.plugin import PollingTriggerNode
+
+        # Build a coroutine on a real subclass — we only need its
+        # source, not its execution.
+        class _T(PollingTriggerNode, abstract=True):
+            type = "introspect.bound"
+            display_name = "Introspect"
+
+            async def setup_service(self, params): return MagicMock()
+            async def fetch_ids(self, service, params): return set()
+            async def fetch_detail(self, service, msg_id, params): return {"id": msg_id}
+            async def post_emit(self, service, msg_id, params): pass
+
+        # _build_poll_coroutine returns a closure; introspect the
+        # MRO-resolved method body instead. Strip comments and
+        # docstrings so the regex only sees executable code.
+        raw = inspect.getsource(PollingTriggerNode._build_poll_coroutine)
+        code_only = "\n".join(
+            line.split("#", 1)[0]  # drop trailing/inline comments
+            for line in raw.splitlines()
+        )
+
+        # The fix: rebase seen to the provider's current snapshot at
+        # the end of every cycle.
+        assert "seen = set(current)" in code_only, (
+            "OOM fix regressed: _build_poll_coroutine no longer rebases "
+            "``seen`` to ``current`` at end of cycle. Pre-fix it called "
+            "``seen.add(msg_id)`` per emit with no eviction; old IDs "
+            "accumulated forever (~36K entries in a year for a 60s "
+            "poller). Restore the ``seen = set(current)`` rebase after "
+            "the new-id emit loop."
+        )
+
+        # And the anti-pattern (per-emit unbounded add) is gone from
+        # executable code. Comments / docstrings that REFERENCE the
+        # historical bug are fine (and useful for future maintainers).
+        assert "seen.add(" not in code_only, (
+            "OOM fix regressed: _build_poll_coroutine reintroduced "
+            "``seen.add(msg_id)``. The rebase-to-current pattern makes "
+            "this redundant AND unbounded — drop it."
+        )
+
+
 class TestPollingTriggerWorkflowBody:
     """The workflow's signal/sleep/spawn loop runs deterministically."""
 
@@ -242,6 +351,11 @@ class TestPollingTriggerWorkflowBody:
         from temporalio import workflow as temporal_workflow
 
         async def fake_execute_activity(name, payload, **kwargs):
+            # Trigger-status broadcasts (idle/waiting around each spawn)
+            # are side-effect-only; they're driven by the workflow body
+            # but don't consume the scripted poll-cycle responses.
+            if name == "broadcast_trigger_status_activity":
+                return None
             return next(responses)
 
         sleep_calls: List[Any] = []
@@ -312,6 +426,10 @@ class TestPollingTriggerWorkflowBody:
         call_count = [0]
 
         async def fake_execute_activity(name, payload, **kwargs):
+            # Trigger-status broadcasts are side-effect-only; don't
+            # count them against the poll-cycle script.
+            if name == "broadcast_trigger_status_activity":
+                return None
             call_count[0] += 1
             if call_count[0] == 2:  # second call fails
                 raise RuntimeError("transient API timeout")

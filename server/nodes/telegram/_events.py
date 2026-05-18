@@ -144,38 +144,21 @@ async def broadcast_telegram_status(
     })
 
 
-async def dispatch_telegram_message_received(event_data: Mapping[str, Any]) -> int:
-    """Dispatch an incoming Telegram message to waiting
-    ``telegramReceive`` trigger nodes.
+async def dispatch_telegram_message_received(event_data: Mapping[str, Any]) -> None:
+    """Dispatch an incoming Telegram message via the canary CloudEvents path.
 
-    Two delivery paths (in priority order):
-
-    1. **Legacy event_waiter waiters** via :func:`event_waiter.dispatch`
-       (in-process collector/processor; default while the canary flag
-       is off).
-    2. **Temporal-durable listeners** via
-       :func:`services.events.dispatch.emit` (Wave 12 C1 rollout #3).
-       ``emit`` is a no-op pass-through when the feature flag is off,
-       so the legacy path keeps working unchanged.
-
-    Returns the count of legacy waiters resolved.
+    Single delivery: :func:`services.events.dispatch.emit` Signals running
+    :class:`TriggerListenerWorkflow` consumers via Temporal Visibility AND
+    broadcasts the envelope to FE on the ``telegram_message_received``
+    wire key. telegramReceive is canary-registered so no legacy
+    ``event_waiter`` waiter is ever registered for it.
     """
-    from services import event_waiter
     from services.events.dispatch import emit
 
-    payload = dict(event_data)
-    # Trigger nodes subscribe by event_type string; keep the legacy
-    # string so the `telegramReceive.event_type` ClassVar still matches.
-    resolved = event_waiter.dispatch(_MESSAGE_LEGACY_EVENT_TYPE, payload)
-
-    # Temporal-durable fan-out (Wave 12 C1 rollout #3). No-op when
-    # event_framework_enabled is off.
     await emit(
-        telegram_message_received(payload),
+        telegram_message_received(dict(event_data)),
         wire_routing_key=_MESSAGE_LEGACY_EVENT_TYPE,
     )
-
-    return resolved
 
 
 __all__ = [

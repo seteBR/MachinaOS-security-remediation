@@ -1,20 +1,15 @@
-"""Wave 12 B9: CloudEvents factory + dispatch wrapper for webhook_trigger.
+"""CloudEvents factory + broadcaster wrapper for webhook_trigger.
 
-Plugin-specific event emission — replaces:
-  - ``broadcaster.send_custom_event("webhook_received", webhook_data)``
-    in ``routers/webhook.py`` (unmapped-path fallback).
+Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live in
+the plugin folder.
 
-The webhook router previously emitted the event itself, hardcoding the
-plugin-specific event_type string in framework code. Phase B9 inverts
-this: the webhook_trigger plugin owns its dispatch primitive.
-
-Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live
-in the plugin folder.
-
-Wire-key behaviour preserved: still goes through
-``broadcaster.send_custom_event(...)`` which (a) does the legacy raw
-WS broadcast AND (b) dispatches the event into ``event_waiter`` so
-``webhookTrigger`` nodes match it.
+Delivery: single ``dispatch.emit`` call routes events to running
+:class:`TriggerListenerWorkflow` consumers via Temporal Visibility AND
+broadcasts the envelope to FE on the ``webhook_received`` wire key.
+webhookTrigger is canary-registered (see ``nodes/trigger/webhook_trigger/__init__.py``)
+so the deployment manager skips ``setup_event_trigger`` and the legacy
+``broadcaster.send_custom_event`` path (which dispatched to
+``event_waiter``) has zero consumers — removed.
 """
 
 from __future__ import annotations
@@ -24,13 +19,10 @@ from typing import Any, Mapping
 from services.events.envelope import WorkflowEvent
 
 
-# Legacy wire-routing key. The frontend has no listener for it today
-# (webhook receivers don't have a status panel); the consumer is the
-# ``webhookTrigger`` node via the event_waiter dispatch.
-_LEGACY_EVENT_TYPE = "webhook_received"
-
-
-# ---- Typed factory ---------------------------------------------------------
+# Outer wire-routing key. Matches ``WebhookTriggerNode.event_type`` and
+# the FE WS channel; the inner envelope carries
+# ``com.machinaos.webhook.received``.
+_WIRE_ROUTING_KEY = "webhook_received"
 
 
 def webhook_received(webhook_data: Mapping[str, Any]) -> WorkflowEvent:
@@ -46,42 +38,14 @@ def webhook_received(webhook_data: Mapping[str, Any]) -> WorkflowEvent:
     )
 
 
-# ---- Broadcaster wrapper ---------------------------------------------------
-
-
 async def broadcast_webhook_received(webhook_data: Mapping[str, Any]) -> None:
-    """Broadcast an incoming webhook to ``webhookTrigger`` nodes.
-
-    Three delivery paths (kept in this order for back-compat):
-
-    1. **Legacy WS broadcast + asyncio.Future waiters** via
-       ``broadcaster.send_custom_event`` (the in-process collector /
-       processor path; default while the canary flag is off).
-    2. **Temporal Signal fan-out** via ``services.events.dispatch.emit``
-       (Wave 12 C1 canary). Gated by ``Settings.event_framework_enabled``;
-       inside :func:`emit` the flag-off branch is a no-op pass-through
-       so it's cheap to always invoke. When on, the dispatch helper
-       runs a Visibility query and signals every running
-       :class:`TriggerListenerWorkflow` whose ``EventType`` matches
-       the envelope.
-
-    Both paths are non-overlapping consumers — legacy reaches the
-    in-process collector/processor task pair; the Temporal path
-    reaches the durable listener workflow. Producer doesn't need to
-    pick one.
-    """
-    from services.status_broadcaster import get_status_broadcaster
-
-    broadcaster = get_status_broadcaster()
-    envelope = webhook_received(webhook_data)
-    await broadcaster.send_custom_event(_LEGACY_EVENT_TYPE, dict(webhook_data))
-
-    # Temporal-durable fan-out (Wave 12 C1 canary). Always-call;
-    # dispatch.emit is a no-op when the feature flag is off, so the
-    # legacy path keeps working unchanged.
+    """Broadcast an incoming webhook via the canary CloudEvents path."""
     from services.events.dispatch import emit
 
-    await emit(envelope, wire_routing_key=_LEGACY_EVENT_TYPE)
+    await emit(
+        webhook_received(dict(webhook_data)),
+        wire_routing_key=_WIRE_ROUTING_KEY,
+    )
 
 
 __all__ = [

@@ -35,7 +35,6 @@ from services.ws_handler_registry import (
 )
 
 from . import _router
-from ._events import dispatch_gmail_received  # noqa: F401 — re-export
 from ._filters import build_gmail_filter
 from ._handlers import WS_HANDLERS
 from ._option_loaders import (
@@ -65,4 +64,4 @@ register_option_loader("googleTasklists", load_tasklists)
 # Temporal activity is emitted by GmailReceiveNode.as_poll_activity()
 # and registered via collect_polling_activities() in the worker. See
 # services/deployment/canary_registry.py.
-register_canary_trigger_type("googleGmailReceive")
+register_canary_trigger_type("googleGmailReceive", "com.machinaos.gmail.message.received")

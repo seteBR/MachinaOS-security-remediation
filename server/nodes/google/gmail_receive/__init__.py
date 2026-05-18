@@ -169,10 +169,11 @@ class GmailReceiveNode(PollingTriggerNode):
                         "gmail", node_id, "receive", 1,
                         {"workflow_id": context.workflow_id, "session_id": context.session_id},
                     )
-                    # Wave 12 B5: route through plugin _events.py wrapper.
-                    from nodes.google import dispatch_gmail_received
-
-                    dispatch_gmail_received(email_data)
+                    # Inline Run path: the node returns ``email_data`` as
+                    # its output and the activity wrapper broadcasts
+                    # ``success`` status to FE. No separate dispatch
+                    # needed — deployment mode uses PollingTriggerWorkflow
+                    # which owns event fan-out in-workflow.
                     logger.info(
                         f"[GmailReceive] New email: {email_data.get('subject', 'no subject')}",
                     )

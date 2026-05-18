@@ -201,7 +201,11 @@ class PollingTriggerWorkflow:
         nodes) stay single-source. Mirrors
         :meth:`TriggerListenerWorkflow._spawn_child_run` exactly.
         """
-        from services.temporal.trigger_listener_workflow import _build_run_graph
+        from services.temporal.trigger_listener_workflow import (
+            _broadcast_trigger_idle,
+            _broadcast_trigger_waiting,
+            _build_run_graph,
+        )
 
         trigger_node_id = listener_data["trigger_node_id"]
         nodes = listener_data["nodes"]
@@ -231,6 +235,13 @@ class PollingTriggerWorkflow:
         event_id = event.get("id") or workflow.uuid4().hex
         child_id = f"run-{workflow_id}-{event_id}"
 
+        await _broadcast_trigger_idle(
+            node_id=trigger_node_id,
+            workflow_id=workflow_id,
+            event_id=event_id,
+            event_type=listener_data.get("event_type", ""),
+        )
+
         await workflow.start_child_workflow(
             "MachinaWorkflow",
             args=[{
@@ -250,6 +261,13 @@ class PollingTriggerWorkflow:
         workflow.logger.info(
             f"PollingTriggerWorkflow spawned child run: child_id={child_id} "
             f"event.id={event.get('id')}"
+        )
+
+        await _broadcast_trigger_waiting(
+            node_id=trigger_node_id,
+            workflow_id=workflow_id,
+            event_type=listener_data.get("event_type", ""),
+            processed_count=self._processed_count + 1,
         )
 
 

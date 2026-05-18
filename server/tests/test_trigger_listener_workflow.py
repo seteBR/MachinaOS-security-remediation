@@ -277,12 +277,21 @@ class TestSpawnChildRun:
             recorded.append({"name": workflow_name, **kwargs})
             return MagicMock()
 
+        async def fake_execute_activity(*args, **kwargs):
+            # Status-broadcast activities — no-op for the spawn test.
+            return None
+
         from temporalio import workflow as temporal_workflow
 
         monkeypatch.setattr(
             temporal_workflow,
             "start_child_workflow",
             fake_start_child_workflow,
+        )
+        monkeypatch.setattr(
+            temporal_workflow,
+            "execute_activity",
+            fake_execute_activity,
         )
 
         wf = tlw.TriggerListenerWorkflow()
@@ -327,12 +336,20 @@ class TestSpawnChildRun:
         async def boom(*args, **kwargs):
             raise RuntimeError("temporal unreachable")
 
+        async def fake_execute_activity(*args, **kwargs):
+            return None
+
         from temporalio import workflow as temporal_workflow
 
         monkeypatch.setattr(
             temporal_workflow,
             "start_child_workflow",
             boom,
+        )
+        monkeypatch.setattr(
+            temporal_workflow,
+            "execute_activity",
+            fake_execute_activity,
         )
 
         wf = tlw.TriggerListenerWorkflow()

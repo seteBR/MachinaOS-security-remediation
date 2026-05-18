@@ -493,12 +493,11 @@ class TelegramService(ServiceSingleton):
                 f"chat_type={event_data.get('chat_type')}"
             )
 
-            # Wave 12 B3: route via plugin _events.py wrapper (single
-            # source of truth for the wire format).
+            # Route via plugin _events.py wrapper — canary CloudEvents
+            # path (Visibility-query Signal + WS broadcast).
             from . import dispatch_telegram_message_received
 
-            resolved = await dispatch_telegram_message_received(event_data)
-            logger.info(f"[Telegram] Dispatched to {resolved} waiter(s)")
+            await dispatch_telegram_message_received(event_data)
         except Exception as e:
             logger.error(f"[Telegram] Message handler error: {e}")
 

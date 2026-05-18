@@ -1,20 +1,24 @@
-"""Wave 12 B5: CloudEvents factories + broadcaster wrappers for google.
+"""CloudEvents factory for gmail.
 
-Plugin-specific event emission — replaces:
-  - ``event_waiter.dispatch("gmail_email_received", email_data)`` in
-    ``gmail_receive/__init__.py``.
+Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live in
+the plugin folder.
+
+No dispatcher wrapper: the canary delivery path for ``googleGmailReceive``
+is :class:`services.temporal.polling_trigger_workflow.PollingTriggerWorkflow`
+(not Signal-based). The polling activity (built by
+:meth:`services.plugin.polling.PollingTriggerNode.as_poll_activity`)
+returns the raw email dict back to the workflow which spawns the child
+MachinaWorkflow directly — no envelope-on-the-wire step is needed.
+
+The factory below is kept for parity with the other plugin ``_events.py``
+modules (and for any future ad-hoc emit usage); the legacy
+``dispatch_gmail_received`` shim was deleted in Wave 13 because it
+dispatched to ``event_waiter`` waiters that were never registered in
+canary-on mode (the polling workflow owns delivery).
 
 OAuth completion broadcasts route through the cross-cutting
 ``StatusBroadcaster.broadcast_credential_event("credential.oauth.connected", ...)``
 path (RFC §6.4 cross-cutting tier) — NOT a plugin-named broadcast.
-No migration needed here for that flow.
-
-Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live
-in the plugin folder.
-
-Legacy ``event_type`` (``"gmail_email_received"``) is preserved so
-the ``gmailReceive`` trigger node's ``event_type`` ClassVar still
-matches without a coordinated registry-side rename.
 """
 
 from __future__ import annotations
@@ -22,14 +26,6 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from services.events.envelope import WorkflowEvent
-
-
-# Legacy event_type the event_waiter dispatches by; trigger nodes
-# subscribe on this string (matches ``GmailReceiveNode.event_type``).
-_LEGACY_EVENT_TYPE = "gmail_email_received"
-
-
-# ---- Typed factory ---------------------------------------------------------
 
 
 def gmail_message_received(email_data: Mapping[str, Any]) -> WorkflowEvent:
@@ -46,18 +42,6 @@ def gmail_message_received(email_data: Mapping[str, Any]) -> WorkflowEvent:
     )
 
 
-# ---- Dispatcher wrapper ----------------------------------------------------
-
-
-def dispatch_gmail_received(email_data: Mapping[str, Any]) -> int:
-    """Dispatch an incoming Gmail message to waiting ``gmailReceive``
-    trigger nodes. Returns the count of resolved waiters."""
-    from services import event_waiter
-
-    return event_waiter.dispatch(_LEGACY_EVENT_TYPE, dict(email_data))
-
-
 __all__ = [
-    "dispatch_gmail_received",
     "gmail_message_received",
 ]

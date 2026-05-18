@@ -140,6 +140,10 @@ class TemporalWorkerManager:
             )
             from services.temporal.agent_activities import collect_agent_activities
             from services.temporal.agent_workflow import AgentWorkflow
+            from services.temporal.activities import (
+                broadcast_trigger_status_activity,
+                store_node_output_activity,
+            )
 
             per_type = collect_plugin_activities()  # no queue filter; all plugins
             agent_activities = collect_agent_activities()
@@ -164,6 +168,8 @@ class TemporalWorkerManager:
                 ],
                 activities=[
                     self._activities.execute_node_activity,
+                    broadcast_trigger_status_activity,
+                    store_node_output_activity,
                     *per_type,
                     *agent_activities,
                     *polling_activities,
@@ -183,7 +189,6 @@ class TemporalWorkerManager:
             span.set_attribute("task_queue", self.task_queue)
             span.set_attribute("pool_size", self.pool_size)
 
-            print(f"[Temporal] Worker started (queue={self.task_queue}, pool={self.pool_size})", flush=True)
             logger.info(
                 "Starting Temporal worker",
                 task_queue=self.task_queue,
@@ -385,6 +390,11 @@ async def run_standalone_worker(
     session = await create_shared_session(pool_size)
     activities = NodeExecutionActivities(session)
 
+    from services.temporal.activities import (
+        broadcast_trigger_status_activity,
+        store_node_output_activity,
+    )
+
     try:
         worker = Worker(
             client,
@@ -394,7 +404,11 @@ async def run_standalone_worker(
                 TriggerListenerWorkflow,
                 PollingTriggerWorkflow,
             ],
-            activities=[activities.execute_node_activity],  # Pass bound method
+            activities=[
+                activities.execute_node_activity,
+                broadcast_trigger_status_activity,
+                store_node_output_activity,
+            ],
             max_concurrent_activities=pool_size,
             max_concurrent_workflow_tasks=10,
             graceful_shutdown_timeout=_graceful_shutdown_timeout(),
@@ -428,6 +442,10 @@ async def create_worker(
         session = await create_shared_session()
 
     activities = NodeExecutionActivities(session)
+    from services.temporal.activities import (
+        broadcast_trigger_status_activity,
+        store_node_output_activity,
+    )
 
     return Worker(
         client,
@@ -437,7 +455,11 @@ async def create_worker(
             TriggerListenerWorkflow,
             PollingTriggerWorkflow,
         ],
-        activities=[activities.execute_node_activity],  # Pass bound method
+        activities=[
+            activities.execute_node_activity,
+            broadcast_trigger_status_activity,
+            store_node_output_activity,
+        ],
         max_concurrent_activities=100,
         max_concurrent_workflow_tasks=10,
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN_TIMEOUT,

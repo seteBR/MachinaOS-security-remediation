@@ -324,11 +324,24 @@ class WorkflowEvent(BaseModel):
         agent: str,
         data: Optional[Mapping[str, Any]] = None,
     ) -> "WorkflowEvent":
-        """Delegated child-agent completion. Type discriminates on
-        succeeded vs failed; ``taskTrigger`` filters by both."""
+        """Delegated child-agent completion.
+
+        Both success and failure share one ``type``
+        (``com.machinaos.agent.task.completed``) so the
+        ``TriggerListenerWorkflow`` for ``taskTrigger`` can register a
+        single ``EventType`` Search Attribute and match every
+        completion event via :func:`services.events.dispatch.emit`'s
+        Visibility query. Status discrimination lives in ``data.status``
+        (``"completed"`` or ``"error"``) — :class:`TaskTriggerNode`'s
+        filter already keys off this field.
+
+        Pre-fix (commit ?) the type split into ``.succeeded`` /
+        ``.failed`` which left the listener's SA value matching only
+        one branch and silently lost the other half of events.
+        """
         return cls(
             source="machinaos://services/agent",
-            type=f"{_TYPE_PREFIX}agent.task.{'succeeded' if status == 'completed' else 'failed'}",
+            type=f"{_TYPE_PREFIX}agent.task.completed",
             subject=task_id,
             data=dict(data) if data else {"task_id": task_id, "agent": agent, "status": status},
         )

@@ -149,6 +149,12 @@ class TriggerListenerWorkflow:
         the same deployment are marked ``_pre_executed=True`` with
         ``{not_triggered: True}`` so MachinaWorkflow doesn't block on
         them (mirrors ``DeploymentManager._execute_from_trigger``).
+
+        Status broadcast lifecycle (matches legacy
+        ``deployment/triggers.py`` collector/processor):
+          - Before spawn → trigger node ``"idle"`` with "Graph executing..."
+          - After spawn returns → trigger node ``"waiting"`` (child runs
+            independently per ``parent_close_policy=ABANDON``).
         """
         trigger_node_id = listener_data["trigger_node_id"]
         nodes = listener_data["nodes"]
@@ -180,6 +186,13 @@ class TriggerListenerWorkflow:
         event_id = event.get("id") or workflow.uuid4().hex
         child_id = f"run-{workflow_id}-{event_id}"
 
+        await _broadcast_trigger_idle(
+            node_id=trigger_node_id,
+            workflow_id=workflow_id,
+            event_id=event_id,
+            event_type=event.get("type", ""),
+        )
+
         await workflow.start_child_workflow(
             "MachinaWorkflow",
             args=[{
@@ -200,6 +213,78 @@ class TriggerListenerWorkflow:
             f"TriggerListener spawned child run: child_id={child_id} "
             f"event.id={event.get('id')} event.type={event.get('type')}"
         )
+
+        await _broadcast_trigger_waiting(
+            node_id=trigger_node_id,
+            workflow_id=workflow_id,
+            event_type=listener_data.get("event_type", ""),
+            processed_count=self._processed_count + 1,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Status-broadcast helpers — thin wrappers around the activity so the
+# spawn loop reads cleanly. Activity name string matches the @activity.defn
+# registration in services/temporal/activities.py.
+# ---------------------------------------------------------------------------
+
+
+_STATUS_ACTIVITY_NAME = "broadcast_trigger_status_activity"
+_STATUS_ACTIVITY_TIMEOUT = timedelta(seconds=5)
+
+
+async def _broadcast_trigger_idle(
+    *,
+    node_id: str,
+    workflow_id: Optional[str],
+    event_id: str,
+    event_type: str,
+) -> None:
+    """Broadcast trigger node ``"idle"`` status with a "Graph executing..."
+    message — matches the legacy collector/processor transition so FE
+    shows a firing pulse instead of a stuck "waiting" indicator."""
+    await workflow.execute_activity(
+        _STATUS_ACTIVITY_NAME,
+        {
+            "node_id": node_id,
+            "status": "idle",
+            "data": {
+                "message": "Graph executing...",
+                "is_processing": True,
+                "event_id": event_id,
+                "event_type": event_type,
+            },
+            "workflow_id": workflow_id,
+        },
+        start_to_close_timeout=_STATUS_ACTIVITY_TIMEOUT,
+    )
+
+
+async def _broadcast_trigger_waiting(
+    *,
+    node_id: str,
+    workflow_id: Optional[str],
+    event_type: str,
+    processed_count: int,
+) -> None:
+    """Broadcast trigger node back to ``"waiting"`` after the child run
+    has been spawned (child completes independently per
+    ``parent_close_policy=ABANDON``)."""
+    await workflow.execute_activity(
+        _STATUS_ACTIVITY_NAME,
+        {
+            "node_id": node_id,
+            "status": "waiting",
+            "data": {
+                "message": "Waiting for next event...",
+                "is_processing": False,
+                "event_type": event_type,
+                "processed_count": processed_count,
+            },
+            "workflow_id": workflow_id,
+        },
+        start_to_close_timeout=_STATUS_ACTIVITY_TIMEOUT,
+    )
 
 
 # ---------------------------------------------------------------------------

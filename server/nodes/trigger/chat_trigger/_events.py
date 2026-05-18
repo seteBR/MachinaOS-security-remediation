@@ -1,19 +1,14 @@
-"""Wave 12 B7: CloudEvents factory + dispatch wrapper for chat_trigger.
+"""CloudEvents factory + dispatch wrapper for chat_trigger.
 
-Plugin-specific event emission — replaces:
-  - ``event_waiter.dispatch("chat_message_received", event_data)`` in
-    ``routers/websocket.py:handle_send_chat_message``.
+Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live in
+the plugin folder.
 
-The Chat console message-send handler in the WS router previously
-dispatched the event itself, hardcoding the plugin-specific event_type
-string in framework code. Phase B7 inverts this: the chat_trigger
-plugin owns its own dispatch primitive, the WS handler imports it.
-
-Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live
-in the plugin folder.
-
-Legacy ``event_type`` (``"chat_message_received"``) is preserved so
-the ``ChatTriggerNode.event_type`` ClassVar still matches.
+Delivery: single ``dispatch.emit`` call routes events to running
+:class:`TriggerListenerWorkflow` consumers via Temporal Visibility AND
+broadcasts the envelope to FE on the ``chat_message_received`` wire key.
+chatTrigger is canary-registered (see ``nodes/trigger/chat_trigger/__init__.py``)
+so the deployment manager skips ``setup_event_trigger`` and the legacy
+``event_waiter.dispatch`` path has zero consumers — removed.
 """
 
 from __future__ import annotations
@@ -23,12 +18,10 @@ from typing import Any, Mapping
 from services.events.envelope import WorkflowEvent
 
 
-# Legacy event_type the event_waiter dispatches by; trigger nodes
-# subscribe on this string (matches ``ChatTriggerNode.event_type``).
-_LEGACY_EVENT_TYPE = "chat_message_received"
-
-
-# ---- Typed factory ---------------------------------------------------------
+# Outer wire-routing key. Matches ``ChatTriggerNode.event_type`` and the
+# FE WS channel; the inner envelope carries
+# ``com.machinaos.chat.message.received``.
+_WIRE_ROUTING_KEY = "chat_message_received"
 
 
 def chat_message_received(event_data: Mapping[str, Any]) -> WorkflowEvent:
@@ -44,37 +37,14 @@ def chat_message_received(event_data: Mapping[str, Any]) -> WorkflowEvent:
     )
 
 
-# ---- Dispatcher wrapper ----------------------------------------------------
-
-
-async def dispatch_chat_message_received(event_data: Mapping[str, Any]) -> int:
-    """Dispatch an incoming chat message to waiting ``chatTrigger`` nodes.
-
-    Two delivery paths (in priority order):
-
-    1. **Legacy event_waiter waiters** via :func:`event_waiter.dispatch`
-       (in-process collector/processor; default while
-       ``Settings.event_framework_enabled`` is off).
-    2. **Temporal-durable listeners** via :func:`services.events.dispatch.emit`
-       (Wave 12 C1 canary). ``emit`` is a no-op pass-through when the
-       feature flag is off, so the legacy path keeps working unchanged.
-
-    Returns the count of legacy waiters resolved (Temporal listeners
-    are signalled asynchronously through Visibility queries and don't
-    show up in this count — that's by design, the chat panel UI only
-    cares about the legacy resolved-count for its "delivered" badge).
-    """
-    from services import event_waiter
+async def dispatch_chat_message_received(event_data: Mapping[str, Any]) -> None:
+    """Dispatch an incoming chat message via the canary CloudEvents path."""
     from services.events.dispatch import emit
 
-    payload = dict(event_data)
-    resolved = event_waiter.dispatch(_LEGACY_EVENT_TYPE, payload)
-
-    # Temporal-durable fan-out (Wave 12 C1 canary). Always-call;
-    # dispatch.emit is a no-op when the feature flag is off.
-    await emit(chat_message_received(payload), wire_routing_key=_LEGACY_EVENT_TYPE)
-
-    return resolved
+    await emit(
+        chat_message_received(dict(event_data)),
+        wire_routing_key=_WIRE_ROUTING_KEY,
+    )
 
 
 __all__ = [

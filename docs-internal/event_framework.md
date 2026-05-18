@@ -30,6 +30,7 @@ phase plan lives in `~/.claude/plans/properly-fix-the-tech-dreamy-tarjan.md`.
 | B11 — FE `plugin_connection_status` envelope handler | ✅ commit `899771c` |
 | D4 — Drop legacy `*_status` raw frames (status-only round) | ✅ commit `5ea4e90` (whatsapp/android/telegram status retired; FE consumes typed channel) |
 | Canary flag default flip + invariant lock | ✅ this commit (default `True`; `EVENT_FRAMEWORK_ENABLED=false` is the rollback) |
+| Wave 13 — EventType SA mismatch fix + canary-only emit path + trigger status lifecycle + polling OOM + template resolution + cancel sweep | ✅ shipped (see "Wave 13 fixes" below) |
 
 ### Dropped / Deferred / Pending
 
@@ -200,6 +201,68 @@ inspection surface:
 This is why Wave 12 explicitly does NOT add a custom `event_dlq` SQLModel table. Doing so would reinvent the Temporal primitives the rest of the framework was built AROUND, not against. The pre-Temporal `services/execution/models.py::DLQEntry` for the legacy `WorkflowExecutor` is a separate concern and stays where it is.
 
 Wave 12 D3 (pending) adds thin WS handlers that wrap these Visibility queries for the FE admin surface, so operators can inspect failed runs without leaving the MachinaOs UI.
+
+## Wave 13 fixes
+
+Six load-bearing corrections to the Wave 12 canary path. All locked by regression tests.
+
+### 1. `EventType` Search Attribute must equal the producer's `event.type`
+
+Pre-fix the deployment manager registered the **legacy snake_case** `event_type` from `TriggerConfig` (e.g. `"chat_message_received"`) as the `EventType` SA on every canary listener. But `dispatch.emit` Visibility-queries by `event.type` from the CloudEvents envelope (reverse-DNS, e.g. `"com.machinaos.chat.message.received"`). The strings never matched — the listener started OK, never reacted to incoming events.
+
+Fix:
+- `register_canary_trigger_type(node_type, cloudevent_type)` now requires the CloudEvents type as a second arg ([canary_registry.py](../server/services/deployment/canary_registry.py)). Re-registering with a diverging `cloudevent_type` raises `ValueError` so plugin upgrades that change the envelope shape surface loudly.
+- `cloudevent_type_for(node_type)` lookup, used by `DeploymentManager._start_canary_listener` for the `EventType` SA value (was `config.event_type`).
+- `WorkflowEvent.task_completed` factory unified to single type `com.machinaos.agent.task.completed` (was `.succeeded` / `.failed` split — broke single-SA listener matching).
+
+Locked by `TestCloudEventTypeMatchesSearchAttribute` in [`test_canary_registry.py`](../server/tests/test_canary_registry.py).
+
+### 2. Plugin `_events.py` is canary-only — no more dual-emit
+
+`event_waiter.dispatch` / `broadcaster.send_custom_event` calls inside canary-registered plugin `_events.py` files (chat / webhook / task / telegram / email) had zero consumers in canary-on mode — the deployment manager skips `setup_event_trigger` when `is_canary_trigger_type(...)` is True, so no legacy waiter ever registered. Removed.
+
+- `dispatch.emit(envelope, wire_routing_key=...)` is now the single delivery path. It Signals running `TriggerListenerWorkflow` consumers via Temporal Visibility AND broadcasts to FE on the same wire key.
+- `google/_events.py:dispatch_gmail_received` deleted (gmail polling uses `PollingTriggerWorkflow`, not `event_waiter`).
+- `whatsapp/_events.py` kept the legacy raw frame on `whatsapp_message_received` for received messages because the FE message-list handler reads `data.sender` (legacy shape) directly — drop blocked on FE migration (D4 follow-up). The duplicate typed-envelope sibling on the same wire key was dropped.
+- `twitter/_events.py` keeps both paths — twitter is the only deferred canary plugin (needs PollingTriggerNode subclass refactor first).
+
+### 3. Trigger node status pulse on every firing
+
+Pre-fix the canary listener broadcast `waiting` once at deploy and stayed there forever — when an event fired, FE saw downstream nodes light up but no visual signal on the trigger node itself. The legacy `services/deployment/triggers.py` collector/processor did `waiting → idle (Graph executing...) → waiting` per event; canary skipped this.
+
+Fix: new `broadcast_trigger_status_activity` ([activities.py](../server/services/temporal/activities.py)). `TriggerListenerWorkflow._spawn_child_run` calls it before + after each child spawn:
+- Before: `status="idle"` with `message="Graph executing..."` data
+- After: `status="waiting"` with the next-event message
+
+`PollingTriggerWorkflow._spawn_child_run` does the same. Matches legacy UX.
+
+### 4. Polling `seen` set OOM leak
+
+Both polling paths grew `seen: Set[str]` unboundedly:
+- `as_poll_activity` returned `seen_ids: list(prior_seen | current)` every cycle — Temporal payload paid for the union forever.
+- `_build_poll_coroutine` called `seen.add(msg_id)` per emit with no eviction.
+
+At Gmail's ~100 msgs/day / 60s poll, this hit ~36K entries / ~1.4MB just for IDs in a year. Fix: rebase `seen = current` at end of every cycle in both paths ([polling.py](../server/services/plugin/polling.py)). Items the provider no longer reports drop out. Bounded by the provider's natural window size.
+
+Semantic note: if a filtered item disappears then reappears (e.g. user marks an email unread again under `is:unread`), it re-emits. That's the correct semantic for visibility-filtered providers; the old unbounded set suppressed legitimate re-emits.
+
+### 5. Template resolution against trigger output (canary path)
+
+Pre-fix the canary path's pre-executed trigger output never reached the workflow output store. `MachinaWorkflow.run` set `outputs[node_id]` in workflow memory only — never persisted. `ParameterResolver._gather_connected_outputs` reads from the store, so `{{triggerNode.field}}` templates in downstream nodes resolved to empty.
+
+The legacy `DeploymentManager._execute_from_trigger` called `_store_output(trigger_node_id, "output_0", trigger_output)` explicitly. Canary skipped it.
+
+Fix: new `store_node_output_activity` ([activities.py](../server/services/temporal/activities.py)). `MachinaWorkflow.run`'s pre-executed loop schedules it for every firing trigger (skips non-firing siblings with `_trigger_output={"not_triggered": True}`). Writes to `output_main` + `output_top` + `output_0` so any downstream edge handle resolves.
+
+### 6. `DeploymentManager.cancel` full status sweep
+
+Pre-fix cancel reset only cron + listener trigger nodes to `idle`. Downstream agents/tools/actions that were mid-execute when cancel hit stayed in `executing` forever on FE. Toolbar Start/Stop indicator also stayed at `executing=True` because no terminal `executing=False` workflow_status broadcast was emitted.
+
+Fix ([manager.py](../server/services/deployment/manager.py) `DeploymentManager.cancel`):
+- `await broadcaster._clear_stuck_node_statuses(workflow_id, include_waiting=True)` — sweeps every node still broadcast as `executing`/`waiting`. The delegation guard inside `_clear_stuck_node_statuses` still protects in-flight fire-and-forget child agents.
+- `await broadcaster.update_workflow_status(executing=False, workflow_id=...)` — terminal toolbar state. Avoids relying on `workflow_run_ended`'s counter (can race against in-flight `workflow_run_started` callers).
+
+Locked by `TestCancelSweepsStuckNodeStatuses` in [`test_deployment_canary_listener.py`](../server/tests/test_deployment_canary_listener.py).
 
 ## References
 

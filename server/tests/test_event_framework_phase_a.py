@@ -32,6 +32,7 @@ from __future__ import annotations
 import sys
 import types
 from datetime import timedelta
+from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
@@ -425,3 +426,105 @@ class TestA8EmitEventActivity:
 
         assert result["delivered"] is False
         assert "error" in result
+
+
+class TestTriggerOutputPersistenceForTemplateResolution:
+    """Wave 13: the canary path's pre-executed trigger nodes must
+    persist their output to the workflow output store, otherwise
+    :class:`services.parameter_resolver.ParameterResolver` can't see
+    them and downstream ``{{triggerNode.field}}`` templates silently
+    resolve to empty.
+
+    Pre-fix MachinaWorkflow's pre-executed handler set
+    ``outputs[node_id]`` in WORKFLOW MEMORY only — never persisted.
+    The legacy ``DeploymentManager._execute_from_trigger`` path called
+    ``_store_output(trigger_node_id, "output_0", trigger_output)``
+    before executing downstream. The fix adds a
+    ``store_node_output_activity`` call inside MachinaWorkflow.run's
+    pre-executed loop that mirrors that persist.
+    """
+
+    def test_activity_exists_and_is_async(self):
+        import inspect
+
+        from services.temporal.activities import store_node_output_activity
+
+        assert inspect.iscoroutinefunction(store_node_output_activity), (
+            "store_node_output_activity must be async — workflow.execute_activity "
+            "awaits it."
+        )
+
+    def test_machina_workflow_calls_persist_activity_for_pre_executed(self):
+        """Source-introspection regression: MachinaWorkflow.run's
+        pre-executed handler must call store_node_output_activity so
+        ParameterResolver can read the trigger output back."""
+        import inspect
+
+        from services.temporal.workflow import MachinaWorkflow
+
+        src = inspect.getsource(MachinaWorkflow.run)
+
+        assert "store_node_output_activity" in src, (
+            "MachinaWorkflow.run no longer schedules the "
+            "store_node_output_activity for pre-executed trigger nodes. "
+            "Without this persist, the legacy "
+            "DeploymentManager._execute_from_trigger contract "
+            "(``_store_output(trigger_node_id, 'output_0', ...)``) is "
+            "missing on the canary path and ``{{triggerNode.field}}`` "
+            "templates resolve to empty."
+        )
+        # Sanity: the persist guard skips non-firing siblings (their
+        # _trigger_output is ``{not_triggered: True}``).
+        assert "not_triggered" in src, (
+            "MachinaWorkflow.run must skip the persist for non-firing "
+            "trigger siblings (``_trigger_output={'not_triggered': True}``). "
+            "Otherwise sibling triggers in the same deployment write empty "
+            "outputs that template references could pick up by mistake."
+        )
+
+    @pytest.mark.asyncio
+    async def test_store_activity_writes_three_handles(self, monkeypatch):
+        """The activity must write to every standard output handle —
+        downstream edges target different handle names (``output_main``
+        on agent nodes, ``output_0`` on trigger nodes, ``output_top`` on
+        legacy code paths). Writing only one would miss the others."""
+        from services.temporal.activities import store_node_output_activity
+
+        calls: List[Dict[str, Any]] = []
+
+        class _StubWorkflowService:
+            async def store_node_output(self, session_id, node_id, output_name, data):
+                calls.append({
+                    "session_id": session_id,
+                    "node_id": node_id,
+                    "output_name": output_name,
+                    "data": data,
+                })
+
+        class _StubContainer:
+            def workflow_service(self):
+                return _StubWorkflowService()
+
+        from core import container as container_mod
+        monkeypatch.setattr(container_mod, "container", _StubContainer())
+
+        await store_node_output_activity({
+            "node_id": "trig-1",
+            "session_id": "sess-1",
+            "result": {"message": "hello", "session_id": "sess-1"},
+        })
+
+        # All three standard handles get the data — same write pattern
+        # NodeExecutor uses for non-pre-executed nodes.
+        output_names = {c["output_name"] for c in calls}
+        assert output_names == {"output_main", "output_top", "output_0"}, (
+            f"Expected writes to output_main + output_top + output_0; "
+            f"got {sorted(output_names)!r}. Missing handles cause "
+            f"downstream template resolution to fail when the edge "
+            f"targets a handle that wasn't written."
+        )
+        # Same node_id + session_id + data on every write.
+        assert {c["node_id"] for c in calls} == {"trig-1"}
+        assert {c["session_id"] for c in calls} == {"sess-1"}
+        for c in calls:
+            assert c["data"] == {"message": "hello", "session_id": "sess-1"}

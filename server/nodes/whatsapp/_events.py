@@ -188,85 +188,78 @@ async def broadcast_whatsapp_message(
     direction: Literal["sent", "received"],
     params: Mapping[str, Any],
 ) -> None:
-    """Emit a message event (sent or received). Wire-routing key
-    preserves the legacy ``whatsapp_message_<direction>`` channel.
+    """Emit a message event (sent or received).
 
-    For inbound (``received``) messages, also fans out via
-    :func:`services.events.dispatch.emit` so Wave 12 C1 canary
-    :class:`TriggerListenerWorkflow` consumers can pick up the
-    envelope (no-op when ``Settings.event_framework_enabled`` is off,
-    so the legacy WS path stays default).
+    Inbound (``received``) routes via :func:`services.events.dispatch.emit`
+    — the canary CloudEvents path Signals running
+    :class:`TriggerListenerWorkflow` consumers AND broadcasts the
+    envelope on the ``whatsapp_message_received`` wire key.
+
+    Outbound (``sent``) is observation-only: no trigger consumer
+    exists, so it bypasses ``dispatch.emit`` and goes out as a raw
+    legacy frame on ``whatsapp_message_sent`` for the FE message-list
+    UI.
     """
     from services.status_broadcaster import get_status_broadcaster
 
     broadcaster = get_status_broadcaster()
-    wire_key = (
-        _MESSAGE_SENT_WIRE_KEY if direction == "sent"
-        else _MESSAGE_RECEIVED_WIRE_KEY
-    )
     payload = dict(params)
 
-    # Legacy raw frame.
-    await broadcaster.broadcast({
-        "type": wire_key,
-        "data": payload,
-    })
-
-    # Typed CloudEvents sibling — same outer wire key (the inner
-    # envelope is what carries the typed contract).
-    event = whatsapp_message_event(direction, payload)
-    await broadcaster.broadcast({
-        "type": wire_key,
-        "data": event.model_dump(mode="json"),
-    })
-
-    # Wave 12 C1 rollout #4: Temporal-durable canary fan-out (received
-    # only; outbound message events are pure observation, no trigger
-    # node consumes them). emit() no-ops when the feature flag is off.
     if direction == "received":
+        # Canary path — single ``emit`` call delivers to Temporal
+        # listeners + FE WS. The FE message-list handler at
+        # WebSocketContext.tsx still reads ``data.*`` for back-compat,
+        # so we also broadcast the legacy raw frame until that handler
+        # migrates to envelope-shape (Wave 12 D4 follow-up).
         from services.events.dispatch import emit
 
-        await emit(event, wire_routing_key=wire_key)
+        await broadcaster.broadcast({
+            "type": _MESSAGE_RECEIVED_WIRE_KEY,
+            "data": payload,
+        })
+        await emit(
+            whatsapp_message_event("received", payload),
+            wire_routing_key=_MESSAGE_RECEIVED_WIRE_KEY,
+        )
+    else:
+        # Outbound observation only — direct legacy raw broadcast.
+        await broadcaster.broadcast({
+            "type": _MESSAGE_SENT_WIRE_KEY,
+            "data": payload,
+        })
 
 
 async def broadcast_whatsapp_newsletter(
     verb: Literal["joined", "left", "muted", "live_updated"],
     params: Mapping[str, Any],
 ) -> None:
-    """Emit a newsletter-lifecycle event. ``verb`` selects the
-    legacy wire key from :data:`_NEWSLETTER_WIRE_KEYS`."""
+    """Emit a newsletter-lifecycle event for FE observation.
+
+    Not a trigger event — no canary consumer. Direct raw broadcast on
+    the legacy wire key until the FE newsletter UI migrates to read
+    the envelope shape, at which point this becomes a ``dispatch.emit``
+    call like :func:`broadcast_whatsapp_message`.
+    """
     from services.status_broadcaster import get_status_broadcaster
 
     broadcaster = get_status_broadcaster()
-    wire_key = _NEWSLETTER_WIRE_KEYS[verb]
-
     await broadcaster.broadcast({
-        "type": wire_key,
+        "type": _NEWSLETTER_WIRE_KEYS[verb],
         "data": dict(params),
-    })
-
-    event = whatsapp_newsletter_event(verb, params)
-    await broadcaster.broadcast({
-        "type": wire_key,
-        "data": event.model_dump(mode="json"),
     })
 
 
 async def broadcast_whatsapp_history_synced(params: Mapping[str, Any]) -> None:
-    """Emit a history-sync-complete event."""
+    """Emit a history-sync-complete event for FE observation.
+
+    Not a trigger event — no canary consumer. Direct raw broadcast.
+    """
     from services.status_broadcaster import get_status_broadcaster
 
     broadcaster = get_status_broadcaster()
-
     await broadcaster.broadcast({
         "type": _HISTORY_SYNCED_WIRE_KEY,
         "data": dict(params),
-    })
-
-    event = whatsapp_history_synced(params)
-    await broadcaster.broadcast({
-        "type": _HISTORY_SYNCED_WIRE_KEY,
-        "data": event.model_dump(mode="json"),
     })
 
 

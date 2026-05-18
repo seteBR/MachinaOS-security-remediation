@@ -231,15 +231,38 @@ class MachinaWorkflow:
         for node in exec_nodes:
             if node.get("_pre_executed"):
                 node_id = node["id"]
+                trigger_output = node.get("_trigger_output", {})
                 outputs[node_id] = {
                     "success": True,
-                    "result": node.get("_trigger_output", {}),
+                    "result": trigger_output,
                     "pre_executed": True,
                 }
                 completed.add(node_id)
                 execution_trace.append(node_id)
                 pre_executed_count += 1
                 workflow.logger.info(f"Pre-executed trigger: {node_id}")
+
+                # Persist the trigger output to the workflow output
+                # store so ParameterResolver can resolve
+                # ``{{triggerNodeName.field}}`` in downstream nodes.
+                # Pre-executed nodes bypass NodeExecutor.execute (the
+                # normal write site), so without this activity the
+                # legacy path's ``_store_output(trigger_node_id, ...)``
+                # behaviour is missing on the canary path and templates
+                # against the trigger silently resolve to empty.
+                # Skip the persist for non-firing siblings — their
+                # ``_trigger_output`` is ``{not_triggered: True}``, no
+                # downstream template should resolve against them.
+                if not trigger_output.get("not_triggered"):
+                    await workflow.execute_activity(
+                        "store_node_output_activity",
+                        {
+                            "node_id": node_id,
+                            "session_id": session_id,
+                            "result": trigger_output,
+                        },
+                        start_to_close_timeout=timedelta(seconds=10),
+                    )
 
         workflow.logger.info(f"Pre-executed: {pre_executed_count}, To execute: {len(node_map) - pre_executed_count}")
 

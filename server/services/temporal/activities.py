@@ -372,3 +372,97 @@ async def emit_event_activity(event_payload: Dict[str, Any]) -> Dict[str, Any]:
         "event_id": event.id,
         "event_type": event.type,
     }
+
+
+# ---------------------------------------------------------------------------
+# Trigger-node status broadcast activity
+#
+# Used by :class:`services.temporal.trigger_listener_workflow.TriggerListenerWorkflow`
+# and :class:`services.temporal.polling_trigger_workflow.PollingTriggerWorkflow`
+# to surface firing/waiting transitions to FE. Workflows can't broadcast
+# directly (sandboxed, deterministic) so they offload to this activity.
+#
+# Mirrors the legacy ``services/deployment/triggers.py`` collector/processor
+# transitions: ``"waiting" → "idle (processing)" → "waiting"`` per event.
+# Without this, the canary path would keep the trigger node visually
+# stuck on "waiting" with no firing pulse — a UX regression vs legacy.
+
+@activity.defn
+async def store_node_output_activity(payload: Dict[str, Any]) -> None:
+    """Persist a node's output to the workflow output store so
+    :class:`services.parameter_resolver.ParameterResolver` can resolve
+    ``{{nodeName.field}}`` templates in downstream nodes.
+
+    Used by :class:`services.temporal.workflow.MachinaWorkflow` for
+    pre-executed trigger nodes — they bypass ``NodeExecutor.execute``
+    (which is what normally persists outputs) because the workflow
+    received their output via the parent ``TriggerListenerWorkflow`` /
+    ``PollingTriggerWorkflow`` signal, not via the standard activity
+    dispatch. Without this persist step, ``ParameterResolver`` reads
+    ``None`` from the store and downstream templates like
+    ``{{chatTrigger.message}}`` silently resolve to empty.
+
+    Mirrors the per-handle write pattern in
+    :func:`services.temporal.agent_activities.store_agent_output`.
+
+    Payload shape::
+
+        {
+            "node_id": str,
+            "session_id": str,
+            "result": dict,  # the trigger output payload
+        }
+    """
+    from core.container import container
+
+    workflow_service = container.workflow_service()
+    node_id = payload["node_id"]
+    session_id = payload.get("session_id", "default")
+    data = payload.get("result") or {}
+    # Mirror NodeExecutor — write to every standard output handle so
+    # the resolver finds the data regardless of which handle name the
+    # downstream edge targets.
+    for output_name in ("output_main", "output_top", "output_0"):
+        try:
+            await workflow_service.store_node_output(
+                session_id, node_id, output_name, data,
+            )
+        except Exception as exc:  # noqa: BLE001 — non-fatal
+            activity.logger.warning(
+                f"store_node_output_activity failed for "
+                f"node={node_id!r} handle={output_name!r}: {exc}"
+            )
+
+
+@activity.defn
+async def broadcast_trigger_status_activity(payload: Dict[str, Any]) -> None:
+    """Broadcast a trigger node status update for FE animation.
+
+    Payload shape:
+        {
+            "node_id": str,
+            "status": "waiting" | "idle" | ...,
+            "data": dict,             # optional, defaults to {}
+            "workflow_id": str | None,
+        }
+
+    Embedded-worker mode (default): direct in-process call to the
+    status_broadcaster singleton — same event loop as FastAPI handlers.
+    Non-fatal: broadcast failures are logged at WARNING and swallowed
+    so they don't fail the calling workflow.
+    """
+    from services.status_broadcaster import get_status_broadcaster
+
+    try:
+        broadcaster = get_status_broadcaster()
+        await broadcaster.update_node_status(
+            node_id=payload["node_id"],
+            status=payload.get("status", "waiting"),
+            data=payload.get("data", {}) or {},
+            workflow_id=payload.get("workflow_id"),
+        )
+    except Exception as exc:  # noqa: BLE001 — non-fatal
+        activity.logger.warning(
+            f"broadcast_trigger_status_activity failed for "
+            f"node={payload.get('node_id')!r}: {exc}"
+        )

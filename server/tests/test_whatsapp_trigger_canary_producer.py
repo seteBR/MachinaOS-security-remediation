@@ -92,8 +92,13 @@ class TestWhatsappProducerDualEmit:
             },
         )
 
-        # WS broadcasts still fire (legacy raw + typed sibling).
-        assert broadcaster.broadcast.await_count == 2
+        # Legacy raw frame still goes out so the existing FE message-list
+        # handler at WebSocketContext.tsx (which reads ``data.*``)
+        # keeps working until the Wave 12 D4 follow-up migrates it to
+        # envelope-shape. The duplicate typed-envelope WS broadcast was
+        # dropped in Wave 13 — dispatch.emit broadcasts the envelope on
+        # the same wire key once.
+        assert broadcaster.broadcast.await_count == 1
 
         # And the canary path fires exactly once.
         assert len(emit_calls) == 1
@@ -132,10 +137,12 @@ class TestWhatsappProducerDualEmit:
             {"chat_id": "123@s.whatsapp.net", "text": "hi"},
         )
 
-        # WS broadcasts still fire for the observation channel.
-        assert broadcaster.broadcast.await_count == 2
+        # Single legacy raw broadcast for the FE message-list
+        # observation channel — duplicate typed-envelope sibling dropped
+        # in Wave 13.
+        assert broadcaster.broadcast.await_count == 1
 
-        # But NO canary fan-out (no trigger consumes outbound).
+        # No canary fan-out (no trigger consumes outbound).
         assert emit_calls == []
 
 

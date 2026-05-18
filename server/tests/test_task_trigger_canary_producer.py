@@ -1,11 +1,12 @@
-"""Wave 12 C1 rollout #2: taskTrigger producer dual-emit invariant.
+"""taskTrigger producer canary-emit invariant.
 
-Locks the contract: ``nodes.agent._events._broadcast_task_event`` must
-route delegated-task completion to BOTH the legacy
-``broadcaster.send_custom_event`` (which dispatches via event_waiter)
-AND the Temporal-durable ``services.events.dispatch.emit`` path. Without
-the second call, canary-enabled taskTrigger consumers miss every
-child-agent completion.
+Locks the contract: ``nodes.agent._events._broadcast_task_event`` routes
+delegated-task completion through the canary CloudEvents path
+(:func:`services.events.dispatch.emit`) ONLY. The legacy
+``broadcaster.send_custom_event`` path (which internally dispatched to
+``event_waiter``) was removed in Wave 13 — taskTrigger is canary-registered,
+the deployment manager skips ``setup_event_trigger``, and the legacy
+collector has zero consumers.
 
 Cross-cutting factory: this rollout uses ``WorkflowEvent.task_completed``
 which stays central per RFC §6.4 (parametrised by task_id + agent +
@@ -19,8 +20,8 @@ import inspect
 import re
 import sys
 import types
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, List
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -37,54 +38,44 @@ _SEND_CUSTOM_EVENT_PATTERN = re.compile(r"send_custom_event\s*\(")
 _EVENTS_EMIT_PATTERN = re.compile(r"\bemit\s*\(")
 
 
-class TestTaskTriggerProducerDualEmit:
-    """Producer wrapper emits BOTH legacy and Temporal envelopes."""
+class TestTaskTriggerProducerCanaryEmit:
+    """Producer wrapper emits via the canary CloudEvents path only."""
 
     def test_broadcast_helper_is_async(self):
         from nodes.agent._events import _broadcast_task_event
 
         assert inspect.iscoroutinefunction(_broadcast_task_event)
 
-    def test_helper_routes_both_legacy_and_temporal(self):
+    def test_helper_uses_canary_path_only(self):
         from nodes.agent import _events
 
         src = inspect.getsource(_events._broadcast_task_event)
 
-        assert _SEND_CUSTOM_EVENT_PATTERN.search(src), (
-            "_broadcast_task_event must still call "
-            "broadcaster.send_custom_event(_LEGACY_EVENT_TYPE, payload) "
-            "so canary-flag-off deployments keep their existing dispatch."
-        )
         assert _EVENTS_EMIT_PATTERN.search(src), (
             "_broadcast_task_event must call "
-            "services.events.dispatch.emit(envelope, ...) for the "
-            "Temporal-durable canary path. Without it, taskTrigger "
-            "TriggerListenerWorkflows receive nothing when the "
-            "event_framework_enabled flag is on."
+            "services.events.dispatch.emit(envelope, ...) — the canary "
+            "CloudEvents path Signals running TriggerListenerWorkflow "
+            "consumers AND broadcasts to FE on the task_completed wire key."
+        )
+        assert not _SEND_CUSTOM_EVENT_PATTERN.search(src), (
+            "_broadcast_task_event must NOT call "
+            "broadcaster.send_custom_event — taskTrigger is canary-registered "
+            "and the legacy event_waiter dispatch path (which "
+            "send_custom_event drives internally) has zero consumers "
+            "(removed in Wave 13)."
         )
 
     @pytest.mark.asyncio
-    async def test_completed_event_routes_both_paths(self, monkeypatch):
+    async def test_completed_event_emits_canary_envelope(self, monkeypatch):
         from nodes.agent import _events
         from services.events import dispatch as dispatch_mod
 
-        custom_calls: List[Dict[str, Any]] = []
         emit_calls: List[Any] = []
-
-        broadcaster = MagicMock()
-
-        async def fake_send_custom_event(event_type, payload):
-            custom_calls.append({"event_type": event_type, "payload": payload})
-
-        broadcaster.send_custom_event = fake_send_custom_event
 
         async def fake_emit(event, **kwargs):
             emit_calls.append({"event": event, **kwargs})
             return event
 
-        # Patch the get_status_broadcaster singleton.
-        from services import status_broadcaster as sb
-        monkeypatch.setattr(sb, "get_status_broadcaster", lambda: broadcaster)
         monkeypatch.setattr(dispatch_mod, "emit", fake_emit)
 
         await _events.broadcast_agent_task_completed(
@@ -96,40 +87,31 @@ class TestTaskTriggerProducerDualEmit:
             result="done",
         )
 
-        # Legacy path: wire key = task_completed, payload carries
-        # the existing fields the taskTrigger filter reads.
-        assert len(custom_calls) == 1
-        assert custom_calls[0]["event_type"] == "task_completed"
-        legacy_payload = custom_calls[0]["payload"]
-        assert legacy_payload["task_id"] == "task-1"
-        assert legacy_payload["status"] == "completed"
-        assert legacy_payload["result"] == "done"
-
-        # Temporal path: envelope.type discriminates on succeeded vs
-        # failed; subject is the task_id; wire_routing_key preserved.
+        # Single type (``.completed``) so the listener's EventType SA
+        # matches via dispatch.emit's Visibility query. Status
+        # discrimination lives in data.status.
         assert len(emit_calls) == 1
         envelope = emit_calls[0]["event"]
-        assert envelope.type == "com.machinaos.agent.task.succeeded"
+        assert envelope.type == "com.machinaos.agent.task.completed"
         assert envelope.subject == "task-1"
+        assert envelope.data["status"] == "completed"
+        assert envelope.data["result"] == "done"
         assert emit_calls[0]["wire_routing_key"] == "task_completed"
 
     @pytest.mark.asyncio
-    async def test_failed_event_routes_both_paths_with_error_type(self, monkeypatch):
-        """Type discriminates between succeeded/failed; subject still task_id."""
+    async def test_failed_event_shares_type_with_status_discriminator(self, monkeypatch):
+        """Success and failure share a single CloudEvents type so the
+        listener's EventType Search Attribute matches both branches;
+        ``status='error'`` lives in the payload."""
         from nodes.agent import _events
         from services.events import dispatch as dispatch_mod
 
         emit_calls: List[Any] = []
 
-        broadcaster = MagicMock()
-        broadcaster.send_custom_event = AsyncMock()
-
         async def fake_emit(event, **kwargs):
             emit_calls.append(event)
             return event
 
-        from services import status_broadcaster as sb
-        monkeypatch.setattr(sb, "get_status_broadcaster", lambda: broadcaster)
         monkeypatch.setattr(dispatch_mod, "emit", fake_emit)
 
         await _events.broadcast_agent_task_failed(
@@ -143,7 +125,7 @@ class TestTaskTriggerProducerDualEmit:
 
         assert len(emit_calls) == 1
         envelope = emit_calls[0]
-        # Status='error' maps to the .failed type variant per the
-        # central factory's discrimination.
-        assert envelope.type == "com.machinaos.agent.task.failed"
+        assert envelope.type == "com.machinaos.agent.task.completed"
         assert envelope.subject == "task-2"
+        assert envelope.data["status"] == "error"
+        assert envelope.data["error"] == "timeout"

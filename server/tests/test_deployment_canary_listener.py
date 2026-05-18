@@ -55,7 +55,7 @@ def fresh_canary_registry(monkeypatch):
     """
     from services.deployment import canary_registry
 
-    monkeypatch.setattr(canary_registry, "_REGISTERED", set())
+    monkeypatch.setattr(canary_registry, "_REGISTERED", {})
     return canary_registry
 
 
@@ -139,7 +139,9 @@ class TestCanaryScope:
     async def test_disabled_when_flag_off(self, monkeypatch, fresh_canary_registry):
         from services.deployment.manager import DeploymentManager
 
-        fresh_canary_registry.register_canary_trigger_type("webhookTrigger")
+        fresh_canary_registry.register_canary_trigger_type(
+            "webhookTrigger", "com.machinaos.webhook.received"
+        )
 
         class _Off:
             event_framework_enabled = False
@@ -170,8 +172,12 @@ class TestCanaryScope:
     async def test_enabled_when_registered_and_flag_on(self, monkeypatch, fresh_canary_registry):
         from services.deployment.manager import DeploymentManager
 
-        fresh_canary_registry.register_canary_trigger_type("webhookTrigger")
-        fresh_canary_registry.register_canary_trigger_type("chatTrigger")
+        fresh_canary_registry.register_canary_trigger_type(
+            "webhookTrigger", "com.machinaos.webhook.received"
+        )
+        fresh_canary_registry.register_canary_trigger_type(
+            "chatTrigger", "com.machinaos.chat.message.received"
+        )
 
         class _On:
             event_framework_enabled = True
@@ -307,8 +313,13 @@ class TestStartCanaryListener:
         # EventTriggerKind derived via _trigger_kind_for (strips "Trigger" /
         # "Receive" suffix) — NOT hardcoded "webhook".
         assert attrs_by_name["EventTriggerKind"] == "webhook"
-        # EventType comes from event_waiter.TRIGGER_REGISTRY['webhookTrigger'].
-        assert attrs_by_name["EventType"] == "webhook_received"
+        # EventType MUST be the CloudEvents reverse-DNS string the
+        # producer puts on outgoing envelopes (registered via
+        # canary_registry). dispatch.emit's Visibility query substitutes
+        # event.type into the EventType filter — if the SA carries the
+        # legacy snake_case event_waiter string instead, the query
+        # never matches and no signal reaches the listener.
+        assert attrs_by_name["EventType"] == "com.machinaos.webhook.received"
 
     @pytest.mark.asyncio
     async def test_chat_trigger_uses_chat_kind_in_search_attrs(self, monkeypatch):
@@ -345,7 +356,9 @@ class TestStartCanaryListener:
         sa = recorded[0]["search_attributes"]
         attrs_by_name = {pair.key.name: pair.value for pair in sa}
         assert attrs_by_name["EventTriggerKind"] == "chat"
-        assert attrs_by_name["EventType"] == "chat_message_received"
+        # CloudEvents reverse-DNS — see test_search_attributes_include_event_workflow_id
+        # for the full rationale.
+        assert attrs_by_name["EventType"] == "com.machinaos.chat.message.received"
 
     @pytest.mark.asyncio
     async def test_returns_none_when_temporal_not_connected(self, monkeypatch):
@@ -514,6 +527,139 @@ class TestCancelCanaryListeners:
 # ---------------------------------------------------------------------------
 # C1d.5 — invariant: DeploymentManager has NO instance state for canary listeners
 # ---------------------------------------------------------------------------
+
+
+class TestCancelSweepsStuckNodeStatuses:
+    """Regression: ``DeploymentManager.cancel`` must broadcast a full
+    status cleanup so the FE doesn't leave downstream nodes glowing
+    forever after the deployment goes down.
+
+    Pre-fix the cancel only reset trigger nodes (cron + listener) to
+    "idle". Downstream agents/tools/actions that were mid-execute when
+    cancel hit stayed in "executing" status on every connected client
+    because no sweep was issued. Also the toolbar Start/Stop indicator
+    stuck at ``executing=True`` because no terminal
+    ``workflow_run_ended`` / ``update_workflow_status(executing=False)``
+    was emitted.
+    """
+
+    def test_cancel_source_calls_stuck_node_sweep_with_include_waiting(self):
+        """Source-introspection: ``cancel`` must call
+        ``_clear_stuck_node_statuses(..., include_waiting=True)`` so
+        every node currently broadcast as ``executing`` OR ``waiting``
+        for this deployment goes back to idle on the FE. Without
+        ``include_waiting=True`` non-firing trigger siblings (and any
+        other ``waiting`` indicators outside the cron/listener buckets
+        the manager owns directly) stay glowing."""
+        import inspect
+
+        from services.deployment.manager import DeploymentManager
+
+        src = inspect.getsource(DeploymentManager.cancel)
+        assert "_clear_stuck_node_statuses" in src, (
+            "DeploymentManager.cancel no longer sweeps stuck node "
+            "statuses. Downstream nodes mid-execute at cancel-time "
+            "will stay glowing on FE forever. Restore the "
+            "``_broadcaster._clear_stuck_node_statuses(workflow_id, "
+            "include_waiting=True)`` call after the trigger resets."
+        )
+        assert "include_waiting=True" in src, (
+            "DeploymentManager.cancel must pass include_waiting=True to "
+            "the stuck-node sweep — explicit user-cancel is the "
+            "'every indicator goes quiet' signal. Without it, sibling "
+            "trigger nodes (or other waiting indicators) outlive the "
+            "deployment."
+        )
+
+    def test_cancel_source_broadcasts_terminal_workflow_status(self):
+        """Source-introspection: ``cancel`` must emit a final
+        ``update_workflow_status(executing=False, workflow_id=...)`` so
+        the toolbar Start/Stop indicator reflects the cancel. The
+        run-counter eviction in ``workflow_run_ended`` can race against
+        in-flight child runs that already incremented the counter."""
+        import inspect
+
+        from services.deployment.manager import DeploymentManager
+
+        src = inspect.getsource(DeploymentManager.cancel)
+        assert "update_workflow_status" in src, (
+            "DeploymentManager.cancel must broadcast "
+            "``update_workflow_status(executing=False, workflow_id=...)`` "
+            "so the FE toolbar Start/Stop indicator goes quiet after a "
+            "deployment is cancelled."
+        )
+        assert "executing=False" in src, (
+            "DeploymentManager.cancel must pass executing=False to the "
+            "terminal workflow_status broadcast. Anything else leaves "
+            "the toolbar showing the deployment as still active."
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancel_runtime_calls_sweep_and_terminal_broadcast(self):
+        """Runtime smoke: stub the broadcaster + state + trigger_manager
+        and assert cancel actually invokes the sweep + terminal status
+        broadcast with the right args."""
+        from services.deployment.manager import DeploymentManager
+        from services.deployment.state import DeploymentState
+
+        sweep_calls: List[Dict[str, Any]] = []
+        status_calls: List[Dict[str, Any]] = []
+
+        broadcaster = MagicMock()
+        broadcaster.update_node_status = AsyncMock()
+        broadcaster.update_workflow_status = AsyncMock(
+            side_effect=lambda **kw: status_calls.append(kw),
+        )
+        broadcaster._clear_stuck_node_statuses = AsyncMock(
+            side_effect=lambda workflow_id, include_waiting=False: sweep_calls.append({
+                "workflow_id": workflow_id,
+                "include_waiting": include_waiting,
+            }) or 0,
+        )
+
+        database = MagicMock()
+        mgr = DeploymentManager(
+            database=database,
+            execute_workflow_fn=AsyncMock(return_value={"success": True}),
+            store_output_fn=AsyncMock(),
+            broadcaster=broadcaster,
+        )
+        # Seed deployment state — the cancel path bails early if
+        # the workflow isn't in self._deployments.
+        mgr._deployments["wf-1"] = DeploymentState(
+            deployment_id="deploy_wf-1",
+            workflow_id="wf-1",
+            is_running=True,
+            nodes=[{"id": "n1", "type": "aiAgent"}],
+            edges=[],
+            session_id="sess",
+        )
+
+        # Patch _cancel_canary_listeners / _cancel_canary_cron_schedules
+        # to be no-ops so the test focuses on the sweep + terminal
+        # broadcast contract.
+        mgr._cancel_canary_listeners = AsyncMock(return_value=0)
+        mgr._cancel_canary_cron_schedules = AsyncMock(return_value=0)
+
+        result = await mgr.cancel("wf-1")
+        assert result["success"] is True
+
+        # Sweep ran once with include_waiting=True (every indicator
+        # goes quiet on explicit user cancel).
+        assert len(sweep_calls) == 1, (
+            f"Expected one stuck-node sweep on cancel, got "
+            f"{len(sweep_calls)}: {sweep_calls!r}"
+        )
+        assert sweep_calls[0] == {
+            "workflow_id": "wf-1",
+            "include_waiting": True,
+        }
+
+        # Terminal executing=False broadcast for the toolbar.
+        assert {"executing": False, "workflow_id": "wf-1"} in status_calls, (
+            f"Expected update_workflow_status(executing=False, "
+            f"workflow_id='wf-1') on cancel; got {status_calls!r}"
+        )
 
 
 class TestNoInstanceStateForCanaryListeners:

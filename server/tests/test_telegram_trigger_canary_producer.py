@@ -1,12 +1,11 @@
-"""Wave 12 C1 rollout #3: telegramReceive producer dual-emit invariant.
+"""telegramReceive producer canary-emit invariant.
 
 Locks the contract: ``nodes.telegram._events.dispatch_telegram_message_received``
-must route incoming Telegram messages to BOTH the legacy
-``event_waiter.dispatch`` and the Temporal-durable
-``services.events.dispatch.emit`` path. Without the second call, a
-canary-enabled telegramReceive deployment silently misses every
-incoming message — the TriggerListenerWorkflow has no other event
-source.
+routes incoming Telegram messages through the canary CloudEvents path
+(:func:`services.events.dispatch.emit`) ONLY. The legacy
+``event_waiter.dispatch`` path was removed in Wave 13 — telegramReceive
+is canary-registered, the deployment manager skips
+``setup_event_trigger``, and the legacy collector has zero consumers.
 
 Same regex-introspection + runtime smoke pattern used for the
 webhookTrigger / chatTrigger / taskTrigger producers in this series.
@@ -18,8 +17,8 @@ import inspect
 import re
 import sys
 import types
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, List
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -37,51 +36,44 @@ _EVENT_WAITER_DISPATCH_PATTERN = re.compile(r"event_waiter\.dispatch\s*\(")
 _EVENTS_EMIT_PATTERN = re.compile(r"\bemit\s*\(")
 
 
-class TestTelegramProducerDualEmit:
-    """Producer wrapper emits BOTH legacy and Temporal envelopes."""
+class TestTelegramProducerCanaryEmit:
+    """Producer wrapper emits via the canary CloudEvents path only."""
 
     def test_dispatcher_is_async(self):
         from nodes.telegram._events import dispatch_telegram_message_received
 
         assert inspect.iscoroutinefunction(dispatch_telegram_message_received)
 
-    def test_dispatcher_routes_both_legacy_and_temporal(self):
+    def test_dispatcher_uses_canary_path_only(self):
         from nodes.telegram import _events
 
         src = inspect.getsource(_events.dispatch_telegram_message_received)
 
-        assert _EVENT_WAITER_DISPATCH_PATTERN.search(src), (
-            "dispatch_telegram_message_received must still call "
-            "event_waiter.dispatch(_MESSAGE_LEGACY_EVENT_TYPE, ...) for "
-            "the in-process waiter path. Without it, canary-flag-off "
-            "deployments lose their existing telegram dispatch."
-        )
         assert _EVENTS_EMIT_PATTERN.search(src), (
             "dispatch_telegram_message_received must call "
-            "services.events.dispatch.emit(envelope, ...) for the "
-            "Temporal-durable canary path. Without it, telegramReceive "
-            "TriggerListenerWorkflows receive nothing when the "
-            "event_framework_enabled flag is on."
+            "services.events.dispatch.emit(envelope, ...) — the canary "
+            "CloudEvents path Signals running TriggerListenerWorkflow "
+            "consumers AND broadcasts to FE on the "
+            "telegram_message_received wire key."
+        )
+        assert not _EVENT_WAITER_DISPATCH_PATTERN.search(src), (
+            "dispatch_telegram_message_received must NOT call "
+            "event_waiter.dispatch — telegramReceive is canary-registered "
+            "and the legacy collector path has zero consumers (removed "
+            "in Wave 13)."
         )
 
     @pytest.mark.asyncio
-    async def test_runtime_dual_emit_calls_both_paths(self, monkeypatch):
+    async def test_runtime_emits_canary_envelope(self, monkeypatch):
         from nodes.telegram import _events
-        from services import event_waiter
         from services.events import dispatch as dispatch_mod
 
-        legacy_calls: List[Dict[str, Any]] = []
         emit_calls: List[Any] = []
-
-        def fake_dispatch(event_type, data):
-            legacy_calls.append({"event_type": event_type, "data": data})
-            return 0
 
         async def fake_emit(event, **kwargs):
             emit_calls.append({"event": event, **kwargs})
             return event
 
-        monkeypatch.setattr(event_waiter, "dispatch", fake_dispatch)
         monkeypatch.setattr(dispatch_mod, "emit", fake_emit)
 
         result = await _events.dispatch_telegram_message_received({
@@ -91,11 +83,7 @@ class TestTelegramProducerDualEmit:
             "timestamp": "2026-05-14T00:00:00",
         })
 
-        assert result == 0
-
-        assert len(legacy_calls) == 1
-        assert legacy_calls[0]["event_type"] == "telegram_message_received"
-        assert legacy_calls[0]["data"]["chat_id"] == 12345
+        assert result is None
 
         assert len(emit_calls) == 1
         envelope = emit_calls[0]["event"]
@@ -118,6 +106,6 @@ class TestTelegramPluginSelfRegistersCanary:
 
         assert canary_registry.is_canary_trigger_type("telegramReceive"), (
             "Importing nodes.telegram should call "
-            "register_canary_trigger_type('telegramReceive') — see "
+            "register_canary_trigger_type('telegramReceive', ...) — see "
             "the __init__.py bottom section."
         )

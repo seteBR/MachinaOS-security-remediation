@@ -229,8 +229,9 @@ class TestEmailReceive:
              patch.object(EmailService, "fetch_detail", fetch_detail_mock), \
              patch("asyncio.sleep", new=AsyncMock(return_value=None)), \
              patch("services.status_broadcaster.get_status_broadcaster") as bcast, \
-             patch("services.event_waiter.dispatch") as dispatch_mock:
+             patch("services.events.dispatch.emit") as emit_mock:
             bcast.return_value.update_node_status = AsyncMock(return_value=None)
+            emit_mock.return_value = None
 
             result = await harness.execute(
                 "emailReceive",
@@ -244,9 +245,13 @@ class TestEmailReceive:
         assert payload["subject"] == "new!"
         # Baseline + one diffing poll
         assert poll_ids_mock.await_count == 2
-        # Event dispatched exactly once
-        dispatch_mock.assert_called_once()
-        assert dispatch_mock.call_args.args[0] == "email_received"
+        # Event routed through the canary CloudEvents path (legacy
+        # event_waiter.dispatch was retired in Wave 13 — emailReceive
+        # is canary-registered and the legacy collector has no consumer).
+        emit_mock.assert_called_once()
+        envelope = emit_mock.call_args.args[0]
+        assert envelope.type == "com.machinaos.email.message.received"
+        assert emit_mock.call_args.kwargs["wire_routing_key"] == "email_received"
 
     async def test_mark_as_read_adds_seen_flag(self, harness):
         from nodes.email._service import EmailService
@@ -262,7 +267,7 @@ class TestEmailReceive:
              patch.object(HimalayaService, "flag_message", flag_mock), \
              patch("asyncio.sleep", new=AsyncMock(return_value=None)), \
              patch("services.status_broadcaster.get_status_broadcaster") as bcast, \
-             patch("services.event_waiter.dispatch"):
+             patch("services.events.dispatch.emit"):
             bcast.return_value.update_node_status = AsyncMock(return_value=None)
 
             result = await harness.execute(
@@ -300,7 +305,7 @@ class TestEmailReceive:
              patch.object(EmailService, "poll_ids", poll_ids_mock), \
              patch("asyncio.sleep", new=AsyncMock(return_value=None)), \
              patch("services.status_broadcaster.get_status_broadcaster") as bcast, \
-             patch("services.event_waiter.dispatch"):
+             patch("services.events.dispatch.emit"):
             bcast.return_value.update_node_status = AsyncMock(return_value=None)
 
             result = await harness.execute(

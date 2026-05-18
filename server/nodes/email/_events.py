@@ -1,22 +1,14 @@
-"""Wave 12 B4 + canary opt-in: CloudEvents factories + dispatcher for email.
-
-Plugin-specific event emission — replaces:
-  - ``event_waiter.dispatch("email_received", email_data)`` in
-    ``email_receive/__init__.py``
+"""CloudEvents factory + dispatcher for email.
 
 Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live in
 the plugin folder.
 
-Legacy ``event_type`` (``"email_received"``) is preserved on the
-dispatch path so the ``emailReceive`` trigger node's ``event_type``
-ClassVar still matches without a coordinated registry-side rename.
-
-Dual-dispatch (canary opt-in, post-2026-05-15):
-  - Legacy ``event_waiter.dispatch`` for the in-process collector/processor
-    (still production-live for non-canary triggers).
-  - Typed ``services.events.dispatch.emit`` for Temporal-durable
-    ``TriggerListenerWorkflow`` consumers (when canary registry +
-    ``event_framework_enabled`` are both on — both default-true).
+Delivery: single ``dispatch.emit`` call routes events to running
+:class:`TriggerListenerWorkflow` consumers via Temporal Visibility AND
+broadcasts the envelope to FE on the ``email_received`` wire key.
+emailReceive is canary-registered (see ``nodes/email/__init__.py``) so
+the deployment manager skips ``setup_event_trigger`` and the legacy
+``event_waiter.dispatch`` path has zero consumers — removed.
 """
 
 from __future__ import annotations
@@ -26,12 +18,10 @@ from typing import Any, Mapping
 from services.events.envelope import WorkflowEvent
 
 
-# Legacy event_type the event_waiter dispatches by; trigger nodes
-# subscribe on this string (matches ``EmailReceiveNode.event_type``).
-_LEGACY_EVENT_TYPE = "email_received"
-
-
-# ---- Typed factory ---------------------------------------------------------
+# Outer wire-routing key. Matches ``EmailReceiveNode.event_type`` and
+# the FE WS channel; the inner envelope carries
+# ``com.machinaos.email.message.received``.
+_WIRE_ROUTING_KEY = "email_received"
 
 
 def email_message_received(email_data: Mapping[str, Any]) -> WorkflowEvent:
@@ -48,41 +38,14 @@ def email_message_received(email_data: Mapping[str, Any]) -> WorkflowEvent:
     )
 
 
-# ---- Dispatcher wrapper ----------------------------------------------------
-
-
-async def dispatch_email_received(email_data: Mapping[str, Any]) -> int:
-    """Dispatch an incoming email to waiting ``emailReceive`` trigger
-    nodes.
-
-    Two delivery paths (mirrors :func:`telegram._events.dispatch_telegram_message_received`):
-
-    1. **Legacy event_waiter waiters** via :func:`event_waiter.dispatch`
-       (in-process collector/processor; still default for trigger nodes
-       outside the canary registry).
-    2. **Temporal-durable listeners** via
-       :func:`services.events.dispatch.emit`. ``emit`` is a pass-through
-       no-op when ``event_framework_enabled`` is off; otherwise it
-       Visibility-queries running ``TriggerListenerWorkflow`` instances
-       and signals each.
-
-    Returns the count of legacy waiters resolved.
-    """
-    from services import event_waiter
+async def dispatch_email_received(email_data: Mapping[str, Any]) -> None:
+    """Dispatch an incoming email via the canary CloudEvents path."""
     from services.events.dispatch import emit
 
-    payload = dict(email_data)
-    resolved = event_waiter.dispatch(_LEGACY_EVENT_TYPE, payload)
-
-    # Temporal-durable fan-out (canary opt-in via
-    # ``register_canary_trigger_type("emailReceive")`` in
-    # ``nodes/email/__init__.py``).
     await emit(
-        email_message_received(payload),
-        wire_routing_key=_LEGACY_EVENT_TYPE,
+        email_message_received(dict(email_data)),
+        wire_routing_key=_WIRE_ROUTING_KEY,
     )
-
-    return resolved
 
 
 __all__ = [
