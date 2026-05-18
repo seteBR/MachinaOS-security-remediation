@@ -15,7 +15,6 @@ import asyncio
 import json
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -27,7 +26,7 @@ from cli.platform_ import IS_WINDOWS, IS_WSL, platform_name, project_root
 from cli.buildenv import validate_build, venv_python
 from cli.ports import kill_port
 from cli.run import which_argv
-from cli.supervisor import Manager, RestartPolicy, ServiceSpec
+from cli.supervisor import Manager, ServiceSpec
 from cli.commands._temporal_specs import temporal_specs
 
 

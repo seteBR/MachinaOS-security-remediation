@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import typer
 
-from machina import run as run_module
+from cli import run as run_module
 from cli.commands import build
 
 

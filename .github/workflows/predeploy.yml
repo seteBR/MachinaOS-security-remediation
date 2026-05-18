@@ -50,15 +50,15 @@ jobs:
           uv sync --extra dev
           uv run pytest tests/ -v
 
-      - name: Machina CLI tests (pytest)
-        # 105 tests covering build/start/stop pipelines, daemon, ports, docs,
-        # release config. Run from repo root — tests resolve workspace paths
-        # via `pnpm list --json` (see machina/tests/conftest.py).
+      - name: Supervisor CLI tests (pytest)
+        # 106 tests covering build/start/stop pipelines, daemon, ports, docs,
+        # release config, clean. Run from repo root — tests resolve workspace
+        # paths via `pnpm list --json` (see cli/tests/conftest.py).
         # `pyyaml` is needed by test_release_pipeline_config.py to parse the
-        # workflow files; not a machina runtime dep, only a test-time one.
+        # workflow files; not a CLI runtime dep, only a test-time one.
         run: |
           uv pip install --system pytest pytest-asyncio pyyaml
-          python -m pytest machina/tests/ -v
+          python -m pytest cli/tests/ -v
 
   # Test build and start from source (cross-platform)
   test-build-start:

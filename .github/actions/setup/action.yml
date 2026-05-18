@@ -39,15 +39,13 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@v4
 
-    - name: Install global CLI tools
-      shell: bash
-      run: npm install -g temporal-server
-
-    # machina (the project supervisor CLI at the repo root) is invoked by
-    # pnpm scripts as `python -m machina ...` from the runner's system
-    # Python. Install its runtime deps eagerly via the root pyproject.toml
-    # so the first `pnpm run build` doesn't trip the self-bootstrap path.
-    - name: Install machina CLI dependencies
+    # The supervisor CLI lives at <repo>/cli/ and is invoked by pnpm
+    # scripts as `python -m cli ...` from the runner's system Python.
+    # Install its runtime deps eagerly via the root pyproject.toml so
+    # the first `pnpm run build` doesn't trip the self-bootstrap path.
+    # User-facing entry-point is named `machina` (see [project.scripts]
+    # in pyproject.toml) — module name is `cli`.
+    - name: Install supervisor CLI dependencies
       shell: bash
       run: uv pip install --system -e .
 
@@ -59,5 +57,4 @@ runs:
         echo "npm: $(npm --version)"
         echo "Python: $(python --version)"
         echo "uv: $(uv --version)"
-        echo "temporal-server: $(temporal --version 2>/dev/null || echo 'installed')"
-        echo "machina: $(python -c 'import machina; print(machina.__version__)' 2>/dev/null || echo 'failed to import')"
+        echo "cli: $(python -c 'import cli; print(cli.__version__)' 2>/dev/null || echo 'failed to import')"

@@ -59,7 +59,7 @@ _core_pkg = _make_package("core")
 def _stub_log_context(**_fields):
     """Stub for ``core.logging.log_context`` (async ctx manager) and
     ``log_context_sync``. Both are no-ops under test."""
-    from contextlib import asynccontextmanager, contextmanager
+    from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def _async_cm():

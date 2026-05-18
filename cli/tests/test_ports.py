@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import psutil
 
-from machina import ports
+from cli import ports
 
 
 def test_kill_pid_no_such_process_returns_false():

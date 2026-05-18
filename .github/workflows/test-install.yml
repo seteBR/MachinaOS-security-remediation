@@ -37,9 +37,6 @@ jobs:
       - name: Install uv
         run: pip install uv
 
-      - name: Install global CLI tools
-        run: npm install -g temporal-server
-
       - name: Install machinaos from npm
         run: npm install -g machinaos
 

@@ -12,10 +12,7 @@ not register itself with the system.
 
 from __future__ import annotations
 
-import os
-import signal
 import subprocess
-import sys
 from pathlib import Path
 
 import psutil

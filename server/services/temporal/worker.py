@@ -462,7 +462,7 @@ async def create_worker(
         ],
         max_concurrent_activities=100,
         max_concurrent_workflow_tasks=10,
-        graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN_TIMEOUT,
+        graceful_shutdown_timeout=_graceful_shutdown_timeout(),
     )
 
 

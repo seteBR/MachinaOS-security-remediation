@@ -29,7 +29,7 @@ def stop_command() -> None:
     console.print("[bold]Stopping MachinaOS services...[/]")
     console.print(f"Platform: {platform_name()}")
     console.print(f"Ports:    {', '.join(str(p) for p in cfg.all_ports)}")
-    console.print(f"Temporal: enabled" if cfg.temporal_enabled else "Temporal: disabled")
+    console.print("Temporal: enabled" if cfg.temporal_enabled else "Temporal: disabled")
     console.print()
 
     all_stopped = True

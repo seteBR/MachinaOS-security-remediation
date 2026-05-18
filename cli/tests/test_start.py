@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from machina import buildenv
+from cli import buildenv
 from cli.commands import start
 from cli.config import Config
 
