@@ -101,7 +101,6 @@ async def handle_get_stored_api_key(data: Dict[str, Any], websocket: WebSocket) 
     the value but tracks ``stored`` separately via ``hasKey`` so the
     validated/connected badge stays honest.
     """
-    from core.container import container
 
     auth_service = container.auth_service()
     provider = data["provider"].lower()
@@ -129,9 +128,7 @@ async def handle_save_api_key(data: Dict[str, Any], websocket: WebSocket) -> Dic
     ``request_id`` (opaque UUID), duplicate calls within 60 s return the
     cached result instead of re-running the mutation.
     """
-    from core.container import container
     from services.idempotency import get_idempotency_store
-    from services.status_broadcaster import get_status_broadcaster
 
     store = get_idempotency_store("credentials")
     provider = data["provider"].lower()
@@ -157,9 +154,7 @@ async def handle_save_api_key(data: Dict[str, Any], websocket: WebSocket) -> Dic
 @ws_handler("provider")
 async def handle_delete_api_key(data: Dict[str, Any], websocket: WebSocket) -> Dict[str, Any]:
     """Delete stored API key. Idempotent on ``request_id``."""
-    from core.container import container
     from services.idempotency import get_idempotency_store
-    from services.status_broadcaster import get_status_broadcaster
 
     store = get_idempotency_store("credentials")
     provider = data["provider"].lower()

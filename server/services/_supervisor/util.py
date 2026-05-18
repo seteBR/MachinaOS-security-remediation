@@ -13,7 +13,7 @@ import logging
 import os
 import signal
 import sys
-from typing import Awaitable, Callable, Optional
+from typing import Callable, Optional
 
 import anyio
 import psutil

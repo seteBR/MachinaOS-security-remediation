@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import sys
 import types
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock
+from typing import List
+from unittest.mock import MagicMock
 
 import pytest
 

@@ -168,7 +168,6 @@ class TestDuckDuckGoSearch:
     """ddgs-library wrapper; heavy mocking so no real network is touched."""
 
     async def test_happy_path_maps_ddgs_results_to_documented_shape(self):
-        from services.handlers import tools as tools_mod
 
         fake_ddgs_instance = MagicMock()
         fake_ddgs_instance.text.return_value = [

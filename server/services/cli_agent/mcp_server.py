@@ -26,7 +26,6 @@ Tools deferred to v2: ``getDiagnostics``, ``executeCode``.
 from __future__ import annotations
 
 import contextvars
-import logging
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,7 +34,6 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.routing import Mount
 
 from core.logging import get_logger
 

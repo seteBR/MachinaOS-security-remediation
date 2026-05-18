@@ -8,7 +8,7 @@ persists an ``APIUsageMetric`` row.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from core.logging import get_logger
 

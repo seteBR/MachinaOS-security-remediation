@@ -13,7 +13,7 @@ import asyncio
 import os
 import shlex
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -103,8 +103,8 @@ class ProcessService:
         if any(cmd_lower.startswith(b) or f" {b}" in f" {cmd_lower}" for b in blocked):
             return {
                 "success": False,
-                "error": f"Destructive commands blocked in process_manager. "
-                         f"Use shell_execute for file operations (sandboxed, no PATH).",
+                "error": "Destructive commands blocked in process_manager. "
+                         "Use shell_execute for file operations (sandboxed, no PATH).",
             }
 
         name = name or f"proc_{id(command) % 100000}"

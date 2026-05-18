@@ -122,7 +122,6 @@ def __getattr__(name: str):
 from core.config import Settings
 from core.logging import get_logger, log_execution_time, log_api_call
 from services.auth import AuthService
-from constants import ANDROID_SERVICE_NODE_TYPES
 
 logger = get_logger(__name__)
 
@@ -1555,7 +1554,7 @@ class AIService:
             workflow_id: Optional workflow ID for scoped status broadcasts
             context: Optional execution context with nodes, edges for nested agent delegation
         """
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
         start_time = time.time()
         provider = 'unknown'
         model = 'unknown'
@@ -2014,7 +2013,7 @@ class AIService:
             workflow_id: Optional workflow ID for scoped status broadcasts
             context: Optional execution context with nodes, edges for nested agent delegation
         """
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
         start_time = time.time()
         provider = 'unknown'
         model = 'unknown'

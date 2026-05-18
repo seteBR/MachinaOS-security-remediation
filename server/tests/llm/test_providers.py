@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from services.llm.protocol import LLMResponse, Message, ThinkingConfig, ToolCall, ToolDef, Usage
+from services.llm.protocol import Message, ThinkingConfig, ToolCall, ToolDef
 
 
 # ---------------------------------------------------------------------------

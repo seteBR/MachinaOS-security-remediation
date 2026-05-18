@@ -13,7 +13,6 @@ from fastapi.responses import FileResponse
 from nodes._visuals import get_plugin_icon_path
 from services.node_input_schemas import (
     get_node_input_schema,
-    list_node_types_with_input_schema,
 )
 from services.node_output_schemas import (
     get_node_output_schema,

@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import anyio
 import pytest
 
 # Ensure server/ on sys.path (mirrors conftest.py)

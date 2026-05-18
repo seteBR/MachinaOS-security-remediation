@@ -5,8 +5,6 @@ Each tool type has its own handler function that processes the tool call
 and returns results.
 """
 
-import math
-import json
 import asyncio
 import uuid
 import hashlib

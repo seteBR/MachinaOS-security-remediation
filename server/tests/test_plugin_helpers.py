@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from services.plugin.base import NodeUserError
 from services.plugin.deps import get_auth_service, get_cache, get_database

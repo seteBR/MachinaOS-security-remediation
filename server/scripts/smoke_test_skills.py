@@ -85,7 +85,7 @@ async def main() -> int:
         allowed_idx = argv.index("--allowedTools")
         allowed = argv[allowed_idx + 1].split(",")
         assert "Skill" in allowed, f"Skill missing from allowlist: {allowed}"
-        assert f"--add-dir" in argv and str(workspace) in argv, (
+        assert "--add-dir" in argv and str(workspace) in argv, (
             f"workspace not in --add-dir argv: {argv}"
         )
         print(f"[smoke] step 2 PASS — argv has Skill in allowlist + --add-dir {workspace.name}")
@@ -134,7 +134,7 @@ async def main() -> int:
             print(f"[smoke] step 4 PASS — session_id={result.session_id}, "
                   f"cost=${result.cost_usd}, num_turns={result.num_turns}, "
                   f"duration_ms={result.duration_ms}")
-            print(f"[smoke] response (first 400 chars):")
+            print("[smoke] response (first 400 chars):")
             print(f"  {result.response[:400]!r}")
 
             # Step 5 — inspect the events for evidence of skill use.

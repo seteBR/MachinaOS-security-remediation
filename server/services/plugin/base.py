@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, ClassVar, Dict, List, Optional, Sequence, Type
+from typing import Any, Awaitable, Callable, ClassVar, Dict, Optional, Sequence, Type
 
 from opentelemetry import trace
 from pydantic import BaseModel, ValidationError

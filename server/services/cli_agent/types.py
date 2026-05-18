@@ -17,7 +17,6 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from services.cli_agent.protocol import CanonicalUsage
 
 
 # ---------------------------------------------------------------------------

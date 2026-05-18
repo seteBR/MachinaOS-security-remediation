@@ -1,6 +1,6 @@
 """Test create_provider() factory and provider detection."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from services.llm.factory import create_provider, is_native_provider, NATIVE_PROVIDERS
 from services.llm.config import detect_provider_from_model

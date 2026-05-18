@@ -17,8 +17,6 @@ from __future__ import annotations
 import asyncio
 import platform
 import stat
-import tarfile
-import zipfile
 from pathlib import Path
 
 import pooch

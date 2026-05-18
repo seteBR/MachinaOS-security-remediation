@@ -14,7 +14,7 @@ import time
 import asyncio
 import uuid
 import weakref
-from typing import Dict, Any, Callable, Awaitable, List, Optional, Set
+from typing import Dict, Any, Callable, Awaitable, Optional, Set
 from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect

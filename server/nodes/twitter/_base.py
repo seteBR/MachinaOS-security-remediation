@@ -11,7 +11,7 @@ Wraps the XDK SDK with:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from core.logging import get_logger
 from services.pricing import get_pricing_service

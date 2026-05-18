@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -264,7 +263,7 @@ class TestMachinaOsToolBridge:
         """The connected workflow node must surface in ``list_tools`` so
         claude sees ``mcp__machinaos__<node_type>`` on first
         ``tools/list``."""
-        from services.cli_agent.mcp_server import _mcp_singleton, get_mcp_app
+        from services.cli_agent.mcp_server import get_mcp_app
         get_mcp_app()  # ensure FastMCP singleton built
         from services.cli_agent.mcp_server import _mcp_singleton as mcp
         assert mcp is not None

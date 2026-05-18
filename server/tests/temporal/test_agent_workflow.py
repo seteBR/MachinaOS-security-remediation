@@ -16,7 +16,6 @@ canary agent migration lands. This file locks the static contracts:
 
 from __future__ import annotations
 
-import pytest
 
 
 class TestAgentWorkflowDefinition:

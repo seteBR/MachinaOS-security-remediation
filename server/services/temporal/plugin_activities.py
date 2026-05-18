@@ -27,7 +27,7 @@ a specialised worker pool.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 from core.logging import get_logger
 

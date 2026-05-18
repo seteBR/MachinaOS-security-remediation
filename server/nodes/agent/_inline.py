@@ -22,7 +22,7 @@ to ``ai_service.execute_agent(...)`` or ``ai_service.execute_chat_agent(...)``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from core.logging import get_logger
 from services.plugin.edge_walker import (

@@ -233,7 +233,6 @@ class TestStartCanaryListener:
     async def test_starts_with_deterministic_id_and_use_existing_policy(
         self, monkeypatch
     ):
-        from services.deployment.manager import DeploymentManager
         from temporalio.common import WorkflowIDConflictPolicy
 
         mgr, _ = _build_manager_with_state(
@@ -273,9 +272,7 @@ class TestStartCanaryListener:
     @pytest.mark.asyncio
     async def test_search_attributes_include_event_workflow_id(self, monkeypatch):
         """Cancel path queries by EventWorkflowId — start must set it."""
-        from services.deployment.manager import DeploymentManager
         from temporalio.common import (
-            SearchAttributeKey,
             TypedSearchAttributes,
         )
 
@@ -325,8 +322,6 @@ class TestStartCanaryListener:
     async def test_chat_trigger_uses_chat_kind_in_search_attrs(self, monkeypatch):
         """C1 rollout #1: starting a chatTrigger listener picks the
         right EventTriggerKind ('chat', not 'webhook')."""
-        from services.deployment.manager import DeploymentManager
-        from temporalio.common import TypedSearchAttributes
 
         mgr, _ = _build_manager_with_state(
             "wf-chat",
@@ -363,7 +358,6 @@ class TestStartCanaryListener:
     @pytest.mark.asyncio
     async def test_returns_none_when_temporal_not_connected(self, monkeypatch):
         """Falls through to legacy path; doesn't raise."""
-        from services.deployment.manager import DeploymentManager
 
         mgr, _ = _build_manager_with_state(
             "wf-1", nodes=[_node("wh-1", "webhookTrigger")], edges=[]
@@ -391,7 +385,6 @@ class TestCancelCanaryListeners:
 
     @pytest.mark.asyncio
     async def test_query_filters_by_workflow_id_and_listener_type(self, monkeypatch):
-        from services.deployment.manager import DeploymentManager
 
         mgr, _ = _build_manager_with_state("wf-1", nodes=[], edges=[])
 
@@ -449,7 +442,6 @@ class TestCancelCanaryListeners:
     @pytest.mark.asyncio
     async def test_zero_listeners_returns_zero(self, monkeypatch):
         """Visibility query with no results is the steady-state — must not raise."""
-        from services.deployment.manager import DeploymentManager
 
         mgr, _ = _build_manager_with_state("wf-1", nodes=[], edges=[])
 
@@ -472,7 +464,6 @@ class TestCancelCanaryListeners:
     async def test_per_listener_failure_doesnt_block_sweep(self, monkeypatch):
         """One listener failing to cancel shouldn't strand the others —
         each handle.cancel() is wrapped in its own try/except."""
-        from services.deployment.manager import DeploymentManager
 
         mgr, _ = _build_manager_with_state("wf-1", nodes=[], edges=[])
 
@@ -510,7 +501,6 @@ class TestCancelCanaryListeners:
 
     @pytest.mark.asyncio
     async def test_returns_zero_when_temporal_disconnected(self, monkeypatch):
-        from services.deployment.manager import DeploymentManager
 
         mgr, _ = _build_manager_with_state("wf-1", nodes=[], edges=[])
 

@@ -18,7 +18,6 @@ from core.logging import get_logger
 from services.proxy.exceptions import (
     BudgetExceededError,
     NoHealthyProviderError,
-    ProxyConfigError,
     ProviderError,
 )
 from services.proxy.models import (

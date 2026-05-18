@@ -12,7 +12,6 @@ on top; it transparently refreshes on 401/403 via this class.
 
 from __future__ import annotations
 
-from typing import Any, Dict
 
 from services.plugin.credential import OAuth2Credential
 

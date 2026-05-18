@@ -46,7 +46,7 @@ Out of scope (commit-stage)
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, ClassVar, Dict, Optional, Set, Tuple
+from typing import Any, Callable, ClassVar, Dict, Set, Tuple
 
 from core.logging import get_logger
 from services.plugin.trigger import TriggerNode

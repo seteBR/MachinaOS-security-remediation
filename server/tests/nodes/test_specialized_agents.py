@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.nodes._mocks import patched_broadcaster, patched_container, patched_subprocess
+from tests.nodes._mocks import patched_broadcaster, patched_container
 
 
 pytestmark = pytest.mark.node_contract

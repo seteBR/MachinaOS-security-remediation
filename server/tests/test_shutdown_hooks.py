@@ -21,12 +21,11 @@ Same source-introspection pattern as ``test_canary_registry.py`` and
 
 from __future__ import annotations
 
-import inspect
 import re
 import sys
 import types
 from typing import List
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 

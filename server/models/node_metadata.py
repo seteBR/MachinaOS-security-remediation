@@ -12,7 +12,7 @@ Kept as a plain dict (not Pydantic) for fast iteration — switch to a
 TypedDict / Pydantic model once the schema stabilises.
 """
 
-from typing import Any, Literal, Optional, TypedDict
+from typing import Literal, Optional, TypedDict
 
 
 class NodeHandle(TypedDict, total=False):

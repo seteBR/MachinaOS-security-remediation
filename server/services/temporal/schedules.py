@@ -20,7 +20,7 @@ Refs:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict
 
 from temporalio.client import (
     Client,

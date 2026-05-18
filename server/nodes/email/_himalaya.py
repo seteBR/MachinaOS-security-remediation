@@ -11,7 +11,7 @@ import tempfile
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from core.logging import get_logger
 from services.plugin.singleton import ServiceSingleton

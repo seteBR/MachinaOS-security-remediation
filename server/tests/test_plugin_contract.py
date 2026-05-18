@@ -10,9 +10,7 @@ adds plugins, they automatically participate.
 
 from __future__ import annotations
 
-from typing import get_type_hints
 
-import pytest
 from pydantic import BaseModel
 
 

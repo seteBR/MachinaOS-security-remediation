@@ -49,7 +49,6 @@ if "machina" not in sys.modules:
     _machina_tcp.probe_tcp_port = MagicMock(return_value=False)
     sys.modules["cli.tcp"] = _machina_tcp
 
-from core.config import Settings
 from services.events.envelope import WorkflowEvent
 from services.plugin.scaling import RetryPolicy
 

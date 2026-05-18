@@ -34,7 +34,7 @@ Cross-confirmed pattern with Temporal docs + samples-python:
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, Set
 
 from temporalio import workflow
 from temporalio.common import WorkflowIDReusePolicy

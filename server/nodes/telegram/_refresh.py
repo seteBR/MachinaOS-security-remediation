@@ -15,7 +15,7 @@ into the broadcaster cache.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Dict, TYPE_CHECKING
 
 from opentelemetry import trace
 
