@@ -89,6 +89,7 @@ const GoogleMapsPicker: React.FC<GoogleMapsPickerProps> = ({
         }
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onLocationClick is a callback prop; including it would tear down the map on every parent re-render.
   }, [apiKey, lat, lng, zoom, mapTypeId]);
 
   // Update marker position when coordinates change

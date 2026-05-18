@@ -160,6 +160,7 @@ export const useReactFlowNodes = ({ setNodes, setEdges }: UseReactFlowNodesProps
       // Add the connection
       setEdges((eds) => addEdge(params, eds));
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isValidConnection is captured by closure; including would re-bind on every render.
     [setEdges]
   );
 

@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/incompatible-library -- react-compiler advisory only; no functional impact. */
 /**
  * RateLimitSection — WhatsApp rate limit configuration.
  *

@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps -- ``handles`` derived from spec.handles; spec is a stable React-Query slice, dep list omits it intentionally. */
 import React, { memo, useState, useEffect, useMemo } from 'react';
 import { nodePropsEqual } from './nodeMemoEquality';
 import { Handle, Position, NodeProps } from 'reactflow';

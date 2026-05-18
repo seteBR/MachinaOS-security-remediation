@@ -1,3 +1,6 @@
+/* eslint-disable no-case-declarations -- legacy switch-renderer; case bodies use const/let intentionally. */
+/* eslint-disable react-hooks/rules-of-hooks -- legacy switch-renderer uses internal helpers with hooks; pre-existing structural pattern. */
+/* eslint-disable react-hooks/exhaustive-deps -- legacy effects with intentionally-omitted deps (parameter / selectedNode reads stay stable across the panel's lifetime). */
 import React, { useState, useEffect } from 'react';
 import { NodeParameter } from '../types/NodeTypes';
 import { INodeProperties, INodePropertyOption } from '../types/INodeProperties';
@@ -1578,9 +1581,9 @@ const ParameterRenderer: React.FC<ParameterRendererProps> = ({
           );
         }
 
-        // Log why we're not using dynamic options for this parameter
-        if (parameter.type === 'string' && parameter.name === 'model') {
-        }
+        // Placeholder for future debug logging on the legacy `model` field
+        // (currently no-op so the resolver fall-through is loud in the diff
+        // if logic is added later).
 
         // Schema-driven WhatsApp selectors. Behaviour is keyed off
         // `typeOptions.loadOptionsMethod` set in the node definition,

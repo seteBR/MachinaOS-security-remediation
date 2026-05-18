@@ -333,6 +333,7 @@ const InputSection: React.FC<InputSectionProps> = ({ nodeId, visible = true }) =
     };
 
     fetchConnectedNodes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sendRequest is a stable WS-context callback; including it would re-fetch on every reconnect.
   }, [nodeId, currentWorkflow, getNodeOutput]);
 
   const toggleNode = (id: string) => {

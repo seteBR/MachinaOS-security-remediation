@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- test helpers; fast-refresh doesn't apply. */
 /**
  * Shared provider wrappers for tests.
  *

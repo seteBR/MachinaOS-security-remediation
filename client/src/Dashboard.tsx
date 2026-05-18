@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps -- curated dep arrays; reactive-graph derivations + workflow debouncers intentionally omit deps to avoid infinite loops. */
 import React, { useEffect } from 'react';
 import {
   ReactFlow,

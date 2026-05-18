@@ -7,7 +7,7 @@
  * style mirrors shadcn DropdownMenuContent so it lives consistently with
  * the rest of the surface.
  */
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { Pencil, Copy as CopyIcon, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -41,11 +41,11 @@ const NodeContextMenu: React.FC<NodeContextMenuProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = React.useState(0);
 
-  const menuItems: MenuItem[] = [
+  const menuItems: MenuItem[] = useMemo(() => [
     { label: 'Rename', shortcut: 'F2',     action: onRename, Icon: Pencil },
     { label: 'Copy',   shortcut: 'Ctrl+C', action: onCopy,   Icon: CopyIcon },
     { label: 'Delete', shortcut: 'Del',    action: onDelete, Icon: Trash2, danger: true },
-  ];
+  ], [onRename, onCopy, onDelete]);
 
   // Calculate menu position to avoid overflow
   const getMenuPosition = useCallback(() => {

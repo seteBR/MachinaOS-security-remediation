@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/exhaustive-deps -- form bootstrap effect runs once on mount; deps intentionally curated. */
+/* eslint-disable react-hooks/incompatible-library -- react-compiler advisory only; no functional impact. */
 /**
  * EmailPanel — Himalaya IMAP/SMTP credentials.
  *

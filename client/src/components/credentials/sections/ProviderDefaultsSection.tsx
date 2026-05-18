@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/exhaustive-deps -- form bootstrap effects run once on provider change; deps intentionally curated. */
+/* eslint-disable react-hooks/incompatible-library -- react-compiler advisory only; no functional impact. */
 /**
  * ProviderDefaultsSection — provider default LLM parameters.
  *

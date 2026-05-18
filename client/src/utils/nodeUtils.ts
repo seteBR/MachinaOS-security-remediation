@@ -21,7 +21,7 @@ export const getShortNodeName = (nodeType: string): string => {
   }
   
   // Otherwise, create a simplified version by removing capitals and common suffixes
-  let simplified = nodeType
+  const simplified = nodeType
     .replace(/[A-Z]/g, '') // Remove capital letters
     .replace(/(Get|Set|Stop|Play|Record|Control)$/i, '') // Remove common suffixes
     .toLowerCase();

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- shadcn primitive: cva variants + component export co-located by convention. */
 /**
  * ActionButton -- colored "soft" toolbar button shared by the parameter
  * panel, location panel, settings header, and top toolbar.

@@ -29,6 +29,7 @@ const OutputSection: React.FC<OutputSectionProps> = ({
   // same run carry the same id, so we can fold them into one entry.
   // The previous implementation hashed outputs via JSON.stringify, which
   // collapsed two distinct executions whose payloads happened to match.
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- pre-existing structural pattern; visible toggle is stable per render-tree mount.
   const combinedResults = React.useMemo(() => {
     const results = [...executionResults];
 

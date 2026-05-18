@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- icon component file mixes component + helper exports. */
 // AI Provider Icons - Using @lobehub/icons for official brand logos.
 // Deep imports keep the package's antd-using `Editor`/`Dashboard`/`Provider*`
 // feature modules out of the bundle (their index re-export would otherwise

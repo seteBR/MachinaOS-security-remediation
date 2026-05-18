@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- file mixes component + helper exports. */
 import React, { useEffect } from 'react';
 import { toast } from 'sonner';
 import {

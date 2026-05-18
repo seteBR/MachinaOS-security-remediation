@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps -- userSkills/folderSkills are React-Query slices; dep arrays curated to avoid re-derivation on every refetch. */
 /**
  * MasterSkillEditor - Editor for Master Skill node
  *

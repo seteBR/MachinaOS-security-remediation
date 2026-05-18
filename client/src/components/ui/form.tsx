@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- shadcn Form primitive: hook + components co-located by convention. */
 "use client"
 
 import * as React from "react"

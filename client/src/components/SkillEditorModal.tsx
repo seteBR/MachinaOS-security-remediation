@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/incompatible-library -- react-compiler advisory only; no functional impact. */
 import React, { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- canonical React Context pattern co-locates Provider + hooks/helpers in one file. */
 /**
  * Authentication Context for user session management.
  *

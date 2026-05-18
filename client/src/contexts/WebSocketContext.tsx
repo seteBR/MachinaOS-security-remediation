@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- canonical React Context pattern co-locates Provider + hooks/helpers/types in one file. */
 /**
  * WebSocket Context for real-time communication with Python backend.
  *
@@ -560,7 +561,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                     wsRef.current?.removeEventListener('message', handler);
                     resolve(msg);
                   }
-                } catch {}
+                } catch { /* swallow message-parse errors — invalid frames are ignored */ }
               };
 
               wsRef.current?.addEventListener('message', handler);
@@ -777,7 +778,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               bot_username: (payload.bot_username as string | null) ?? null,
               bot_name: (payload.bot_name as string | null) ?? null,
               bot_id: (payload.bot_id as string | null) ?? null,
-              owner_chat_id: (payload.owner_chat_id as string | null) ?? null,
+              owner_chat_id: (payload.owner_chat_id as number | null) ?? null,
             });
             invalidateCatalogue(queryClient);
           }
@@ -1523,7 +1524,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   ws.removeEventListener('message', handler);
                   resolve(msg);
                 }
-              } catch {}
+              } catch { /* swallow message-parse errors — invalid frames are ignored */ }
             };
             ws.addEventListener('message', handler);
             ws.send(JSON.stringify({ ...payload, request_id: requestId }));

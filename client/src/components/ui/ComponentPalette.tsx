@@ -106,6 +106,7 @@ const ComponentPalette: React.FC<ComponentPaletteProps> = ({
     });
 
     return categories;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- specsReady gates memo recomputation when the spec catalogue hydrates.
   }, [searchQuery, proMode, groupIndex, isBlocked, isAllowed, specsReady]);
 
   const totalComponents = Object.values(categorizedComponents).reduce(

@@ -112,6 +112,7 @@ const GoogleMapsLocationPicker: React.FC<{
         }
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lat/lng/onLocationClick re-init the map; tracked separately by the position-update effect below.
   }, [apiKey, isDarkMode]);
 
   // Update marker position when coordinates change

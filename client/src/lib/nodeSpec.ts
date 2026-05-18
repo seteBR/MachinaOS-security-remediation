@@ -138,6 +138,7 @@ export function useNodeSpec(nodeType: string | undefined | null): NodeSpec | nul
     if (!nodeType || !isReady) return;
     if (queryClient.getQueryData(key) !== undefined) return;
     void fetchNodeSpec(nodeType, sendRequest);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key derives from nodeType; including it is redundant.
   }, [nodeType, isReady, sendRequest]);
 
   return data;
