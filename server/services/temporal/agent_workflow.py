@@ -319,15 +319,57 @@ class AgentWorkflow:
                     })
                     continue
 
+                # Delegation tools (``delegate_to_<child>``) need different
+                # arg handling than regular tools:
+                #
+                #   1. LLM passes ``{"task": "...", "context": "..."}`` — map
+                #      ``task → system_message`` and ``context → prompt`` so
+                #      the child agent's ``Params`` model parses correctly.
+                #      Without this remap Gemini fails with ``contents are
+                #      required`` because the child's prompt is empty.
+                #   2. The child agent needs the full canvas (``nodes`` +
+                #      ``edges``) so its ``collect_agent_connections`` edge
+                #      walk can find its own skills / memory / tools.
+                #      Regular tools don't need this — they execute against
+                #      their own params alone.
+                #
+                # Same mapping the legacy fire-and-forget
+                # ``handlers.tools._execute_delegated_agent`` applies to its
+                # ``child_params`` before spawning the child task.
+                call_args = call.get("args") or {}
+                tool_name = call.get("name", "")
+                is_delegation = tool_name.startswith("delegate_to_")
+
+                if is_delegation:
+                    task_description = str(call_args.get("task", "") or "")
+                    task_context = str(call_args.get("context", "") or "")
+                    delegation_params = {
+                        "system_message": task_description,
+                        "prompt": task_context or task_description,
+                    }
+                    tool_node_data = {
+                        **(tool_info.get("parameters") or {}),
+                        **delegation_params,
+                    }
+                    child_nodes = context.get("nodes") or []
+                    child_edges = context.get("edges") or []
+                else:
+                    tool_node_data = {
+                        **(tool_info.get("parameters") or {}),
+                        **call_args,
+                    }
+                    child_nodes = []   # regular tool activity doesn't need full canvas
+                    child_edges = []
+
                 tool_payload = {
                     "node_id": tool_info["tool_node_id"],
                     "node_type": tool_info["node_type"],
-                    "node_data": {**(tool_info.get("parameters") or {}), **(call.get("args") or {})},
+                    "node_data": tool_node_data,
                     "inputs": {},
                     "workflow_id": payload.get("workflow_id"),
                     "session_id": payload.get("session_id", "default"),
-                    "nodes": [],   # tool activity doesn't need full canvas
-                    "edges": [],
+                    "nodes": child_nodes,
+                    "edges": child_edges,
                 }
 
                 tool_activity_name = (

@@ -146,3 +146,76 @@ class TestPayloadShape:
             f"AgentWorkflow.run docstring missing payload keys: {missing}. "
             "If you renamed a field, update both the docstring and the body."
         )
+
+
+class TestDelegationToolDispatch:
+    """Regression: when the LLM emits a ``delegate_to_<child>`` tool
+    call inside ``AgentWorkflow``'s tool-dispatch loop, the resulting
+    activity payload MUST:
+
+    1. Remap ``args.task → node_data.system_message`` and
+       ``args.context → node_data.prompt`` so the child agent's
+       ``Params`` model picks them up. Pre-fix the workflow merged
+       ``call.args`` (``{task, context}``) into ``node_data`` as-is —
+       ``SpecializedAgentParams`` doesn't have those fields, so the
+       child got empty prompt/system_message and Gemini failed with
+       ``contents are required``.
+    2. Carry the full canvas (``nodes`` + ``edges``) so the child's
+       ``collect_agent_connections`` edge walk finds its connected
+       skills / memory / tools. Pre-fix this was ``[]`` / ``[]`` for
+       every tool call — fine for regular tools but broken for
+       delegation.
+
+    Source-introspection invariant — runtime test against the live
+    workflow body needs a Temporal WorkflowEnvironment which is too
+    heavy for unit tests. The source check is enough to lock the
+    behaviour against regression.
+    """
+
+    def test_dispatch_remaps_delegation_args(self):
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+
+        # Detection: must check for the ``delegate_to_`` tool-name prefix.
+        assert "delegate_to_" in src, (
+            "AgentWorkflow tool dispatch lost the ``delegate_to_`` "
+            "detection branch. Without it, delegation tool calls take "
+            "the regular-tool path which leaves the child agent's "
+            "``prompt`` + ``system_message`` empty and Gemini fails "
+            "with ``contents are required``."
+        )
+        # Remapping: task → system_message, context → prompt.
+        assert "system_message" in src and "task" in src and "prompt" in src, (
+            "AgentWorkflow tool dispatch must map the LLM's "
+            "``{task, context}`` args to the child agent's "
+            "``{system_message, prompt}`` Params. Same mapping the "
+            "legacy ``_execute_delegated_agent`` applies."
+        )
+
+    def test_dispatch_passes_canvas_for_delegation(self):
+        """Delegation tool calls must pass the parent's ``nodes`` +
+        ``edges`` to the child agent's activity so the child's edge
+        walk can find its skills/memory/tools. Regular tool calls
+        keep the empty-canvas optimisation."""
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+
+        # The fix uses ``context.get("nodes")`` / ``context.get("edges")``
+        # inside the delegation branch.
+        assert 'context.get("nodes")' in src, (
+            "AgentWorkflow tool dispatch must read ``context.get('nodes')`` "
+            "to pass the canvas to delegation tool calls. Without it, "
+            "the child agent's edge walk sees an empty graph and can't "
+            "resolve its connected skills / memory / tools."
+        )
+        assert 'context.get("edges")' in src, (
+            "AgentWorkflow tool dispatch must read ``context.get('edges')`` "
+            "for the same reason — both are needed by "
+            "``collect_agent_connections``."
+        )
