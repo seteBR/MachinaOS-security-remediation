@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      agent-browser:
-        specifier: latest
-        version: 0.27.0
       cross-env:
         specifier: ^7.0.3
         version: 7.0.3
@@ -2722,10 +2719,6 @@ packages:
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
-
-  agent-browser@0.27.0:
-    resolution: {integrity: sha512-mmHzVsYFVA6nshNNGJzg83aVMgKpf4h98ytY3pvtJB1Cot0ZyA2bfnkbSngGD56Azkj+GlhVH6qx9DfKOVE0yg==}
-    hasBin: true
 
   ahooks@3.9.7:
     resolution: {integrity: sha512-S0lvzhbdlhK36RFBkGv+RbOM/dbbweym+BIHM/bwwuWVSVN5TuVErHPMWo4w0t1NDYg5KPp2iEf7Y7E5LASYiw==}
@@ -9045,8 +9038,6 @@ snapshots:
   acorn@8.16.0: {}
 
   agent-base@7.1.4: {}
-
-  agent-browser@0.27.0: {}
 
   ahooks@3.9.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
     dependencies:
