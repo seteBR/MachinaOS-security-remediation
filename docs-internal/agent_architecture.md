@@ -94,7 +94,7 @@ The agent loop is a plain `for iteration in range(max_iterations):` async functi
 5. If `response.tool_calls` is empty → return `{messages, iteration, thinking_content, truncated: False}`.
 6. Otherwise dispatch each `tool_call` via the supplied `tool_executor`, wrap each result as a `ToolMessage`, append, and loop.
 
-On hitting `max_iterations`, append a terminal `AIMessage` with a truncation note (same behaviour the old `GraphRecursionError` handler synthesised) and return `truncated: True`.
+On hitting `max_iterations`, append a terminal `AIMessage` with a truncation note and return `truncated: True`.
 
 ### Signature
 

@@ -586,13 +586,13 @@ class AgentWorkflow:
 def _serialise_tool_result(result: Any) -> str:
     """Return a string body for a ``ToolMessage``.
 
-    Mirrors the legacy ``create_tool_node`` in ``services/ai.py``: feed
-    the LLM the handler's raw return value (``json.dumps(result,
-    default=str)``), NOT the Temporal activity envelope. The F4.A
-    per-type activity wraps the handler result as
-    ``{"success": bool, "result": {...}, "node_id": ..., "node_type": ...,
-    "timestamp": ...}``; we strip the envelope so the LLM doesn't see
-    infrastructure metadata.
+    Mirrors the in-process tool-call serialisation in
+    ``services/ai.py:_run_agent_loop``: feed the LLM the handler's raw
+    return value (``json.dumps(result, default=str)``), NOT the Temporal
+    activity envelope. The F4.A per-type activity wraps the handler
+    result as ``{"success": bool, "result": {...}, "node_id": ...,
+    "node_type": ..., "timestamp": ...}``; we strip the envelope so the
+    LLM doesn't see infrastructure metadata.
     """
     import json as _json
 

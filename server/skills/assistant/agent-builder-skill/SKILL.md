@@ -42,7 +42,7 @@ need is already on your canvas, USE IT -- don't add a duplicate.
 
 ## Soft-reload semantics (important)
 
-LangGraph binds your tool list at the start of each invocation.
+The agent loop binds your tool list at the start of each invocation.
 Tools / skills / teammates added mid-run **do NOT become callable
 in the current run**. They become available on your **next
 invocation** (next chat message, next workflow trigger, next call).
@@ -103,11 +103,11 @@ message on your next turn.
 
 Required field: `agent_type` (string).
 
-**Team-leads only** (`orchestrator_agent`, `ai_employee`,
-`deep_agent`). Spawns a specialized agent (`coding_agent`,
-`web_agent`, `task_agent`, etc.) and wires it to your
-`input-teammates` handle. The new agent appears as a
-`delegate_to_<name>` tool on your next turn.
+**Team-leads only** (`orchestrator_agent`, `ai_employee`).
+Spawns a specialized agent (`coding_agent`, `web_agent`,
+`task_agent`, etc.) and wires it to your `input-teammates`
+handle. The new agent appears as a `delegate_to_<name>` tool
+on your next turn.
 
 The new agent starts with empty configuration -- the user will
 need to set its provider/model after the run. Mention this in your

@@ -138,8 +138,8 @@ async def execute_llm_step(payload: Dict[str, Any]) -> Dict[str, Any]:
     from services.ai import filter_empty_messages
 
     rehydrated = messages_from_dict(messages)
-    # Same filter the legacy create_agent_node runs (services/ai.py:775)
-    # — empty-content messages trigger 400s on Gemini/Anthropic.
+    # Same filter ``_run_agent_loop`` runs in services/ai.py — empty-content
+    # messages trigger 400s on Gemini / Anthropic.
     rehydrated = filter_empty_messages(rehydrated)
 
     activity.heartbeat("LLM step: invoking model")

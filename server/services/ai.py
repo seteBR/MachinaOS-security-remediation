@@ -743,11 +743,11 @@ async def _run_agent_loop(
     4. If no tool calls, return.
 
     On hitting ``max_iterations``, append a terminal ``AIMessage`` with
-    a truncation note so downstream extraction has a usable response —
-    same shape the old ``GraphRecursionError`` handler synthesised.
+    a truncation note so downstream extraction has a usable response.
 
     ``progress_callback(iteration)`` is awaited at the top of each turn
-    (replaces the per-snapshot broadcast inside ``astream``).
+    so callers can drive per-iteration broadcasts (e.g. the FE iteration
+    badge).
 
     Returns ``{messages, iteration, thinking_content, truncated}``.
     ``messages`` is the full accumulated list (system + history +
@@ -782,8 +782,7 @@ async def _run_agent_loop(
                 thinking_accumulated = new_thinking
 
         # Gemini occasionally returns a blocked / safety-stopped response;
-        # surface the same warning the legacy agent_node did so operators
-        # can spot the cause in the logs.
+        # surface the cause so operators can spot it in the logs.
         if hasattr(response, "response_metadata"):
             meta = response.response_metadata or {}
             if meta.get("finish_reason") == "SAFETY":
@@ -830,8 +829,7 @@ async def _run_agent_loop(
 
     # Loop exited without returning -- hit max_iterations. Append a
     # terminal AIMessage so downstream extraction (and post-loop token
-    # tracking / memory persistence) still have a usable state, matching
-    # the legacy ``GraphRecursionError`` handler.
+    # tracking / memory persistence) still have a usable state.
     messages.append(AIMessage(content=(
         f"[Recursion limit reached: {max_iterations} iterations. "
         f"Adjust agent.recursion_limit in llm_defaults.json or "

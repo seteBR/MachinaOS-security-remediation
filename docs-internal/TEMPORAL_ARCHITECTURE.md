@@ -304,7 +304,8 @@ AgentWorkflow.run(context):
            emit_phase("tool_completed", tool_name=...)
            _serialise_tool_result unwraps F4.A's {success, result, ...}
            envelope so the LLM sees only the handler's return value
-           (matches services/ai.py:create_tool_node behavior).
+           (matches the in-process tool-call serialisation in
+           services/ai.py:_run_agent_loop).
     4. execute_activity("agent.persist_turn.v1")
          append_to_memory_markdown(content, "human", prompt) +
          (content, "ai", response); trim window; broadcast

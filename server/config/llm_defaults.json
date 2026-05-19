@@ -4,7 +4,7 @@
   "_description": "LLM provider defaults. Connection config (base_url, models_endpoint) drives both native SDK and LangChain paths. Model specs auto-enriched by model_registry.json (OpenRouter cache).",
 
   "agent": {
-    "_description": "Agent execution defaults shared across the LangGraph + compaction layers. recursion_limit is intentionally generous so the token-based compaction.ratio is the load-bearing termination signal, not the step cap.",
+    "_description": "Agent execution defaults shared across the agent loop + compaction layers. recursion_limit is intentionally generous so the token-based compaction.ratio is the load-bearing termination signal, not the step cap.",
     "recursion_limit": 500,
     "default_temperature": 0.7,
     "compaction": {

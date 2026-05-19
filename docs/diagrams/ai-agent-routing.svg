@@ -93,28 +93,28 @@
   <rect class="method" x="920" y="215" width="360" height="75" rx="8"/>
   <text x="1100" y="243" class="big" text-anchor="middle">execute_agent(parameters)</text>
   <text x="1100" y="263" class="sub" text-anchor="middle">execute_chat_agent(parameters)</text>
-  <text x="1100" y="283" class="caption" text-anchor="middle">aiAgent, chatAgent, 13 specialized agents</text>
+  <text x="1100" y="283" class="caption" text-anchor="middle">aiAgent, chatAgent, 11 specialized + 2 team leads</text>
 
   <!-- Arrow -->
   <path class="conn-lc" d="M 1100 290 L 1100 330" marker-end="url(#arrow)"/>
 
-  <!-- LangChain + LangGraph box -->
+  <!-- LangChain chat model box -->
   <rect class="langchain" x="920" y="330" width="360" height="130" rx="8"/>
-  <text x="1100" y="358" class="title" text-anchor="middle" fill="#bd93f9">LangChain + LangGraph</text>
+  <text x="1100" y="358" class="title" text-anchor="middle" fill="#bd93f9">LangChain chat model</text>
   <text x="1100" y="382" class="sub" text-anchor="middle">create_model() -&gt; LangChain class</text>
   <text x="1100" y="402" class="path-lc" text-anchor="middle">ChatOpenAI / ChatAnthropic</text>
   <text x="1100" y="420" class="path-lc" text-anchor="middle">ChatGoogleGenerativeAI / ChatGroq / ...</text>
   <text x="1100" y="442" class="sub" text-anchor="middle">.bind_tools([StructuredTool, ...])</text>
 
-  <!-- Arrow to state graph -->
+  <!-- Arrow to agent loop -->
   <path class="conn-lc" d="M 1100 460 L 1100 500" marker-end="url(#arrow)"/>
 
-  <!-- LangGraph StateGraph box -->
+  <!-- _run_agent_loop box -->
   <rect class="langchain" x="900" y="500" width="400" height="155" rx="8"/>
-  <text x="1100" y="528" class="title" text-anchor="middle" fill="#bd93f9">LangGraph StateGraph</text>
-  <text x="1100" y="552" class="sub" text-anchor="middle">START -&gt; agent (LLM) -&gt; should_continue?</text>
-  <text x="1100" y="572" class="sub" text-anchor="middle">if tools needed: tools node -&gt; loop back</text>
-  <text x="1100" y="592" class="sub" text-anchor="middle">else: END</text>
+  <text x="1100" y="528" class="title" text-anchor="middle" fill="#bd93f9">_run_agent_loop (plain async)</text>
+  <text x="1100" y="552" class="sub" text-anchor="middle">for iteration in range(max): ainvoke -&gt; tool_calls?</text>
+  <text x="1100" y="572" class="sub" text-anchor="middle">if tools: dispatch each, append ToolMessage, loop</text>
+  <text x="1100" y="592" class="sub" text-anchor="middle">else: return final response</text>
   <text x="1100" y="615" class="caption" text-anchor="middle">Max iterations guard against tool loops</text>
   <text x="1100" y="635" class="caption" text-anchor="middle">Agent Teams: delegate_to_&lt;type&gt; tools auto-injected</text>
 

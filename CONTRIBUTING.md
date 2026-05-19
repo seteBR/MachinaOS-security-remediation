@@ -36,7 +36,7 @@ Deep dives: [DESIGN.md](docs-internal/DESIGN.md) - [TEMPORAL_ARCHITECTURE.md](do
 
 [![AI Agent Routing](docs/diagrams/ai-agent-routing.svg)](https://raw.githubusercontent.com/zeenie-ai/MachinaOS/main/docs/diagrams/ai-agent-routing.svg)
 
-AI execution splits into two paths. `execute_chat()` for direct chat completions prefers the native SDK layer in [services/llm/](server/services/llm/) (10 providers, lazy imports, normalized `LLMResponse`), falling back to LangChain for Groq and Cerebras. `execute_agent()` and `execute_chat_agent()` always use LangChain + LangGraph because tool-calling, state graphs, and the checkpointer have no native equivalent today. Team leads (`orchestrator_agent`, `ai_employee`) auto-inject `delegate_to_<type>` tools for every agent connected to their `input-teammates` handle. The Deep Agent variant uses [LangChain DeepAgents](https://github.com/langchain-ai/deepagents) with built-in filesystem tools, sub-agent delegation, and todo planning; the RLM Agent uses a REPL-based recursive language model pattern. Long-running activities (DeepAgent, browser automation) stay alive across Temporal's 2-minute heartbeat window via per-message `activity.heartbeat()` calls in the WebSocket read loop.
+AI execution splits into two paths. `execute_chat()` for direct chat completions prefers the native SDK layer in [services/llm/](server/services/llm/) (10 providers, lazy imports, normalized `LLMResponse`), falling back to LangChain for Groq and Cerebras. `execute_agent()` and `execute_chat_agent()` build a LangChain chat model (`ChatOpenAI` / `ChatAnthropic` / etc.) and drive it through `_run_agent_loop` — a plain async `for iteration in range(max):` that calls `chat_model.ainvoke`, dispatches any `tool_calls`, appends `ToolMessage` results, and loops. Team leads (`orchestrator_agent`, `ai_employee`) auto-inject `delegate_to_<type>` tools for every agent connected to their `input-teammates` handle. The RLM Agent uses a REPL-based recursive language model pattern. Long-running activities (browser automation, claude_code_agent) stay alive across Temporal's 2-minute heartbeat window via per-message `activity.heartbeat()` calls in the WebSocket read loop.
 
 Deep dives: [agent_architecture.md](docs-internal/agent_architecture.md) - [native_llm_sdk.md](docs-internal/native_llm_sdk.md) - [agent_teams.md](docs-internal/agent_teams.md) - [memory_compaction.md](docs-internal/memory_compaction.md)
 
@@ -121,7 +121,6 @@ Full setup and scripts reference: [SETUP.md](docs-internal/SETUP.md) - [SCRIPTS.
 | [DESIGN.md](docs-internal/DESIGN.md) | Execution engine architecture, design patterns, execution modes |
 | [TEMPORAL_ARCHITECTURE.md](docs-internal/TEMPORAL_ARCHITECTURE.md) | Distributed execution via Temporal activities |
 | [workflow-schema.md](docs-internal/workflow-schema.md) | Workflow JSON schema and full node catalog (106 nodes) |
-| [deep_agent.md](docs-internal/deep_agent.md) | LangChain DeepAgents integration with filesystem tools and sub-agents |
 | [ROADMAP.md](docs-internal/ROADMAP.md) | Implementation status and completed phases |
 | [SETUP.md](docs-internal/SETUP.md) | Development environment setup |
 | [SCRIPTS.md](docs-internal/SCRIPTS.md) | npm/shell scripts reference |

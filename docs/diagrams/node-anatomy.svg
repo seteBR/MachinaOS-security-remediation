@@ -113,7 +113,7 @@
   <rect class="ai-box" x="990" y="475" width="360" height="85" rx="8"/>
   <text x="1010" y="500" class="title">D. AI layer (for AI nodes)</text>
   <text x="1010" y="520" class="path-be">server/services/ai.py + llm/</text>
-  <text x="1010" y="540" class="sub">Native SDK path or LangChain + LangGraph</text>
+  <text x="1010" y="540" class="sub">Native SDK path or LangChain agent loop</text>
   <text x="1010" y="554" class="sub">with tool calling</text>
 
   <!-- Arrows inside backend column (vertical flow) -->

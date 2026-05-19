@@ -133,7 +133,6 @@ Pick the right agent for the job:
 | Travel Agent       | Maps, location lookup, planning                                          |
 | Payments Agent     | Stripe + financial workflows                                             |
 | Consumer Agent     | Customer support, order management                                       |
-| Deep Agent         | LangChain DeepAgents with filesystem tools + sub-agent delegation        |
 | Claude Code Agent  | Anthropic's Claude Code CLI for advanced coding sessions                 |
 | Codex Agent        | OpenAI Codex CLI integration                                             |
 | RLM Agent          | Recursive Language Model — write code that calls itself recursively      |

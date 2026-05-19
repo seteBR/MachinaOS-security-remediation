@@ -66,7 +66,7 @@ const LONG_RUNNING_NODE_TYPES = [
   'aiAgent', 'chatAgent', 'rlm_agent',
   'android_agent', 'coding_agent', 'web_agent', 'task_agent', 'social_agent',
   'travel_agent', 'tool_agent', 'productivity_agent', 'payments_agent', 'consumer_agent',
-  'autonomous_agent', 'orchestrator_agent', 'ai_employee', 'deep_agent',
+  'autonomous_agent', 'orchestrator_agent', 'ai_employee',
 ];
 
 // Status types

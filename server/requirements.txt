@@ -48,7 +48,9 @@ langchain-google-genai>=3.1.0
 langchain-groq>=0.1.0
 langchain-cerebras>=0.1.0
 
-# DeepAgents - Batteries-included agent harness (LangChain)
+# DeepAgents - LocalShellBackend + validate_path + ExecuteResponse for the
+# filesystem/shell plugins (nodes/filesystem/_backend.py). Not used as the
+# agent harness itself (the deep_agent plugin was removed in 5335188).
 deepagents>=0.4.12
 
 # Temporal - Durable workflow execution (optional, requires TEMPORAL_ENABLED=true)
