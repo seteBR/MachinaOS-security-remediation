@@ -41,13 +41,17 @@ jobs:
         run: pnpm --filter react-flow-client run test
 
       - name: Backend tests (server pytest)
-        # 922 tests covering plugin contracts, credential broadcasts, native
+        # 1376 tests covering plugin contracts, credential broadcasts, native
         # LLM SDK wiring, parameter resolution, workflow ops, MCP tokens.
-        # `--extra dev` adds pytest, pytest-asyncio, pytest-mock, respx on
-        # top of the venv that `pnpm run build` already created via `uv sync`.
+        # ``uv sync`` (no flag) includes the PEP 735 ``[dependency-groups].dev``
+        # bundle by default — pytest, pytest-asyncio, pytest-mock, respx,
+        # ruff. The previous ``--extra dev`` invocation read PEP 621
+        # ``[project.optional-dependencies].dev``, which no longer exists
+        # (moved to PEP 735 groups so ``pnpm install`` keeps dev tools
+        # installed instead of stripping them on every dependency bump).
         working-directory: server
         run: |
-          uv sync --extra dev
+          uv sync
           uv run pytest tests/ -v
 
       - name: Supervisor CLI tests (pytest)
