@@ -31,7 +31,7 @@ Open http://localhost:3000 and click **Credentials** to connect your first AI pr
 npm install -g pnpm
 git clone https://github.com/zeenie-ai/MachinaOS.git
 cd MachinaOS
-pnpm install
+pnpm run build
 pnpm run dev
 ```
 
