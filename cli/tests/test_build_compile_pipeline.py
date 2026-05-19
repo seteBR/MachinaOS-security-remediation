@@ -63,11 +63,13 @@ def _run_build_capture_invocations(tmp_path: Path) -> list[dict]:
             return "Python 3.12.5"
         return "v1.0.0"
 
+    # ``_ensure_temporal`` was removed -- the supervised
+    # ``TemporalServerRuntime`` downloads the binary via pooch at first
+    # boot, so the build command no longer touches Temporal at all.
     with patch.object(build, "run", side_effect=fake_run), \
          patch.object(build, "capture", side_effect=fake_capture), \
          patch.object(build, "_which_python", return_value="python"), \
          patch.object(build, "_ensure_uv"), \
-         patch.object(build, "_ensure_temporal"), \
          patch.object(build, "project_root", return_value=tmp_path):
         build.build_command()
 

@@ -169,6 +169,7 @@ server/core/
 ├── cache.py                 # CacheService with Redis/SQLite/Memory fallback
 ├── config.py                # Application configuration
 ├── logging.py               # Logging configuration
+├── paths.py                 # SSOT for on-disk locations: machina_root()/workspaces_dir()/whatsapp_dir() under ~/.machina/; packages_dir()/package_dir(name) via platformdirs (OS cache) for downloaded binaries; example_workflows_dir() = <repo>/.machina/workflows/ (shipped seeds, NOT under DATA_DIR)
 ├── encryption.py            # Fernet encryption with PBKDF2 key derivation
 ├── credentials_database.py  # Async SQLite for encrypted API keys and OAuth tokens
 └── credential_backends.py   # Multi-backend abstraction (Fernet, Keyring, AWS)
@@ -1399,9 +1400,9 @@ Interactive browser automation via the [agent-browser](https://www.npmjs.com/pac
 | `server/services/handlers/browser.py` | Handler dispatcher mapping operation+params to agent-browser CLI args |
 | `server/skills/web_agent/browser-skill/SKILL.md` | AI agent skill documenting snapshot-act-snapshot loop |
 
-**Installation Requirement:** `agent-browser` is a pinned project dependency in [package.json](../package.json). `pnpm install` places it under `node_modules/.pnpm/`, and `scripts/install.js` runs `npx agent-browser install` during postinstall to download the Chromium runtime. The handler returns an installation-instruction error if the binary cannot be located.
+**Installation Requirement:** `agent-browser` is MachinaOs-managed (NOT a `package.json` dep). On first browser-node invocation, [`server/nodes/browser/_install.py::agent_browser_binary_path`](../server/nodes/browser/_install.py) runs `npm install agent-browser@latest --prefix <package_dir("browser")/npm>` then `<bin> install` for the Chromium runtime. Same shape as [`claude_binary_path`](../server/nodes/agent/claude_code_agent/_oauth.py) (the precedent). Cache root: [`core.paths.packages_dir()`](../server/core/paths.py) → `~/.cache/MachinaOs/browser/` on Linux, `~/Library/Caches/MachinaOs/browser/` on macOS, `%LOCALAPPDATA%\MachinaOs\Cache\browser\` on Windows (XDG-conventional via `platformdirs.user_cache_path`).
 
-**Implementation Detail:** `browser_service.py` invokes the binary via `[shutil.which("npx"), "--no-install", "agent-browser", ...args]` -- the same pattern used by [claude_code_service.py](../server/services/claude_code_service.py). This avoids custom cross-platform shim detection: `npx --no-install` handles local `node_modules/.bin/` resolution, Windows/POSIX shim differences, and shebang interpretation internally. The service reads only the first JSON output line from agent-browser (the daemon holds stdout open), truncates at 100KB, and kills the process tree via `psutil`. All subprocess calls use `shell=False` with list argv to avoid BatBadBut (CVE-2024-1874) on Windows.
+**Implementation Detail:** `browser_service.py` invokes the resolved binary directly via `subprocess.Popen([binary, ...args], shell=False)`. Reads only the first JSON output line from agent-browser (the daemon holds stdout open), truncates at 100KB, and kills the process tree via `psutil`. `shell=False` with list argv avoids BatBadBut (CVE-2024-1874) on Windows; `npm` itself is located via `shutil.which("npm")` which honours `PATHEXT` for the `.cmd` shim.
 
 ---
 
@@ -3199,17 +3200,17 @@ aws = ["boto3>=1.34.0"]        # AWS Secrets Manager
 ## Example Workflows
 
 ### Overview
-Example workflows are pre-built workflow templates that auto-load on first use. They provide users with starting points to explore the platform's capabilities. Examples are stored as JSON files in the `workflows/` folder at the project root.
+Example workflows are pre-built workflow templates that auto-load on first use. They provide users with starting points to explore the platform's capabilities. Seeds live as JSON files at **`<repo>/.machina/workflows/`** — the only git-tracked content under `<repo>/.machina/` (everything else there is `.gitignore`d as runtime state). The path is also preserved by `machina clean` (see `_MACHINA_KEEP` in `cli/commands/clean.py`).
 
 ### Architecture
 ```
-workflows/                        # Example workflow JSON files (project root)
-├── hello_world.json
-├── zeenie_chat.json
-└── ...
+<repo>/.machina/workflows/        # Shipped seed JSONs (git-tracked)
+├── AI Assistant_example_workflow-*.json
+├── AI Employee_example_workflow-*.json
+└── Claude Assistant_example_workflow-*.json
 
 server/services/
-└── example_loader.py             # Loads and imports examples
+└── example_loader.py             # Loads and imports examples via core.paths.example_workflows_dir()
 
 server/models/database.py         # UserSettings.examples_loaded flag
 server/core/database.py           # Migration for examples_loaded column
@@ -3218,7 +3219,7 @@ server/routers/database.py        # Auto-load logic in get_all_workflows
 
 ### How It Works
 1. **First Fetch Detection**: When `get_all_workflows` API is called, it checks `UserSettings.examples_loaded`
-2. **Auto-Import**: If `examples_loaded=false`, imports all JSON files from `workflows/` folder
+2. **Auto-Import**: If `examples_loaded=false`, calls `example_loader.get_example_workflows()` which reads from `core.paths.example_workflows_dir()` = `<repo>/.machina/workflows/`
 3. **Mark Complete**: Sets `examples_loaded=true` to prevent re-import on subsequent fetches
 4. **Anonymous Support**: Uses `user_id="default"` when `VITE_AUTH_ENABLED=false`
 
@@ -3259,7 +3260,8 @@ Example workflows use the same format as UI exports:
 ### Key Files
 | File | Description |
 |------|-------------|
-| `workflows/*.json` | Example workflow JSON files |
+| `.machina/workflows/*.json` | Shipped seed workflow JSONs (git-tracked) |
+| `server/core/paths.py` | `example_workflows_dir()` → `<repo>/.machina/workflows/` (fixed path, NOT under `DATA_DIR`) |
 | `server/services/example_loader.py` | `get_example_workflows()`, `import_examples_for_user()` |
 | `server/models/database.py` | `UserSettings.examples_loaded` field |
 | `server/core/database.py` | Migration adds `examples_loaded` column |
@@ -3268,10 +3270,12 @@ Example workflows use the same format as UI exports:
 ### Example Loader Service
 ```python
 # server/services/example_loader.py
-EXAMPLES_DIR = Path(__file__).parent.parent.parent / "workflows"
+from core.paths import example_workflows_dir
 
 def get_example_workflows() -> List[Dict[str, Any]]:
     """Load all example workflow JSON files from disk."""
+    examples_dir = example_workflows_dir()
+    ...
 
 async def import_examples_for_user(database) -> int:
     """Import all examples using existing database.save_workflow().
@@ -3295,9 +3299,9 @@ if not settings or not settings.get("examples_loaded", False):
 
 ### Adding Custom Examples
 1. Export a workflow from the UI (File > Export)
-2. Copy the JSON file to `workflows/` folder at project root
+2. Copy the JSON file to `<repo>/.machina/workflows/` (git-tracked seed location)
 3. Edit the `id` and `name` fields as needed
-4. Delete `server/machina.db` (or set `examples_loaded=false` in database)
+4. Delete `~/.machina/workflow.db` (or set `examples_loaded=false` in DB)
 5. Restart server - examples auto-load on first workflow list fetch
 
 ### Database Migration
@@ -5201,7 +5205,7 @@ This function:
 - **Node Data Architecture**: `node.data` only stores `label` (display name). All parameters are stored in the database via `save_node_parameters` WebSocket handler. This prevents parameter bloat in workflow JSON exports and keeps React Flow state lightweight. `useDragAndDrop.ts` saves default parameters to DB on drop, not to `node.data`.
 - **Workflow Export/Import with Parameters**: Exported workflow JSON includes a `nodeParameters` field containing all node configuration (provider, model, prompt, skillsConfig, etc.) fetched from the database at export time. On import, embedded `nodeParameters` are saved back to the database. `sanitizeNodes()` in `workflowExport.ts` still strips `node.data` to UI-only fields (`label`, `disabled`, `condition`). A `parameterSanitizer.ts` utility exists for credential stripping but is currently disabled (pass-through). Old exports without `nodeParameters` import cleanly (backward compatible). Key files: `client/src/utils/workflowExport.ts`, `client/src/utils/parameterSanitizer.ts`, `client/src/Dashboard.tsx` (export/import handlers), `server/services/example_loader.py`.
 - **Skill System Architecture**: Skills organized in `server/skills/<folder>/` subfolders. Each folder appears in Master Skill dropdown. DB is source of truth for skill instructions (seeded from SKILL.md on first load). Icon resolution mirrors `BaseNode._metadata_dict`: per-plugin `<plugin>/icon.svg` (served as `/api/schemas/nodes/<type>/icon`) → `visuals.json` (emoji / `lobehub:<brand>`); color: per-plugin `<plugin>/meta.json` → `visuals.json`. Lives in [`skill_loader.py::_parse_skill_metadata`](./server/services/skill_loader.py). Native DOM keydown handler prevents React Flow from intercepting Ctrl shortcuts in skill editor. **Mutation broadcasts use the CloudEvents-typed `skill_lifecycle` wire key** with stages `created` / `updated` / `deleted` / `content_saved` — see "Plugin-folder location for plugin-specific CloudEvents factories" below.
-- **Example Workflows**: Auto-load example workflows from `workflows/` folder on first use. Uses `UserSettings.examples_loaded` flag to track import status. Supports anonymous users (`user_id="default"`). Reuses existing `database.save_workflow()` for import. Embedded `nodeParameters` in example JSON files are saved to the database on import. See "Example Workflows" section for details.
+- **Example Workflows**: Auto-load example workflow seeds from `<repo>/.machina/workflows/` on first use (git-tracked; the only non-ignored content under `<repo>/.machina/`). Path resolved by `core.paths.example_workflows_dir()` — fixed, NOT under `DATA_DIR`, preserved by `machina clean` via `_MACHINA_KEEP`. Uses `UserSettings.examples_loaded` flag; supports anonymous users (`user_id="default"`); embedded `nodeParameters` saved to DB on import.
 - **Onboarding Service**: 5-step welcome wizard (Welcome, Concepts, API Keys, Canvas Tour, Get Started) using Ant Design Steps/Card/Button/Typography. Database-backed via `UserSettings.onboarding_completed` + `onboarding_step`. Existing users auto-skip (migration marks `examples_loaded=1` as completed). Replayable from Settings "Help" section. No new WebSocket handlers needed. See [Onboarding Service](./docs-internal/onboarding.md) for details.
 - **Node.js Code Executor**: Persistent Node.js server (Express + tsx) at port 3020 for JavaScript/TypeScript execution, replacing subprocess spawning per execution. Handlers in `server/services/handlers/code.py` call `NodeJSClient` which makes HTTP requests to the Node.js server. All config via environment variables (`NODEJS_EXECUTOR_URL`, `NODEJS_EXECUTOR_PORT`, etc.).
 - **writeTodos Tool Node**: Dedicated AI tool for task planning connecting to any agent's `input-tools` handle. `TodoService` singleton (`server/services/todo_service.py`) stores JSON-based per-session todo state keyed by workflow_id. Handler broadcasts `phase: "todo_update"` via WebSocket on each update for real-time UI; `formatTodoOutput()` in `OutputDisplayPanel.tsx` renders the result as a checklist with `[ ]` / `[~]` / `[x]` icons. Schema uses `TodoItem`/`TodoStatus` Pydantic enum. Skill at `server/skills/assistant/write-todos-skill/SKILL.md` teaches the plan-work-update loop.
@@ -5233,5 +5237,10 @@ This function:
 - **Telegram owner detection — three layers** (f746ddf): the bot owner is captured by THREE independent paths so the realistic setup flows all converge to a working state. (1) **Explicit field**: secondary `FieldDef` in the credentials modal lets the user paste their Telegram user ID directly (recommended; works without DM'ing the bot). (2) **Pre-poll peek** in `connect()` via `_capture_owner_from_pending_updates()` — calls `bot.get_updates(timeout=0)` BEFORE `start_polling(drop_pending_updates=True)` discards the queue, scans for any historical private DM, captures + persists atomically. (3) **Atomic write-through in `_on_message_received`** — persists FIRST, sets in-memory ONLY on success. Invariant: "in-memory has owner ⇒ DB has owner" so a process restart can re-capture cleanly. Failure logged at `ERROR` with `exc_info=True` (was `WARNING` previously, masking persist failures). The lazy fallback in `telegram_send.py` (read DB → `service.set_owner`) sits on top of all three.
 - **Supervisor Job Object loud-failure (machina/tree.py + supervisor.py)** (8a64eb9): the Windows process-tree mechanism depends entirely on a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (no fallback — `start_new_session` is POSIX-only). `pywin32>=308` is a hard supervisor dependency on Windows; the declaration in `machina/pyproject.toml` carries an inline comment so future maintainers don't drop it. `_JobObject.__init__` splits failures into explicit `ImportError` (with reinstall command) and `Exception` (with `repr`) branches — both write to `stderr` instead of swallowing. `_JobObject.add()` verifies enrollment via `win32job.IsProcessInJob(handle, self._handle)` after assignment; on mismatch it queries `IsProcessInJob(handle, None)` so the warning explicitly names the wrapper-job hypothesis (npm / pnpm / conhost wrappers occasionally place us in their own non-nesting Job). `supervisor._spawn_once` checks `add_to_job` return value and emits a yellow `WARN: pid=N not enrolled in Job Object` per child if False. Without these guards, a stale pywin32 install or a wrapping Job Object silently leaks orphan Python processes on every Ctrl-C and they accumulate to the point of holding SQLite locks that block subsequent backend startup.
 - **Credentials envelope-shape invariant** (dc94cde): the `useCredentialPanel` query stores `{values: CredentialFormValues, hadStored: boolean}` (an envelope, NOT a flat dict). The earlier `writeValues` called `setQueryData<CredentialFormValues>` with a spread `(prev) => ({...prev, [key]: value})`, which at runtime merged the typed character at the envelope level next to `values` and `hadStored` instead of inside `.values` — the input selector `panel.values[field.key]` re-rendered with the original (server) value on every keystroke and the input felt frozen. Fix: `writeValues` now preserves the envelope shape and updates only the inner `values` dict; `hadStored` is preserved verbatim (it reflects real server state, not local edits). When introducing other queries shaped as `{data, meta}` envelopes, follow the same pattern — never spread `prev` as if it were the inner payload.
+- **`core.paths` is the SSOT for on-disk locations**: state vs. install split — `machina_root()` (= `~/.machina/`) holds *state* (workspaces, whatsapp session DB, `credentials.db`, `workflow.db`, claude OAuth at `~/.machina/claude/`); `packages_dir()` (= `platformdirs.user_cache_path("MachinaOs")` → `~/.cache/MachinaOs/` on Linux, `~/Library/Caches/MachinaOs/` on macOS, `%LOCALAPPDATA%\MachinaOs\Cache\` on Windows) holds *downloaded binaries* via `package_dir(name)` per service (`stripe`, `claude`, `browser`). Wiping `packages_dir` forces a fresh redownload without dropping auth state. Out of scope: globally-installed binaries (`temporal`, Himalaya) and npm `package.json` deps (`edgymeow`). Shipped seed workflows are the lone exception — `example_workflows_dir()` is hardcoded to `<repo>/.machina/workflows/` (git-tracked seeds, NOT under `DATA_DIR`) so they survive `machina clean` and stay at the same path across `DATA_DIR=~/.machina` vs `DATA_DIR=.machina` configs.
+- **`machina clean` preserves `.machina/workflows/`**: `cli/commands/clean.py` iterates `<repo>/.machina/` children and skips anything in `_MACHINA_KEEP = frozenset({"workflows"})`. Wipes `claude/`, `workspaces/`, `*.db` as before; preserves the shipped seed JSONs so a fresh clone + clean doesn't lose user-importable examples. Test `cli/tests/test_clean.py::test_machina_keep_preserves_workflows` locks the keep-list.
+- **No raw `print()` outside three sanctioned helpers**: `main._startup_log` (pre-logger boot markers), `core.container._clog` (DI-bootstrap markers), and `nodes.code.python_executor.captured_print` (the sandbox builtin handed to user code). Everything else goes through `logger = get_logger(__name__)`. The supervisor prefixes every aggregated line with `[HH:MM:SS.fff]` so no inner `TimeStamper` is needed; structlog console mode is deliberately timestamp-less. Test `server/tests/test_no_raw_prints.py` AST-walks the tree and flags any unsanctioned `print(...)` call.
+- **`configure_logging(settings)` must run BEFORE plugin self-registration imports**: in `main.py`, `Settings()` + `configure_logging(settings)` + `init_tracing()` + `get_logger(__name__)` happen ahead of `from core.container import container` and `from routers import …`. Otherwise plugin folders that register on import call `logger.debug(...)` while structlog is still on its default processor chain (which includes `TimeStamper` + no `filter_by_level`) — symptom is double timestamps + debug records leaking despite `LOG_LEVEL=INFO`.
+- **Plugin-identifier shape validator (`services/plugin/identifiers.py`)** (`7700f87`): `NODE_TYPE_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"` + `is_valid_node_type(value)`. Single source of truth used by FastAPI URL routes (`Path(pattern=NODE_TYPE_PATTERN)` in `routers/schemas.py`) AND internal helpers (`nodes/_visuals.py::get_plugin_meta` / `get_plugin_icon_path`). Closes CodeQL `py/path-injection` alerts on the icon-resolution endpoints: the registry lookup `get_node_class(node_type)` already gates the taint in practice, but CodeQL can't follow registry-mediated sanitization — adding `fullmatch` at the function boundary is the canonical pattern its rule docs prescribe. Contract test (`tests/services/test_identifiers.py`, 47 cases) locks the regex against `../etc/passwd`, `..\windows\system32`, `foo\x00bar`, `%2e%2e%2fetc`, `foo;bar`, `${HOME}`, `` foo`bar ``, CRLF, and non-string input.
 - **Wave 13 canary fixes** — six load-bearing corrections to the Wave 12 event framework. See [docs-internal/event_framework.md → Wave 13 fixes](./docs-internal/event_framework.md#wave-13-fixes) for the full breakdown. Key invariants to remember when working on canary triggers: (1) `register_canary_trigger_type(node_type, cloudevent_type)` requires the CloudEvents reverse-DNS string as second arg — must match the producer's `WorkflowEvent.type` exactly or the deployment manager's `EventType` SA won't match `dispatch.emit`'s Visibility query (silent firing failure). Diverging re-registration raises `ValueError` so plugin upgrades surface loudly. (2) Plugin `_events.py` for canary-registered triggers is canary-only — no `event_waiter.dispatch` / `send_custom_event` calls (those have zero consumers in canary-on mode). `dispatch.emit(envelope, wire_routing_key=...)` handles BOTH Temporal Signal fan-out AND in-process WS broadcast. (3) `TriggerListenerWorkflow` + `PollingTriggerWorkflow` call `broadcast_trigger_status_activity` before/after each child spawn for firing-pulse UX (matches legacy `triggers.py` collector/processor). (4) `PollingTriggerNode.as_poll_activity` returns `seen_ids: list(current)` — NOT `list(prior_seen | current)` (the latter grows unboundedly; Gmail at ~100/day hit ~36K entries in a year). The legacy `_build_poll_coroutine` does `seen = set(current)` at end of cycle for the same reason. Visibility-filtered providers (Gmail-unread) re-emit on re-surface, which is correct. (5) Canary trigger output persistence: `MachinaWorkflow.run`'s pre-executed loop schedules `store_node_output_activity` for every firing trigger so `ParameterResolver` can resolve `{{triggerNode.field}}` in downstream nodes (the legacy `_execute_from_trigger` did this via `_store_output(trigger_node_id, "output_0", ...)`; canary skipped it pre-fix). Skips non-firing siblings (`_trigger_output={"not_triggered": True}`). (6) `DeploymentManager.cancel` sweeps stuck node statuses via `_clear_stuck_node_statuses(workflow_id, include_waiting=True)` + emits terminal `update_workflow_status(executing=False, workflow_id=...)`. Without these the FE leaves downstream nodes glowing forever after deployment cancel and the toolbar Start/Stop indicator stays at `executing=True`. The delegation guard inside `_clear_stuck_node_statuses` still protects in-flight fire-and-forget child agents.
 - never use emojis in prints

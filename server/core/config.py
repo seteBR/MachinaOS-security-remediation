@@ -144,6 +144,26 @@ class Settings(BaseSettings):
     temporal_postgres_dsn: Optional[str] = Field(
         default=None, env="TEMPORAL_POSTGRES_DSN",
     )
+    # On-disk locations for Temporal persistence. Both resolve relative
+    # to ``DATA_DIR`` (cross-platform via ``Settings._resolve_under_data``);
+    # absolute paths are used verbatim. ``temporal_sqlite_path`` is the
+    # SQLite database file the dev server opens via ``temporal server
+    # start-dev --db-filename ...``. ``temporal_postgres_subdir`` is the
+    # pgserver data directory (where PostgreSQL writes its own files
+    # before Temporal touches them). ``temporal_server_subdir`` is the
+    # cwd for the postgres-backed ``temporal-server`` process (config
+    # YAML lands there). All three are env-driven so test harnesses and
+    # alternative installs can point them wherever needed without code
+    # changes.
+    temporal_sqlite_path: str = Field(
+        default="temporal/temporal.db", env="TEMPORAL_SQLITE_PATH",
+    )
+    temporal_postgres_subdir: str = Field(
+        default="postgres", env="TEMPORAL_POSTGRES_SUBDIR",
+    )
+    temporal_server_subdir: str = Field(
+        default="_temporal", env="TEMPORAL_SERVER_SUBDIR",
+    )
 
     # API Keys (all optional, injected at runtime)
     google_maps_api_key: Optional[str] = Field(default=None, env="GOOGLE_MAPS_API_KEY")

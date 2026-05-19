@@ -71,10 +71,17 @@ _CHECKSUMS_BY_VERSION: dict[str, dict[str, str]] = {
 }
 
 # Names of the binaries we extract from each release tarball. The
-# Temporal release ships several; these are the two MachinaOS actually
-# invokes (server + schema migrator). Adding ``tctl`` here would also
-# extract it.
-_BINARY_NAMES: tuple[str, ...] = ("temporal-server", "temporal-sql-tool")
+# Temporal release ships several; we extract the three MachinaOS
+# actually invokes:
+#   - ``temporal`` — standalone CLI. Powers the sqlite-backend dev
+#                    server (``temporal server start-dev``) and any
+#                    ad-hoc workflow / operator commands.
+#   - ``temporal-server`` — full cluster binary used by the postgres
+#                           backend with a YAML config.
+#   - ``temporal-sql-tool`` — schema migrator invoked once at boot to
+#                             create + update the Postgres databases.
+# Adding ``tctl`` here would also extract it.
+_BINARY_NAMES: tuple[str, ...] = ("temporal", "temporal-server", "temporal-sql-tool")
 
 # pooch cache namespace. Re-used across versions; pooch's own cache
 # layout includes the asset URL so versions don't collide.

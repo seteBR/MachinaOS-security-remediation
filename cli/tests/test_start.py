@@ -7,11 +7,15 @@ from unittest.mock import patch
 
 from cli import buildenv
 from cli.commands import start
-from cli.config import Config
+from cli.config import Config, load_config
 
 
 def _cfg() -> Config:
-    return Config()
+    # Use the real env-file loader so test config mirrors production
+    # behaviour (``.env.template`` -> ``.env`` -> ``os.environ``).
+    # No hardcoded values: ``.env.template`` is the single source of
+    # truth, same as ``cli.commands.start`` at runtime.
+    return load_config()
 
 
 def test_venv_python_returns_none_when_missing(tmp_path: Path):
@@ -32,9 +36,13 @@ def test_venv_python_finds_posix_layout(tmp_path: Path):
     assert buildenv.venv_python(tmp_path) == posix_py
 
 
-def test_temporal_running_false_when_cli_missing():
-    with patch.object(start.subprocess, "run", side_effect=FileNotFoundError):
-        assert start._temporal_running() is False
+def test_temporal_running_false_when_port_closed():
+    # TCP-probe based check: returns False when nothing is listening on
+    # the configured gRPC port. Mock the probe directly instead of the
+    # legacy subprocess-spawn implementation.
+    cfg = _cfg()
+    with patch("cli.tcp.probe_tcp_port_sync", return_value=False):
+        assert start._temporal_running(cfg) is False
 
 
 def test_build_specs_skips_temporal_when_already_running(tmp_path: Path):
@@ -46,13 +54,16 @@ def test_build_specs_skips_temporal_when_already_running(tmp_path: Path):
 def test_build_specs_includes_temporal_when_not_running(tmp_path: Path):
     cfg = _cfg()
     specs = start._build_specs(tmp_path, cfg, temporal_running=False)
-    assert {s.name for s in specs} == {"client", "server", "temporal"}
+    names = {s.name for s in specs}
+    # Backend-agnostic: sqlite yields {"client", "server", "temporal"};
+    # postgres yields {"client", "server", "postgres", "temporal"}.
+    assert {"client", "server", "temporal"} <= names
 
 
 def test_build_specs_assigns_ready_ports(tmp_path: Path):
     cfg = _cfg()
     specs = start._build_specs(tmp_path, cfg, temporal_running=False)
     by_name = {s.name: s for s in specs}
-    assert by_name["client"].ready_port == 3000
-    assert by_name["server"].ready_port == 3010
-    assert by_name["temporal"].ready_port == 7233
+    assert by_name["client"].ready_port == cfg.client_port
+    assert by_name["server"].ready_port == cfg.backend_port
+    assert by_name["temporal"].ready_port == cfg.temporal_port

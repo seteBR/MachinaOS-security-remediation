@@ -25,7 +25,6 @@ from cli.config import load_config
 from cli.platform_ import IS_WINDOWS, IS_WSL, platform_name, project_root
 from cli.buildenv import validate_build, venv_python
 from cli.ports import kill_port
-from cli.run import which_argv
 from cli.supervisor import Manager, ServiceSpec
 from cli.commands._temporal_specs import temporal_specs
 
@@ -69,18 +68,14 @@ def _sqlalchemy_preflight(root: Path) -> None:
         )
 
 
-def _temporal_running() -> bool:
-    """Check whether the temporal server is already up via the ``temporal`` CLI."""
-    try:
-        out = subprocess.run(
-            which_argv(["temporal", "status"]),
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return any(token in out.stdout for token in ("running", "UP", "up"))
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+def _temporal_running(cfg) -> bool:
+    """Check whether a Temporal frontend is already listening on the
+    configured gRPC port. TCP probe instead of spawning a CLI -- works
+    without the legacy ``temporal-server`` npm wrapper (we install our
+    own binary via pooch at first boot of the supervised
+    ``TemporalServerRuntime``)."""
+    from cli.tcp import probe_tcp_port_sync
+    return probe_tcp_port_sync(cfg.temporal_port)
 
 
 def _read_version(root: Path) -> str:
@@ -133,7 +128,7 @@ def start_command() -> None:
     validate_build(root, require_client_dist=True)
     _sqlalchemy_preflight(root)
 
-    temporal_running = _temporal_running()
+    temporal_running = _temporal_running(cfg)
     if temporal_running:
         console.print("[dim]Temporal already running, skipping[/]")
 

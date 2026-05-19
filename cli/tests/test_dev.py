@@ -5,11 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from cli.commands import dev
-from cli.config import Config
+from cli.config import Config, load_config
 
 
 def _cfg() -> Config:
-    return Config()
+    # Use the real env-file loader so test config mirrors production
+    # behaviour (``.env.template`` -> ``.env`` -> ``os.environ``).
+    # No hardcoded values: ``.env.template`` is the single source of
+    # truth, same as ``cli.commands.start``/``dev`` at runtime.
+    return load_config()
 
 
 def test_has_vite_false_when_missing(tmp_path: Path):

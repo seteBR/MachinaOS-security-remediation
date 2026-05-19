@@ -89,25 +89,6 @@ def _ensure_uv(python_cmd: str) -> str:
     return version
 
 
-def _ensure_temporal() -> None:
-    """Ensure the ``temporal`` CLI (from npm package ``temporal-server``) is on PATH."""
-    version = capture(["temporal", "--version"])
-    if version:
-        console.print(f"  temporal: {version}")
-        return
-    console.print("  temporal: not found, installing globally...")
-    rc = run(["npm", "install", "-g", "temporal-server"], check=False)
-    if rc != 0:
-        console.print(
-            "  [yellow]Warning: temporal install failed. "
-            "Distributed execution unavailable.[/]"
-        )
-        return
-    version = capture(["temporal", "--version"])
-    if version:
-        console.print(f"  temporal: {version}")
-
-
 # ---------------------------------------------------------------- build
 
 def build_command() -> None:
@@ -125,6 +106,10 @@ def build_command() -> None:
         return
 
     # ---- toolchain ---------------------------------------------------
+    # Temporal binaries are NOT a build-time dep: the supervised
+    # ``TemporalServerRuntime`` (server/services/temporal/_runtime.py)
+    # downloads ``temporal`` / ``temporal-server`` / ``temporal-sql-tool``
+    # via pooch on first boot. No system install / npm shim required.
     console.print("[bold]Checking dependencies...[/]\n")
     node_version = capture(["node", "--version"])
     console.print(f"  Node.js: {node_version or '[red]not found[/]'}")
@@ -144,7 +129,6 @@ def build_command() -> None:
         raise typer.Exit(code=1)
 
     _ensure_uv(python_cmd)
-    _ensure_temporal()
 
     console.print("\n[green]All dependencies ready.[/]\n")
 

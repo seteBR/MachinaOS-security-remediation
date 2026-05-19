@@ -72,7 +72,7 @@ class PostgresRuntime(BaseSupervisor):
     binary.
     """
 
-    name = "temporal-postgres"
+    name = "postgres"
 
     def __init__(self, settings: Optional[Settings] = None) -> None:
         super().__init__()
@@ -86,12 +86,18 @@ class PostgresRuntime(BaseSupervisor):
     def is_running(self) -> bool:
         return self._pg is not None
 
+    @property
+    def _data_dir(self) -> Path:
+        """Env-driven pgserver data dir (``TEMPORAL_POSTGRES_SUBDIR``),
+        resolved relative to ``DATA_DIR`` unless absolute."""
+        return Path(self.settings._resolve_under_data(self.settings.temporal_postgres_subdir))
+
     async def _do_start(self) -> None:
         # Lazy import: pgserver pulls a heavy native dep tree; only
         # load it when the Postgres backend is actually selected.
         import pgserver
 
-        data_dir = Path(self.settings.data_dir) / "postgres"
+        data_dir = self._data_dir
         data_dir.mkdir(parents=True, exist_ok=True)
 
         def _start_sync() -> Any:
@@ -127,7 +133,7 @@ class PostgresRuntime(BaseSupervisor):
         return {
             "uri": self.uri,
             "port": self.port,
-            "data_dir": str(Path(self.settings.data_dir) / "postgres"),
+            "data_dir": str(self._data_dir),
         }
 
     # ---- public read-only properties -------------------------------------
@@ -146,20 +152,39 @@ class PostgresRuntime(BaseSupervisor):
 
 
 class TemporalServerRuntime(BaseProcessSupervisor):
-    """Temporal server binary, supervised via BaseProcessSupervisor.
+    """Temporal server, supervised via BaseProcessSupervisor.
 
-    The binary lands on disk via :func:`services.temporal._install.ensure_temporal_binaries`
-    (pooch-cached); the YAML config is rendered by
-    :func:`services.temporal._config.render_temporal_config` pointing at
-    the running :class:`PostgresRuntime` instance.
+    Single runtime class for both backends. The only difference is
+    which binary + argv we spawn and whether we run the Postgres
+    schema-bootstrap step; everything else (signal / restart /
+    tree-kill / health probe) is shared. Backend selected by
+    ``settings.temporal_backend``:
 
-    BaseProcessSupervisor handles all signal, restart, and tree-kill
-    semantics — we only override the four required methods plus
-    ``_pre_spawn`` (download + bootstrap) and ``health_check``
-    (gRPC port probe).
+      - ``postgres`` — spawns ``temporal-server start --config <yaml>``
+        against a running :class:`PostgresRuntime` instance. YAML config
+        is rendered by
+        :func:`services.temporal._config.render_temporal_config`;
+        schemas are migrated via
+        :func:`services.temporal._config.bootstrap_temporal_schemas`.
+
+      - ``sqlite`` — spawns ``temporal server start-dev --db-filename
+        <path>`` against a SQLite file. Path comes from
+        ``settings.temporal_sqlite_path`` (env-driven).
+
+    Both binaries (``temporal``, ``temporal-server``,
+    ``temporal-sql-tool``) ship in the same pooch-cached tarball
+    extracted by
+    :func:`services.temporal._install.ensure_temporal_binaries`, so
+    swapping backends costs no extra download.
+
+    All on-disk locations come from env-driven settings (no hardcoded
+    subdirs in this module): ``settings.temporal_sqlite_path``,
+    ``settings.temporal_postgres_subdir``,
+    ``settings.temporal_server_subdir`` — all resolved relative to
+    ``settings.data_dir`` unless already absolute.
     """
 
-    name = "temporal-server"
+    name = "temporal"
     pipe_streams = True
     graceful_shutdown = sys.platform == "win32"
 
@@ -174,63 +199,119 @@ class TemporalServerRuntime(BaseProcessSupervisor):
         self.settings = settings
         # SIGTERM grace = settings.temporal_graceful_shutdown_seconds —
         # same knob already documented for the embedded Temporal worker.
-        # Reusing it avoids inventing a parallel ``temporal_server_grace_seconds``.
         self.terminate_grace_seconds = float(
             settings.temporal_graceful_shutdown_seconds,
         )
-        self._postgres = postgres or PostgresRuntime.get_instance(settings)
+        # Postgres runtime is only consulted when ``backend == "postgres"``;
+        # lazy-bound there so the sqlite path doesn't spin up an unused
+        # PostgresRuntime singleton or pull pgserver imports.
+        self._postgres = postgres
         self._binaries: Optional[dict[str, Path]] = None
         self._config_path: Optional[Path] = None
+
+    @property
+    def backend(self) -> str:
+        return self.settings.temporal_backend.strip().lower()
+
+    @property
+    def _sqlite_path(self) -> Path:
+        """Env-driven SQLite db path (``TEMPORAL_SQLITE_PATH``),
+        resolved relative to ``DATA_DIR`` unless absolute."""
+        return Path(self.settings._resolve_under_data(self.settings.temporal_sqlite_path))
+
+    @property
+    def _server_cwd(self) -> Path:
+        """Env-driven cwd subdir for the temporal-server process
+        (``TEMPORAL_SERVER_SUBDIR``)."""
+        return Path(self.settings._resolve_under_data(self.settings.temporal_server_subdir))
 
     # ---- BaseProcessSupervisor overrides ---------------------------------
 
     async def _pre_spawn(self) -> None:
         from services.temporal._install import ensure_temporal_binaries
-        from services.temporal._config import (
-            bootstrap_temporal_schemas,
-            render_temporal_config,
-        )
 
-        if self._postgres.uri is None:
-            raise RuntimeError(
-                f"[{self.label}] Postgres runtime not started; "
-                "schedule the postgres ServiceSpec before this one"
-            )
-
-        # 1. Download / cache temporal-server + temporal-sql-tool.
-        #    Version pin lives in settings.temporal_binary_version.
+        # 1. Download / cache Temporal binaries (both backends share
+        #    the same tarball; pooch deduplicates across calls).
         self._binaries = await ensure_temporal_binaries(self.settings)
 
-        # 2. Idempotent schema bootstrap.
-        await bootstrap_temporal_schemas(
-            sql_tool=self._binaries["temporal-sql-tool"],
-            postgres_uri=self._postgres.uri,
-            binary_path=self._binaries["temporal-server"],
-        )
+        if self.backend == "postgres":
+            from services.temporal._config import (
+                bootstrap_temporal_schemas,
+                render_temporal_config,
+            )
 
-        # 3. Render YAML config pointing at the Postgres URI.
-        self._config_path = render_temporal_config(
-            settings=self.settings,
-            postgres_uri=self._postgres.uri,
-        )
+            if self._postgres is None:
+                self._postgres = PostgresRuntime.get_instance(self.settings)
+            if self._postgres.uri is None:
+                raise RuntimeError(
+                    f"[{self.label}] Postgres runtime not started; "
+                    "schedule the postgres ServiceSpec before this one"
+                )
+
+            # Idempotent schema bootstrap.
+            await bootstrap_temporal_schemas(
+                sql_tool=self._binaries["temporal-sql-tool"],
+                postgres_uri=self._postgres.uri,
+                binary_path=self._binaries["temporal-server"],
+            )
+
+            # Render YAML config pointing at the Postgres URI.
+            self._config_path = render_temporal_config(
+                settings=self.settings,
+                postgres_uri=self._postgres.uri,
+            )
+        else:
+            # sqlite backend — ensure the parent dir for the SQLite
+            # file exists before ``temporal server start-dev`` opens it.
+            self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 
     def binary_path(self) -> Path:
+        # Pre-``_pre_spawn`` placeholders for any existence check
+        # BaseProcessSupervisor may run; the real paths are populated
+        # once pooch resolves the cache.
+        binary = "temporal-server" if self.backend == "postgres" else "temporal"
         if self._binaries is None:
-            # Called before _pre_spawn — e.g. if BaseProcessSupervisor
-            # tries to validate the binary exists. Return a placeholder;
-            # _pre_spawn populates the real path before the existence
-            # check in _do_start runs.
-            return Path("temporal-server")
-        return self._binaries["temporal-server"]
+            return Path(binary)
+        return self._binaries[binary]
 
     def argv(self) -> list[str]:
-        return [str(self.binary_path()), "start", "--config", str(self._config_path)]
+        if self.backend == "postgres":
+            return [
+                str(self.binary_path()),
+                "start", "--config", str(self._config_path),
+            ]
+
+        # ``temporal server start-dev`` is the official subcommand for
+        # the SQLite-backed dev server. Flags documented at
+        # https://docs.temporal.io/cli/server (subset we use):
+        #   --port           frontend gRPC port (gates ready-probe)
+        #   --db-filename    SQLite file (omit for in-memory)
+        #   --metrics-port   0 disables the Prometheus endpoint
+        #   --log-level      warn keeps the supervisor log readable
+        #   --ip             127.0.0.1 when TEMPORAL_BIND_LOCAL_ONLY=true
+        #   --namespace      default namespace bootstrapped at start
+        ip = "127.0.0.1" if self.settings.temporal_bind_local_only else "0.0.0.0"
+        return [
+            str(self.binary_path()), "server", "start-dev",
+            "--port", str(self.settings.temporal_frontend_grpc_port),
+            "--db-filename", str(self._sqlite_path),
+            "--metrics-port", "0",
+            "--log-level", "warn",
+            "--ip", ip,
+            "--namespace", self.settings.temporal_namespace,
+        ]
 
     def cwd(self) -> Path:
-        return Path(self.settings.data_dir) / "_temporal"
+        if self.backend == "postgres":
+            return self._server_cwd
+        # sqlite — cwd is the parent of the SQLite file so any default
+        # output / log files land alongside the db rather than in the
+        # supervisor's working directory.
+        return self._sqlite_path.parent
 
     def env(self) -> dict[str, str]:
-        # Temporal reads everything from YAML; inherit parent env only.
+        # Temporal reads everything from YAML (postgres) or argv flags
+        # (sqlite); inherit parent env only.
         return {**os.environ}
 
     async def health_check(self) -> bool:
@@ -243,12 +324,19 @@ class TemporalServerRuntime(BaseProcessSupervisor):
 
     def _extra_status(self) -> dict[str, Any]:
         base = super()._extra_status()
-        return {
+        extra: dict[str, Any] = {
             **base,
+            "backend": self.backend,
             "grpc_port": self.settings.temporal_frontend_grpc_port,
-            "config_path": str(self._config_path) if self._config_path else None,
             "binary_version": self.settings.temporal_binary_version,
         }
+        if self.backend == "postgres":
+            extra["config_path"] = (
+                str(self._config_path) if self._config_path else None
+            )
+        else:
+            extra["sqlite_path"] = str(self._sqlite_path)
+        return extra
 
 
 # ---- module-level singleton accessors -----------------------------------
