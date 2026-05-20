@@ -1,9 +1,9 @@
 {
-  "id": "workflow-1779095939967-2369cff4",
+  "id": "example_workflow-1779095939967-2369cff4",
   "name": "Claude Assistant",
   "nodes": [
     {
-      "id": "chatTrigger-17790959399670-5e1402",
+      "id": "chatTrigger-17792004809890-32f2e9",
       "type": "chatTrigger",
       "position": {
         "x": 920,
@@ -22,7 +22,7 @@
       "dragging": true
     },
     {
-      "id": "console-17790959399671-5e1402",
+      "id": "console-17792004809891-32f2e9",
       "type": "console",
       "position": {
         "x": 1760,
@@ -41,7 +41,7 @@
       "dragging": false
     },
     {
-      "id": "simpleMemory-17790959399672-5e1402",
+      "id": "simpleMemory-17792004809892-32f2e9",
       "type": "simpleMemory",
       "position": {
         "x": 1160,
@@ -60,7 +60,7 @@
       "dragging": true
     },
     {
-      "id": "writeTodos-17790959399673-5e1402",
+      "id": "writeTodos-17792004809893-32f2e9",
       "type": "writeTodos",
       "position": {
         "x": 1480,
@@ -79,7 +79,7 @@
       "dragging": true
     },
     {
-      "id": "telegramReceive-17790959399674-5e1402",
+      "id": "telegramReceive-17792004809894-32f2e9",
       "type": "telegramReceive",
       "position": {
         "x": 920,
@@ -98,7 +98,7 @@
       "dragging": false
     },
     {
-      "id": "telegramSend-17790959399675-5e1402",
+      "id": "telegramSend-17792004809895-32f2e9",
       "type": "telegramSend",
       "position": {
         "x": 1720,
@@ -117,7 +117,7 @@
       "dragging": false
     },
     {
-      "id": "masterSkill-17790959399676-5e1402",
+      "id": "masterSkill-17792004809896-32f2e9",
       "type": "masterSkill",
       "position": {
         "x": 1280,
@@ -136,7 +136,7 @@
       "dragging": true
     },
     {
-      "id": "claude_code_agent-17790959399677-5e1402",
+      "id": "claude_code_agent-17792004809897-32f2e9",
       "type": "claude_code_agent",
       "position": {
         "x": 1300,
@@ -155,7 +155,7 @@
       "dragging": false
     },
     {
-      "id": "duckduckgoSearch-17790959399678-5e1402",
+      "id": "duckduckgoSearch-17792004809898-32f2e9",
       "type": "duckduckgoSearch",
       "position": {
         "x": 1680,
@@ -174,7 +174,7 @@
       "dragging": false
     },
     {
-      "id": "processManager-17790959399679-5e1402",
+      "id": "processManager-17792004809899-32f2e9",
       "type": "processManager",
       "position": {
         "x": 1580,
@@ -193,7 +193,7 @@
       "dragging": false
     },
     {
-      "id": "browser-177909593996710-5e1402",
+      "id": "browser-177920048098910-32f2e9",
       "type": "browser",
       "position": {
         "x": 1820,
@@ -212,7 +212,7 @@
       "dragging": false
     },
     {
-      "id": "fileModify-177909593996711-5e1402",
+      "id": "fileModify-177920048098911-32f2e9",
       "type": "fileModify",
       "position": {
         "x": 1920,
@@ -231,7 +231,7 @@
       "dragging": false
     },
     {
-      "id": "fileRead-177909593996712-5e1402",
+      "id": "fileRead-177920048098912-32f2e9",
       "type": "fileRead",
       "position": {
         "x": 2040,
@@ -250,7 +250,7 @@
       "dragging": false
     },
     {
-      "id": "fsSearch-177909593996713-5e1402",
+      "id": "fsSearch-177920048098913-32f2e9",
       "type": "fsSearch",
       "position": {
         "x": 2140,
@@ -269,7 +269,7 @@
       "dragging": false
     },
     {
-      "id": "shell-177909593996714-5e1402",
+      "id": "shell-177920048098914-32f2e9",
       "type": "shell",
       "position": {
         "x": 2240,
@@ -296,11 +296,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "telegramReceive-17790959399674-5e1402",
+      "source": "telegramReceive-17792004809894-32f2e9",
       "sourceHandle": "output-main",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-main",
-      "id": "e-telegramReceive-17790959399674-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-telegramReceive-17792004809894-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -310,11 +310,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "chatTrigger-17790959399670-5e1402",
+      "source": "chatTrigger-17792004809890-32f2e9",
       "sourceHandle": "output-main",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-main",
-      "id": "e-chatTrigger-17790959399670-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-chatTrigger-17792004809890-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -324,11 +324,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "claude_code_agent-17790959399677-5e1402",
+      "source": "claude_code_agent-17792004809897-32f2e9",
       "sourceHandle": "output-main",
-      "target": "telegramSend-17790959399675-5e1402",
+      "target": "telegramSend-17792004809895-32f2e9",
       "targetHandle": "input-main",
-      "id": "e-claude_code_agent-17790959399677-5e1402-telegramSend-17790959399675-5e1402-1779095939967-5e1402",
+      "id": "e-claude_code_agent-17792004809897-32f2e9-telegramSend-17792004809895-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -338,11 +338,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "claude_code_agent-17790959399677-5e1402",
+      "source": "claude_code_agent-17792004809897-32f2e9",
       "sourceHandle": "output-main",
-      "target": "console-17790959399671-5e1402",
+      "target": "console-17792004809891-32f2e9",
       "targetHandle": "input-main",
-      "id": "e-claude_code_agent-17790959399677-5e1402-console-17790959399671-5e1402-1779095939967-5e1402",
+      "id": "e-claude_code_agent-17792004809897-32f2e9-console-17792004809891-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -352,11 +352,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "simpleMemory-17790959399672-5e1402",
+      "source": "simpleMemory-17792004809892-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-memory",
-      "id": "e-simpleMemory-17790959399672-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-simpleMemory-17792004809892-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -366,11 +366,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "masterSkill-17790959399676-5e1402",
+      "source": "masterSkill-17792004809896-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-skill",
-      "id": "e-masterSkill-17790959399676-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-masterSkill-17792004809896-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -380,11 +380,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "writeTodos-17790959399673-5e1402",
+      "source": "writeTodos-17792004809893-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-writeTodos-17790959399673-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-writeTodos-17792004809893-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -394,11 +394,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "browser-177909593996710-5e1402",
+      "source": "browser-177920048098910-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-browser-177909593996710-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-browser-177920048098910-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -408,11 +408,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "processManager-17790959399679-5e1402",
+      "source": "processManager-17792004809899-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-processManager-17790959399679-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-processManager-17792004809899-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -422,11 +422,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "duckduckgoSearch-17790959399678-5e1402",
+      "source": "duckduckgoSearch-17792004809898-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-duckduckgoSearch-17790959399678-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-duckduckgoSearch-17792004809898-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -436,11 +436,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "fileModify-177909593996711-5e1402",
+      "source": "fileModify-177920048098911-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-fileModify-177909593996711-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-fileModify-177920048098911-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -450,11 +450,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "fileRead-177909593996712-5e1402",
+      "source": "fileRead-177920048098912-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-fileRead-177909593996712-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-fileRead-177920048098912-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -464,11 +464,11 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "fsSearch-177909593996713-5e1402",
+      "source": "fsSearch-177920048098913-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-fsSearch-177909593996713-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-fsSearch-177920048098913-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     },
     {
@@ -478,19 +478,19 @@
         "stroke": "#8be9fd",
         "strokeWidth": 3
       },
-      "source": "shell-177909593996714-5e1402",
+      "source": "shell-177920048098914-32f2e9",
       "sourceHandle": "output-tool",
-      "target": "claude_code_agent-17790959399677-5e1402",
+      "target": "claude_code_agent-17792004809897-32f2e9",
       "targetHandle": "input-tools",
-      "id": "e-shell-177909593996714-5e1402-claude_code_agent-17790959399677-5e1402-1779095939967-5e1402",
+      "id": "e-shell-177920048098914-32f2e9-claude_code_agent-17792004809897-32f2e9-1779200480989-32f2e9",
       "selected": false
     }
   ],
-  "createdAt": "2026-05-18T03:48:59.969Z",
-  "lastModified": "2026-05-18T05:03:13.000Z",
+  "createdAt": "2026-05-19T08:51:20.997Z",
+  "lastModified": "2026-05-19T08:51:20.997Z",
   "version": "0.0.72",
   "nodeParameters": {
-    "console-17790959399671-5e1402": {
+    "console-17792004809891-32f2e9": {
       "label": "Console",
       "log_mode": "field",
       "field_path": "{{claudecode.response}}",
@@ -498,7 +498,7 @@
       "format": "json",
       "fieldPath": ""
     },
-    "simpleMemory-17790959399672-5e1402": {
+    "simpleMemory-17792004809892-32f2e9": {
       "session_id": "",
       "window_size": 100,
       "memory_content": "# Conversation History\n\n*No messages yet.*\n",
@@ -510,7 +510,7 @@
       "longTermEnabled": false,
       "retrievalCount": 3
     },
-    "telegramReceive-17790959399674-5e1402": {
+    "telegramReceive-17792004809894-32f2e9": {
       "content_type_filter": "text",
       "sender_filter": "self",
       "chat_id": "",
@@ -519,7 +519,7 @@
       "ignore_bots": true,
       "label": "Telegram Receive"
     },
-    "telegramSend-17790959399675-5e1402": {
+    "telegramSend-17792004809895-32f2e9": {
       "recipient_type": "self",
       "chat_id": "",
       "message_type": "text",
@@ -536,7 +536,7 @@
       "reply_to_message_id": 0,
       "label": "Telegram Send"
     },
-    "masterSkill-17790959399676-5e1402": {
+    "masterSkill-17792004809896-32f2e9": {
       "skills_config": {
         "perplexity-search-skill": {
           "enabled": true,
@@ -630,7 +630,7 @@
         }
       }
     },
-    "claude_code_agent-17790959399677-5e1402": {
+    "claude_code_agent-17792004809897-32f2e9": {
       "tasks": null,
       "prompt": "{{telegramreceive.text}}",
       "model": "claude-sonnet-4-6",
@@ -640,11 +640,11 @@
       "allowed_credentials": null,
       "label": "Claude Code"
     },
-    "duckduckgoSearch-17790959399678-5e1402": {
+    "duckduckgoSearch-17792004809898-32f2e9": {
       "max_results": 5,
       "label": "DuckDuckGo Search"
     },
-    "processManager-17790959399679-5e1402": {
+    "processManager-17792004809899-32f2e9": {
       "operation": "list",
       "name": "",
       "command": "",
@@ -654,7 +654,7 @@
       "tail": 100,
       "label": "Process Manager"
     },
-    "browser-177909593996710-5e1402": {
+    "browser-177920048098910-32f2e9": {
       "operation": "navigate",
       "url": "",
       "selector": "",
@@ -681,7 +681,7 @@
       "timeout": 30,
       "label": "Browser"
     },
-    "fileModify-177909593996711-5e1402": {
+    "fileModify-177920048098911-32f2e9": {
       "operation": "write",
       "content": "",
       "old_string": "",
@@ -689,18 +689,18 @@
       "replace_all": false,
       "label": "File Modify"
     },
-    "fileRead-177909593996712-5e1402": {
+    "fileRead-177920048098912-32f2e9": {
       "offset": 0,
       "limit": 2000,
       "label": "File Read"
     },
-    "fsSearch-177909593996713-5e1402": {
+    "fsSearch-177920048098913-32f2e9": {
       "mode": "ls",
       "path": ".",
       "pattern": "",
       "label": "FS Search"
     },
-    "shell-177909593996714-5e1402": {
+    "shell-177920048098914-32f2e9": {
       "cwd": "",
       "timeout": 30,
       "label": "Shell"
