@@ -266,12 +266,14 @@ class TemporalServerRuntime(BaseProcessSupervisor):
             self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 
     def binary_path(self) -> Path:
-        # Pre-``_pre_spawn`` placeholders for any existence check
-        # BaseProcessSupervisor may run; the real paths are populated
-        # once pooch resolves the cache.
+        # ``_pre_spawn`` (called by ``BaseProcessSupervisor._do_start``
+        # before this method) populates ``self._binaries`` via the
+        # pooch downloader. Loud failure if that contract regresses.
         binary = "temporal-server" if self.backend == "postgres" else "temporal"
-        if self._binaries is None:
-            return Path(binary)
+        assert self._binaries is not None, (
+            f"[{self.label}] binary_path() called before _pre_spawn() "
+            "populated self._binaries"
+        )
         return self._binaries[binary]
 
     def argv(self) -> list[str]:

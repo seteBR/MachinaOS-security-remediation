@@ -70,11 +70,15 @@ class BaseProcessSupervisor(BaseSupervisor):
         return self._proc is not None and self._proc.returncode is None
 
     async def _do_start(self) -> None:
+        # Subclasses that download or otherwise materialise their binary
+        # do so in ``_pre_spawn`` (e.g. Temporal's pooch fetch populates
+        # ``self._binaries``). Run that first so ``binary_path`` can
+        # return the real on-disk location before the existence check.
+        await self._pre_spawn()
+
         binary = self.binary_path()
         if not binary.exists():
             raise FileNotFoundError(f"{self.label} binary not found at {binary}")
-
-        await self._pre_spawn()
 
         argv = self.argv()
         kwargs: dict[str, Any] = {

@@ -17,9 +17,10 @@ import sys
 
 import typer
 
-from cli.run import capture, run
+from cli._common import error_block
+from cli.run import capture, run, uv_run
 from cli.colors import console
-from cli.platform_ import project_root
+from cli.platform_ import node_modules_dir, project_root, server_dir
 
 
 # Source dirs / entry-point modules under ``server/`` that ``machina build``
@@ -83,7 +84,7 @@ def _ensure_uv(python_cmd: str) -> str:
     run([python_cmd, "-m", "pip", "install", "uv"])
     version = capture(["uv", "--version"])
     if not version:
-        console.print("[red]Error: failed to install uv. See https://docs.astral.sh/uv/[/]")
+        error_block("failed to install uv.", ["See https://docs.astral.sh/uv/"])
         raise typer.Exit(code=1)
     console.print(f"  uv: {version}")
     return version
@@ -106,15 +107,11 @@ def build_command() -> None:
         return
 
     # ---- toolchain ---------------------------------------------------
-    # Temporal binaries are NOT a build-time dep: the supervised
-    # ``TemporalServerRuntime`` (server/services/temporal/_runtime.py)
-    # downloads ``temporal`` / ``temporal-server`` / ``temporal-sql-tool``
-    # via pooch on first boot. No system install / npm shim required.
     console.print("[bold]Checking dependencies...[/]\n")
     node_version = capture(["node", "--version"])
     console.print(f"  Node.js: {node_version or '[red]not found[/]'}")
     if not node_version:
-        console.print("[red]Error: Node.js is required.[/]")
+        error_block("Node.js is required.", [])
         raise typer.Exit(code=1)
 
     npm_version = capture(["npm", "--version"])
@@ -122,9 +119,9 @@ def build_command() -> None:
 
     python_cmd = _which_python()
     if not python_cmd or not _check_python(python_cmd):
-        console.print(
-            "[red]Error: Python 3.12+ is required.[/] "
-            "Install from https://python.org/downloads/"
+        error_block(
+            "Python 3.12+ is required.",
+            ["Install from https://python.org/downloads/"],
         )
         raise typer.Exit(code=1)
 
@@ -133,7 +130,7 @@ def build_command() -> None:
     console.print("\n[green]All dependencies ready.[/]\n")
 
     # ---- build steps -------------------------------------------------
-    server_dir = root / "server"
+    server_cwd = server_dir(root)
     env_path = root / ".env"
     template_path = root / ".env.template"
 
@@ -162,9 +159,13 @@ def build_command() -> None:
     run(["pnpm", "--filter", "machinaos-nodejs-executor", "run", "build"], cwd=root)
 
     console.log("[4/6] Installing Python dependencies...")
-    if not (server_dir / ".venv").exists():
-        run(["uv", "venv"], cwd=server_dir)
-    run(["uv", "sync"], cwd=server_dir)
+    # ``server/`` is its own standalone uv project; ``uv sync`` at that
+    # directory resolves ``server/pyproject.toml`` and materialises
+    # ``server/.venv``. The CLI lives in a separate venv (or system
+    # python via pipx) and never shares this environment -- see
+    # ``cli/platform_.py`` docstring for the rationale. ``uv sync``
+    # is idempotent and creates the venv on first run.
+    run(["uv", "sync"], cwd=server_cwd)
 
     # Pre-compile our Python sources to optimised bytecode (.opt-1.pyc).
     # `-O` strips `assert` statements + `__debug__` branches; `-q`
@@ -178,20 +179,22 @@ def build_command() -> None:
     # template files inside packages like crawlee that aren't real Python.
     console.log("[5/6] Compiling Python bytecode...")
     run(
-        ["uv", "run", "python", "-O", "-m", "compileall", "-q", "-j", "0", *COMPILEALL_SOURCE_DIRS],
-        cwd=server_dir,
+        uv_run("python", "-O", "-m", "compileall", "-q", "-j", "0", *COMPILEALL_SOURCE_DIRS),
+        cwd=server_cwd,
         check=False,  # missing pyc is non-fatal — runtime regenerates as needed
     )
 
-    console.log("[6/6] Verifying edgymeow binary...")
-    bin_name = "edgymeow-server.exe" if sys.platform == "win32" else "edgymeow-server"
-    edgymeow_bin = root / "node_modules" / "edgymeow" / "bin" / bin_name
-    if edgymeow_bin.exists():
-        console.print(f"  Binary present: {edgymeow_bin}")
-    else:
-        console.print(
-            "  [yellow]Warning: edgymeow binary not found. "
-            "Set WHATSAPP_RUNTIME_ENABLED=false to disable.[/]"
-        )
+    # Temporal is a required runtime dep: fetch + verify the binaries
+    # now so first ``machina start`` is instant instead of paying the
+    # ~90 MB pooch download cost inside ``_pre_spawn``. The ``-m
+    # services.temporal._install`` entry runs ``ensure_temporal_binaries``
+    # then asserts every extracted path exists; non-zero exit aborts
+    # the build via ``run(check=True)``. Idempotent on re-build (pooch
+    # cache hit) so this step is sub-second once the tarball is on disk.
+    console.log("[6/6] Installing Temporal binaries...")
+    run(
+        uv_run("python", "-m", "services.temporal._install"),
+        cwd=server_cwd,
+    )
 
     console.log("[green]Build complete.[/]")

@@ -32,17 +32,6 @@ from cli.commands import build
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _seed_edgymeow_binary(tmp_path: Path) -> None:
-    """Create a fake edgymeow binary so the [6/6] verify step doesn't warn.
-
-    The verify step only stat()s the file; the contents are never read.
-    """
-    bin_dir = tmp_path / "node_modules" / "edgymeow" / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    bin_name = "edgymeow-server.exe" if build.sys.platform == "win32" else "edgymeow-server"
-    (bin_dir / bin_name).write_text("")
-
-
 def _run_build_capture_invocations(tmp_path: Path) -> list[dict]:
     """Run ``build_command()`` with all external I/O mocked.
 
@@ -50,7 +39,6 @@ def _run_build_capture_invocations(tmp_path: Path) -> list[dict]:
     to ``cli.run.run`` — in the order the orchestrator emitted them.
     Preserving kwargs lets tests assert ``check=False`` and ``cwd=...``.
     """
-    _seed_edgymeow_binary(tmp_path)
     captured: list[dict] = []
 
     def fake_run(argv, **kwargs):
@@ -63,9 +51,9 @@ def _run_build_capture_invocations(tmp_path: Path) -> list[dict]:
             return "Python 3.12.5"
         return "v1.0.0"
 
-    # ``_ensure_temporal`` was removed -- the supervised
-    # ``TemporalServerRuntime`` downloads the binary via pooch at first
-    # boot, so the build command no longer touches Temporal at all.
+    # Step [6/6] invokes ``services.temporal._install`` via ``uv_run`` to
+    # materialise the Temporal binaries at build time. ``fake_run``
+    # captures the argv without actually spawning, so pooch never fires.
     with patch.object(build, "run", side_effect=fake_run), \
          patch.object(build, "capture", side_effect=fake_capture), \
          patch.object(build, "_which_python", return_value="python"), \
@@ -185,15 +173,17 @@ def test_compileall_uses_optimised_flag_quiet_and_parallel(tmp_path: Path):
 
 
 def test_compileall_runs_via_uv_run_python(tmp_path: Path):
-    """Compileall must use ``uv run python`` so the project's pinned
-    interpreter is used regardless of what ``python`` is on PATH.
+    """Compileall must go through ``uv run --no-sync python`` (built by
+    :func:`cli.run.uv_run`) so the project's pinned workspace interpreter
+    is used regardless of what ``python`` is on PATH, without re-syncing
+    the lockfile mid-build.
     """
     captured = _run_build_capture_invocations(tmp_path)
     match = _find_call(captured, lambda c: "compileall" in c)
     assert match is not None
     argv = match[1]["argv"]
-    assert argv[:5] == ["uv", "run", "python", "-O", "-m"], (
-        f"expected `uv run python -O -m compileall ...`, got {argv[:6]}"
+    assert argv[:6] == ["uv", "run", "--no-sync", "python", "-O", "-m"], (
+        f"expected `uv run --no-sync python -O -m compileall ...`, got {argv[:7]}"
     )
 
 
@@ -250,6 +240,90 @@ def test_only_one_compileall_invocation(tmp_path: Path):
     captured = _run_build_capture_invocations(tmp_path)
     matches = [c for c in captured if "compileall" in c["argv"]]
     assert len(matches) == 1, f"expected exactly 1 compileall call, got {len(matches)}"
+
+
+# ---------------------------------------------------------------------------
+# Temporal install step ([6/6])
+# ---------------------------------------------------------------------------
+
+def _find_temporal_install_call(captured: list[dict]) -> tuple[int, dict] | None:
+    return _find_call(
+        captured,
+        lambda c: (
+            c[:3] == ["uv", "run", "--no-sync"]
+            and "services.temporal._install" in c
+        ),
+    )
+
+
+def test_build_invokes_temporal_install_via_uv_run(tmp_path: Path):
+    """[6/6] must invoke ``uv run --no-sync python -m
+    services.temporal._install`` so pooch downloads the Temporal
+    tarball at build time (idempotent on re-build via the pooch cache).
+    """
+    captured = _run_build_capture_invocations(tmp_path)
+    match = _find_temporal_install_call(captured)
+    assert match is not None, (
+        "expected temporal install step in "
+        f"{[c['argv'] for c in captured]}"
+    )
+    argv = match[1]["argv"]
+    assert argv[:6] == ["uv", "run", "--no-sync", "python", "-m",
+                        "services.temporal._install"], (
+        f"expected `uv run --no-sync python -m services.temporal._install`, got {argv[:7]}"
+    )
+
+
+def test_temporal_install_runs_in_server_dir(tmp_path: Path):
+    """Temporal install runs under ``server/`` so ``uv run`` resolves the
+    workspace venv with ``services.temporal._install`` on sys.path.
+    """
+    captured = _run_build_capture_invocations(tmp_path)
+    match = _find_temporal_install_call(captured)
+    assert match is not None
+    call = match[1]
+    assert call.get("cwd") == tmp_path / "server", (
+        f"temporal install must cwd into server/, got {call.get('cwd')}"
+    )
+
+
+def test_temporal_install_is_fatal_on_failure(tmp_path: Path):
+    """Temporal is a required runtime dep, so the install step must NOT
+    pass ``check=False`` — a pooch failure (network, SHA mismatch,
+    missing asset) has to abort the build cleanly rather than silently
+    deferring the failure to ``machina start``.
+    """
+    captured = _run_build_capture_invocations(tmp_path)
+    match = _find_temporal_install_call(captured)
+    assert match is not None
+    call = match[1]
+    # ``check`` defaults to True in ``cli.run.run`` — assert no override.
+    assert call.get("check", True) is True, (
+        "temporal install must keep check=True so build aborts on fetch failure"
+    )
+
+
+def test_temporal_install_runs_after_uv_sync(tmp_path: Path):
+    """Temporal install MUST follow ``uv sync`` because it invokes
+    ``uv run python -m services.temporal._install``, which requires the
+    workspace venv (and pooch + the install module) to be materialised.
+    """
+    captured = _run_build_capture_invocations(tmp_path)
+    uv_sync = _find_call(captured, lambda c: c[:2] == ["uv", "sync"])
+    temporal = _find_temporal_install_call(captured)
+    assert uv_sync is not None and temporal is not None
+    assert uv_sync[0] < temporal[0], (
+        f"uv_sync idx {uv_sync[0]} must precede temporal install idx {temporal[0]}"
+    )
+
+
+def test_only_one_temporal_install_invocation(tmp_path: Path):
+    """Temporal install must fire exactly once per build."""
+    captured = _run_build_capture_invocations(tmp_path)
+    matches = [c for c in captured if "services.temporal._install" in c["argv"]]
+    assert len(matches) == 1, (
+        f"expected exactly 1 temporal install call, got {len(matches)}"
+    )
 
 
 # ---------------------------------------------------------------------------

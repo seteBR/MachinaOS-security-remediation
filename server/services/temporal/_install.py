@@ -71,17 +71,33 @@ _CHECKSUMS_BY_VERSION: dict[str, dict[str, str]] = {
 }
 
 # Names of the binaries we extract from each release tarball. The
-# Temporal release ships several; we extract the three MachinaOS
-# actually invokes:
-#   - ``temporal`` — standalone CLI. Powers the sqlite-backend dev
-#                    server (``temporal server start-dev``) and any
-#                    ad-hoc workflow / operator commands.
+# ``temporalio/temporal`` server release contains the cluster binaries
+# only — the user-facing ``temporal`` CLI is a separate distribution
+# fetched from the official URL documented at
+# https://docs.temporal.io/develop/python/set-up-your-local-python:
 #   - ``temporal-server`` — full cluster binary used by the postgres
-#                           backend with a YAML config.
+#                           backend with a YAML config
+#                           (``temporal-server start --config <yaml>``).
 #   - ``temporal-sql-tool`` — schema migrator invoked once at boot to
 #                             create + update the Postgres databases.
-# Adding ``tctl`` here would also extract it.
-_BINARY_NAMES: tuple[str, ...] = ("temporal", "temporal-server", "temporal-sql-tool")
+_BINARY_NAMES: tuple[str, ...] = ("temporal-server", "temporal-sql-tool")
+
+# Official Temporal CLI download URL. Per the docs at
+# https://docs.temporal.io/develop/python/set-up-your-local-python the
+# CLI archive lives at ``temporal.download/cli/archive/latest`` with
+# ``platform`` and ``arch`` query parameters. Contains a single
+# ``temporal`` binary; powers ``temporal server start-dev`` (the
+# sqlite/in-memory dev server) and ad-hoc workflow / operator commands.
+_CLI_BASE_URL = "https://temporal.download/cli/archive/latest"
+_CLI_PLATFORM_MAP: dict[tuple[str, str], tuple[str, str]] = {
+    # platform.system, platform.machine -> (URL platform, URL arch)
+    ("Linux", "x86_64"): ("linux", "amd64"),
+    ("Linux", "aarch64"): ("linux", "arm64"),
+    ("Darwin", "x86_64"): ("darwin", "amd64"),
+    ("Darwin", "arm64"): ("darwin", "arm64"),
+    ("Windows", "AMD64"): ("windows", "amd64"),
+    ("Windows", "ARM64"): ("windows", "arm64"),
+}
 
 # pooch cache namespace. Re-used across versions; pooch's own cache
 # layout includes the asset URL so versions don't collide.
@@ -124,7 +140,15 @@ def _resolver(version: str) -> pooch.Pooch:
 async def ensure_temporal_binaries(
     settings: Settings | None = None,
 ) -> dict[str, Path]:
-    """Return ``{"temporal-server": Path, "temporal-sql-tool": Path}``.
+    """Return ``{"temporal": Path, "temporal-server": Path, "temporal-sql-tool": Path}``.
+
+    Two fetches, merged into one dict:
+      - ``temporal-server`` + ``temporal-sql-tool`` from the pinned
+        ``temporalio/temporal`` GitHub release (SHA-verified).
+      - ``temporal`` CLI from the official URL at
+        https://docs.temporal.io/develop/python/set-up-your-local-python
+        (``temporal.download/cli/archive/latest``). No SHA pin — the
+        ``latest`` URL rotates and is served over TLS.
 
     Idempotent — first call downloads, subsequent calls hit the pooch
     cache (XDG / OS-conventional dir). Async-locked so concurrent
@@ -140,12 +164,57 @@ async def ensure_temporal_binaries(
     async with _lock:
         if _cached is not None:
             return _cached
-        _cached = await asyncio.to_thread(_fetch_sync, version)
+        cluster_paths = await asyncio.to_thread(_fetch_sync, version)
+        cli_path = await asyncio.to_thread(_fetch_cli_sync)
+        _cached = {**cluster_paths, "temporal": cli_path}
         logger.info(
-            "[Temporal install] binaries ready (v=%s): %s",
+            "[Temporal install] binaries ready (cluster v=%s + official CLI): %s",
             version, {k: str(v) for k, v in _cached.items()},
         )
         return _cached
+
+
+def _fetch_cli_sync() -> Path:
+    """Download the official ``temporal`` CLI archive and return the binary path.
+
+    Uses ``pooch.retrieve`` with ``known_hash=None`` because the
+    ``temporal.download/cli/archive/latest`` URL rotates as new CLI
+    versions ship — pinning a SHA would defeat the "latest" semantics
+    the official docs document. TLS gives us transport integrity.
+    """
+    key = (platform.system(), platform.machine())
+    if key not in _CLI_PLATFORM_MAP:
+        raise RuntimeError(
+            f"[Temporal install] Unsupported platform for CLI: {key}. "
+            f"Supported: {sorted(_CLI_PLATFORM_MAP.keys())}"
+        )
+    url_platform, url_arch = _CLI_PLATFORM_MAP[key]
+    url = f"{_CLI_BASE_URL}?platform={url_platform}&arch={url_arch}"
+
+    is_windows = platform.system() == "Windows"
+    fname = f"temporal_cli_latest_{url_platform}_{url_arch}.{'zip' if is_windows else 'tar.gz'}"
+    processor = pooch.Unzip() if is_windows else pooch.Untar()
+
+    extracted = pooch.retrieve(
+        url=url,
+        known_hash=None,
+        path=pooch.os_cache(_CACHE_NAMESPACE),
+        fname=fname,
+        processor=processor,
+        progressbar=True,
+    )
+
+    target = "temporal.exe" if is_windows else "temporal"
+    match = next((Path(p) for p in extracted if Path(p).name == target), None)
+    if match is None:
+        raise RuntimeError(
+            f"[Temporal install] CLI binary {target!r} not found in archive. "
+            f"Extracted files: {[Path(p).name for p in extracted]}"
+        )
+    if not is_windows:
+        mode = match.stat().st_mode
+        match.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return match
 
 
 def _fetch_sync(version: str) -> dict[str, Path]:
@@ -181,3 +250,39 @@ def _fetch_sync(version: str) -> dict[str, Path]:
 
 
 __all__ = ["ensure_temporal_binaries"]
+
+
+def _main() -> int:
+    """Standalone entry: ``python -m services.temporal._install``.
+
+    Used by ``machina build`` step [6/6] to materialise the Temporal
+    binaries at build time instead of paying the ~90 MB download cost
+    on first ``machina start``. Fetches, verifies every extracted path
+    exists on disk, prints the resolved locations. Non-zero exit on
+    any failure (pooch raises on SHA mismatch / network errors / asset
+    missing from tarball; we add an explicit post-fetch existence pass
+    so partial extractions also fail loudly).
+    """
+    import sys as _sys
+
+    try:
+        paths = asyncio.run(ensure_temporal_binaries())
+    except Exception as exc:  # noqa: BLE001 — propagate to non-zero exit
+        print(f"[Temporal install] {exc}", file=_sys.stderr)
+        return 1
+
+    missing = [name for name, path in paths.items() if not path.exists()]
+    if missing:
+        print(
+            f"[Temporal install] binaries missing after fetch: {missing}",
+            file=_sys.stderr,
+        )
+        return 1
+
+    for name, path in paths.items():
+        print(f"  {name}: {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
