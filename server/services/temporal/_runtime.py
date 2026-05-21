@@ -111,7 +111,12 @@ class TemporalServerRuntime(BaseProcessSupervisor):
         # https://docs.temporal.io/cli/server (subset we use):
         #   --port           frontend gRPC port (gates ready-probe)
         #   --ui-port        Web UI port (default ``--port + 1000``)
-        #   --db-filename    SQLite file (omit for in-memory)
+        #   --db-filename    SQLite file — preserves history across
+        #                    restarts. Running workflows are not
+        #                    auto-resumed; see ``TemporalClientWrapper.
+        #                    terminate_running_workflows`` (run from
+        #                    ``main.py`` lifespan) for the boot-time
+        #                    terminate-but-preserve-history behaviour.
         #   --metrics-port   0 disables the Prometheus endpoint
         #   --log-level      warn keeps the supervisor log readable
         #   --namespace      default namespace bootstrapped at start
@@ -126,9 +131,9 @@ class TemporalServerRuntime(BaseProcessSupervisor):
         ]
 
     def cwd(self) -> Path:
-        # cwd is the parent of the SQLite file so any default
-        # output / log files land alongside the db rather than in the
-        # supervisor's working directory.
+        # Land any incidental output / log files next to the SQLite
+        # file (when persisting) or under DATA_DIR (when in-memory) —
+        # either way, never the supervisor's own working directory.
         return self._sqlite_path.parent
 
     def env(self) -> dict[str, str]:

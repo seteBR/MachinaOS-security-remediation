@@ -7,11 +7,20 @@ same battle-tested ``psutil`` paths that are already in production.
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import subprocess
+import time
 from dataclasses import dataclass
 
 import psutil
+
+
+# Post-kill grace before re-checking the port. Windows can lag a few
+# hundred ms releasing the listener socket after the bound process
+# dies — without this, ``kill_port`` reports the port still in use
+# even though the kill succeeded.
+_POST_KILL_RECHECK_DELAY = 0.5
 
 
 @dataclass
@@ -50,10 +59,30 @@ def find_pids_by_port(port: int) -> set[int]:
 
 
 def kill_pid(pid: int, *, graceful_timeout: float = 3.0) -> bool:
-    """Terminate ``pid`` gracefully, then force-kill on timeout."""
+    """Terminate ``pid`` gracefully, then force-kill on timeout.
+
+    Windows: send ``CTRL_BREAK_EVENT`` first so daemons spawned with
+    ``CREATE_NEW_PROCESS_GROUP`` (the supervisor's children — see
+    ``cli/tree.py:new_session_kwargs``) get a real shutdown signal and
+    can release listener sockets cleanly. ``proc.terminate()``
+    (= ``TerminateProcess``) is the fallback for processes that weren't
+    spawned with a process group — equivalent to SIGKILL, leaves the
+    OS holding sockets briefly. Same pattern as
+    ``cli/supervisor.py:_stop_proc``.
+
+    POSIX: plain ``proc.terminate()`` (SIGTERM).
+    """
     try:
         proc = psutil.Process(pid)
-        proc.terminate()
+        if sys.platform == "win32":
+            try:
+                os.kill(pid, signal.CTRL_BREAK_EVENT)
+            except (OSError, ProcessLookupError):
+                # Target wasn't in its own process group — fall back
+                # to TerminateProcess via psutil.terminate.
+                proc.terminate()
+        else:
+            proc.terminate()
         try:
             proc.wait(timeout=graceful_timeout)
         except psutil.TimeoutExpired:
@@ -64,7 +93,15 @@ def kill_pid(pid: int, *, graceful_timeout: float = 3.0) -> bool:
 
 
 def kill_port(port: int) -> KillResult:
-    """Kill anything listening on ``port`` and report whether the port is free."""
+    """Kill anything listening on ``port`` and report whether the port is free.
+
+    Post-kill recheck sleeps ``_POST_KILL_RECHECK_DELAY`` because Windows
+    can lag a few hundred ms releasing the listener socket after the
+    bound process dies — without this, ``temporal server start-dev``'s
+    UI port (8080) frequently re-reports as in-use immediately after the
+    gRPC port kill, even though the kill on temporal.exe (one process
+    binds both ports — per docs.temporal.io/cli/server) succeeded.
+    """
     my_pid = os.getpid()
     killed: list[int] = []
     for pid in find_pids_by_port(port):
@@ -72,6 +109,8 @@ def kill_port(port: int) -> KillResult:
             continue
         if kill_pid(pid):
             killed.append(pid)
+    if killed:
+        time.sleep(_POST_KILL_RECHECK_DELAY)
     port_free = not find_pids_by_port(port)
     return KillResult(port=port, killed_pids=killed, port_free=port_free)
 

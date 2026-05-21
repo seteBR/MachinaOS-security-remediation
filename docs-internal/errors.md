@@ -77,31 +77,15 @@ component=matching-engine wf-namespace=temporal-system
 
 **Root cause**: Temporal's SQLite database runs in DELETE journal mode by default, which allows only one writer at a time. Temporal's internal system workflows (namespace replication, queue metadata maintenance, backlog counters) contend for write access. When multiple internal workflows try to update task queue metadata concurrently, `BeginTx` blocks, the gRPC context deadline elapses, and the transaction is cancelled.
 
-**Fix**: Enable WAL (Write-Ahead Logging) mode via `--sqlite-pragma` flags. This is configured in the `temporal-server` npm package (v0.0.10+) via `configs/server.json`:
+**Status**: benign with the current single-process `temporal server start-dev` setup (the official CLI handles its own SQLite pragmas internally). If you see `persistence_error_with_type` errors in a **user namespace** (e.g. `default` instead of `temporal-system`), it's a real problem — file an issue. Errors in `temporal-system` are auto-retried by Temporal and don't affect workflow execution.
 
-```json
-{
-  "sqlitePragma": ["journal_mode=wal", "busy_timeout=5000"]
-}
-```
-
-- `journal_mode=wal` -- concurrent read/write access instead of single-writer DELETE mode
-- `busy_timeout=5000` -- wait up to 5s for a write lock instead of failing immediately
-
-After changing the pragma config, delete the existing `temporal.db` so the new DB is created with WAL mode from the start:
-
+**If you do hit a stuck DB**: delete the db file and let `temporal server start-dev` recreate it on next boot:
 ```bash
-temporal stop
-rm <temporal-server-package>/data/temporal.db
-temporal start
+machina stop
+rm ~/.machina/temporal.db          # macOS / Linux
+rm "$env:USERPROFILE/.machina/temporal.db"   # Windows PowerShell
+machina start
 ```
-
-**Verification**: After restart, check the metrics endpoint. `persistence_error_with_type` counters for `serviceerror_Unavailable` should stop incrementing:
-```bash
-curl -s http://localhost:9090/metrics | grep "persistence_error_with_type" | grep "Unavailable"
-```
-
-WAL mode is confirmed when `.db-wal` and `.db-shm` sidecar files appear next to `temporal.db`.
 
 ---
 
@@ -184,31 +168,33 @@ GET http://localhost:3010/api/auth/status net::ERR_CONNECTION_REFUSED
 Failed to check auth status (attempt 4/6): TypeError: Failed to fetch
 ```
 
-**Root cause**: The FastAPI lifespan blocks on Temporal client connection (`await temporal_client_wrapper.connect(retries=10, delay=3.0)`) for up to 30 seconds. During this window, uvicorn has not called `yield` yet, so it is not accepting HTTP connections. The frontend retry window (1+2+4+8+16 = 31s) barely overlaps with the blocking window and can exhaust before the backend starts serving.
+**Root cause**: An older version of the FastAPI lifespan blocked on Temporal client connection for up to 30 seconds before yielding to uvicorn. During that window, uvicorn was not accepting HTTP connections, so the frontend retry window could exhaust before the backend started serving.
 
-**Fix**: Move the Temporal initialization into a background `asyncio.create_task()` so the lifespan yields immediately. WorkflowService falls back to parallel/sequential execution until Temporal connects in the background. See the stashed refactor in `git stash list` for the implementation.
-
-**Workaround** (if the refactor is not applied): Increase the frontend retry count or delay in `AuthContext.tsx`, or ensure `temporal-server` is already running before starting the Python backend.
+**Status**: fixed. Temporal initialization runs in a background `asyncio.create_task()` ([server/main.py:_init_temporal_background](../server/main.py)) so the lifespan yields immediately. WorkflowService falls back to parallel/sequential execution until Temporal connects in the background.
 
 ---
 
-## 6. `temporal-server` Binary Not Found
+## 6. `temporal` CLI Binary Not Found
 
-**Symptom**:
+**Symptom**: Supervisor logs:
 ```
-Binary not found. Run: npm run postinstall
+FileNotFoundError: temporal binary not found at ...
 ```
+or pooch fails to download during `machina start`.
 
-**Root cause**: The `temporal-server` npm package downloads the Temporal CLI binary (~60MB) during its `postinstall` script. If `pnpm install` was interrupted, if `--ignore-scripts` was used, or if a previous install was corrupted, the binary at `<package>/bin/temporal.exe` is missing.
+**Root cause**: The official `temporal` CLI archive is downloaded by `pooch` to a per-OS cache (`~/.cache/MachinaOs/machinaos-temporal/` on Linux, `~/Library/Caches/MachinaOs/machinaos-temporal/` on macOS, `%LOCALAPPDATA%\MachinaOs\Cache\machinaos-temporal\` on Windows) during `machina build` step [6/6]. If the build was skipped or interrupted, or if network access to `temporal.download` was blocked, the binary is missing.
 
 **Fix**:
 ```bash
-# Re-run the postinstall download
-npx --no-install temporal postinstall
+# Re-fetch the binary (idempotent — cache hit if already downloaded)
+cd server
+uv run python -m services.temporal._install
 
-# Or reinstall the package
-pnpm install
+# Or re-run the build step
+machina build
 ```
+
+If pooch keeps failing, check connectivity to `https://temporal.download/cli/archive/latest?platform=<os>&arch=<arch>` (the URL the docs document at https://docs.temporal.io/develop/python/set-up-your-local-python). Behind a corporate proxy, set `HTTPS_PROXY` in your environment before running.
 
 ---
 

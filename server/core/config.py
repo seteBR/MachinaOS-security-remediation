@@ -108,9 +108,18 @@ class Settings(BaseSettings):
     )
     # SQLite db path passed to ``temporal server start-dev
     # --db-filename ...``. Resolved relative to ``DATA_DIR``
-    # (``Settings._resolve_under_data``) unless absolute. Sourced from
-    # ``.env.template`` (canonical default lives there).
+    # (``Settings._resolve_under_data``) unless absolute. Sourced
+    # from ``.env.template`` (canonical default lives there).
     temporal_sqlite_path: str = Field(env="TEMPORAL_SQLITE_PATH")
+    # Terminate every workflow in ``Running`` state on server boot.
+    # Preserves history (workflows show as ``Terminated`` in the
+    # Temporal UI, not deleted) but prevents auto-resumption, since
+    # MachinaOS's ``DeploymentManager`` has no boot-time reconcile
+    # against Temporal Visibility yet — resumed workflows would
+    # otherwise be invisible to the UI.
+    temporal_terminate_running_on_startup: bool = Field(
+        env="TEMPORAL_TERMINATE_RUNNING_ON_STARTUP",
+    )
 
     # API Keys (all optional, injected at runtime)
     google_maps_api_key: Optional[str] = Field(default=None, env="GOOGLE_MAPS_API_KEY")

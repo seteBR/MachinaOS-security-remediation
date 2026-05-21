@@ -289,6 +289,26 @@ async def lifespan(app: FastAPI):
                     )
                 else:
                     try:
+                        # Disable workflow auto-resumption while
+                        # DeploymentManager has no boot-time reconcile
+                        # against Temporal Visibility. History stays in
+                        # the SQLite db; UI shows workflows as
+                        # ``Terminated`` rather than continuing to run
+                        # invisibly to MachinaOS. Toggle off via
+                        # TEMPORAL_TERMINATE_RUNNING_ON_STARTUP=false.
+                        if settings.temporal_terminate_running_on_startup:
+                            try:
+                                terminated = await temporal_client_wrapper.terminate_running_workflows()
+                                if terminated:
+                                    _startup_log(
+                                        f"[Temporal] Terminated {terminated} running workflow(s) "
+                                        "at startup (history preserved)"
+                                    )
+                            except Exception as term_exc:  # noqa: BLE001 — non-fatal
+                                logger.warning(
+                                    f"Startup terminate-running sweep failed: {term_exc}",
+                                )
+
                         temporal_executor = TemporalExecutor(
                             client=client,
                             task_queue=settings.temporal_task_queue,

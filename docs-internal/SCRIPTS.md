@@ -54,10 +54,9 @@ Run with `npm run <script>` from the project root.
 |--------|---------|-------------|
 | `client:start` | `cd client && npm run start` | Start React frontend (Vite) |
 | `python:start` | `cd server && uv run uvicorn main:app ...` | Start Python backend |
-| `temporal:start` | `temporal-server api` | Start Temporal server (foreground) |
-| `temporal:stop` | `temporal-server stop` | Stop Temporal server |
-| `temporal:status` | `temporal-server status` | Check Temporal server status |
 | `temporal:worker` | `cd server && uv run python -m services.temporal.worker` | Start standalone Temporal worker |
+
+Temporal server lifecycle is managed by `machina start` / `machina dev` / `machina stop` directly (see [Temporal Architecture](./TEMPORAL_ARCHITECTURE.md)). The official `temporal` CLI is downloaded by `pooch` to a per-OS cache during `machina build` and spawned as a supervised subprocess.
 
 ### Docker Scripts (Development)
 
@@ -95,17 +94,16 @@ Run with `npm run <script>` from the project root.
 
 Cross-platform start script that runs all services concurrently.
 
-**What it does:**
+**What it does** (mirrored by the canonical `machina start` / `machina dev` CLI commands):
 1. Validates build artifacts exist
 2. Creates `.env` from `.env.template` if missing
-3. Checks if Temporal is already running via `temporal-server status` CLI
-4. Frees configured app ports (client, backend, WhatsApp, Node.js executor)
-5. Starts services via `concurrently` with `--kill-others`:
+3. Frees configured app ports (client, backend, WhatsApp, Node.js executor, Temporal gRPC, Temporal UI)
+4. Spawns each service in its own process group (Windows: `CREATE_NEW_PROCESS_GROUP` for graceful `CTRL_BREAK_EVENT` shutdown):
    - Static client server (`serve-client.js`)
    - Python backend (uvicorn) -- supervises the edgymeow Go binary lazily via [server/nodes/whatsapp/_runtime.py](../server/nodes/whatsapp/_runtime.py)
-   - Temporal server via `npm:temporal:start` (unless already running)
+   - Temporal dev server -- the supervised-runtime shim ([server/services/temporal/_supervised_runtime.py](../server/services/temporal/_supervised_runtime.py)) spawning `temporal server start-dev`
 
-**Temporal handling:** If `temporal-server status` reports the server is already running, Temporal is skipped in the concurrently service list. This prevents `temporal-server api` from exiting immediately with "Already running", which would trigger `--kill-others` and cascade-kill all services.
+**Temporal handling:** The supervisor's TCP readiness probe on 7233 short-circuits if Temporal is already running, so launching `machina start` against a pre-existing Temporal works without conflict.
 
 **Ports (configurable in .env):**
 - `VITE_CLIENT_PORT` - Frontend (default: 3000)

@@ -80,10 +80,11 @@ Services will be available at:
 
 ### Temporal Server (Distributed Execution)
 - Provides durable workflow execution with per-node retry and horizontal scaling
-- Installed globally: `npm install -g temporal-server`
-- Managed via CLI: `temporal-server start/stop/status`
-- Ports: gRPC 7233, HTTP API 8233, Web UI 8080, Metrics 9090
+- Official `temporal` CLI downloaded by `pooch` from `https://temporal.download/cli/archive/latest` on `machina build` (or first `machina start`)
+- Supervised by MachinaOS as `temporal server start-dev` — single process, SQLite at `~/.machina/temporal.db`
+- Ports: gRPC 7233, Web UI 8080
 - Embedded worker runs inside Python backend (`TemporalWorkerManager` in `main.py`)
+- Workflow auto-resumption disabled at startup (history preserved); see `TEMPORAL_TERMINATE_RUNNING_ON_STARTUP`
 - See [Temporal Architecture](./TEMPORAL_ARCHITECTURE.md) and [CLI Services Guide](./cli_services_integration.md)
 
 ### Database (SQLite)

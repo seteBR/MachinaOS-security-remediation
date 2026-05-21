@@ -435,79 +435,55 @@ client = await Client.connect(server_address, namespace=namespace, runtime=runti
 
 ## Server Management
 
-The Temporal binary + persistence layer are managed in-process by the plugin-folder pattern at [`server/services/temporal/`](../server/services/temporal/) — the `temporal-server` npm package has been retired. Six sibling files (`_install.py`, `_runtime.py`, `_config.py`, `_handlers.py`, `_refresh.py`, plus `__init__.py` for registry wiring) match the [Wave 11 plugin-folder pattern](./plugin_system.md#self-contained-plugin-folders) that `server/nodes/whatsapp/` uses for its Go binary.
+The Temporal binary + persistence are managed in-process by the plugin-folder pattern at [`server/services/temporal/`](../server/services/temporal/). Single supervised process — the official `temporal` CLI's `server start-dev` mode, per [docs.temporal.io/develop/python/set-up-your-local-python](https://docs.temporal.io/develop/python/set-up-your-local-python). Five sibling files (`_install.py`, `_runtime.py`, `_handlers.py`, `_refresh.py`, `client.py`, plus `__init__.py` for registry wiring) match the [Wave 11 plugin-folder pattern](./plugin_system.md#self-contained-plugin-folders) that `server/nodes/whatsapp/` uses for its Go binary.
 
-**Persistence backends** (selected by `TEMPORAL_BACKEND` env var):
-
-| Backend | When | What runs |
-|---|---|---|
-| `sqlite` (dev default) | `TEMPORAL_BACKEND=sqlite` | Single supervised process running `temporal api` (the binary's built-in `start-dev` mode). In-memory or file-based SQLite. Zero deps beyond the Temporal binary. |
-| `postgres` (prod) | `TEMPORAL_BACKEND=postgres` | Two supervised processes: `temporal-postgres` (pgserver-managed PostgreSQL 16.2) then `temporal-server` (binary with YAML config pointing at the Postgres). Ordered automatically by the supervisor's TCP readiness probe. |
+**What runs**: one process — `temporal server start-dev --port 7233 --ui-port 8080 --db-filename ~/.machina/temporal.db --namespace default`. Both gRPC + Web UI bind to the same process (per docs.temporal.io/cli/server — "all running in a single process"). SQLite-backed durability; history persisted across restarts.
 
 **Modern libs doing the heavy lifting** (zero custom infrastructure code):
-- **[`pooch`](https://pypi.org/project/pooch/)** — `services/temporal/_install.py` downloads `temporal-server` + `temporal-sql-tool` from `temporalio/temporal` GitHub releases. SHA-256 verified (digests pinned in `_install.py:_CHECKSUMS`); XDG-cached via `pooch.os_cache()`; tar.gz / zip extraction handled by `pooch.Untar()` / `pooch.Unzip()`. Falls back to `shutil.which("temporal-server")` for system installs. ~30 LOC total.
-- **[`pgserver`](https://pypi.org/project/pgserver/)** — bundles PostgreSQL 16.2 binaries cross-platform (Linux / macOS / Windows, x86_64 + ARM64) via pip. Single API: `pgserver.get_server(data_dir)` returns a managed instance. `PostgresRuntime` wraps its lifecycle in `BaseSupervisor.start()` / `.stop()`.
-- **`BaseProcessSupervisor` + `BaseSupervisor`** (`server/services/_supervisor/`) — the existing in-house supervisor base classes that `server/nodes/whatsapp/_runtime.py` already uses. Provides cross-platform signal handling (POSIX setsid + Windows Job Objects + psutil tree-kill), restart policy via tenacity, log draining, status snapshots. We subclass both — zero custom supervisor logic.
+- **[`pooch`](https://pypi.org/project/pooch/)** — `services/temporal/_install.py` downloads the official `temporal` CLI archive from `https://temporal.download/cli/archive/latest?platform=<os>&arch=<arch>`. Cross-platform (Windows zip / macOS+Linux tar.gz), XDG-cached via `pooch.os_cache("machinaos-temporal")`. Standalone entry: `python -m services.temporal._install` (invoked by `machina build` step [6/6] so first `machina start` doesn't pay the ~114 MB download).
+- **`BaseProcessSupervisor` + `BaseSupervisor`** (`server/services/_supervisor/`) — the in-house supervisor base classes that `server/nodes/whatsapp/_runtime.py` also uses. Provides cross-platform signal handling (POSIX `setsid` + Windows Job Objects + `CREATE_NEW_PROCESS_GROUP` for graceful `CTRL_BREAK_EVENT` shutdown), restart policy via tenacity, log draining, status snapshots. We subclass both — zero custom supervisor logic.
 
-**ServiceSpec wiring**: [`cli/commands/_temporal_specs.py`](../cli/commands/_temporal_specs.py) returns the ServiceSpec for the supervised Temporal dev server (env reads happen inside `temporal_specs()` at call time, not module load -- safe to import before `cli.config.load_config()` runs). Both `start.py` and `dev.py` call it. The generic supervised-runtime shim lives at [`server/services/temporal/_supervised_runtime.py`](../server/services/temporal/_supervised_runtime.py) (~50 LOC) -- colocated with the factory it imports so the spawned `uv run python -m services.temporal._supervised_runtime services.temporal._runtime:get_temporal_server_runtime` resolves out of the workspace `.venv` without any cross-tree path plumbing.
+**ServiceSpec wiring**: [`cli/commands/_temporal_specs.py`](../cli/commands/_temporal_specs.py) returns one ServiceSpec for the supervised Temporal dev server (env reads happen inside `temporal_specs()` at call time, safe to import before `cli.config.load_config()` runs). Both `start.py` and `dev.py` call it. The generic supervised-runtime shim lives at [`server/services/temporal/_supervised_runtime.py`](../server/services/temporal/_supervised_runtime.py) so the spawned `uv run python -m services.temporal._supervised_runtime services.temporal._runtime:get_temporal_server_runtime` resolves out of the workspace `.venv` without any cross-tree path plumbing.
 
 **WS surface**: `_handlers.py` registers `temporal_status` / `temporal_start` / `temporal_stop` via `services.ws_handler_registry.register_ws_handlers`. `_refresh.py` registers a WS-connect callback via `services.status_broadcaster.register_service_refresh` so the FE health indicator stays current.
 
-**Port management**: Temporal owns ports 7233 / 8233 / 8080 / 9090. Postgres picks a dynamic free port (read via `get_postgres_runtime().uri`). Both are excluded from MachinaOS `allPorts` and from port-freeing in `scripts/start.js`.
+**Resumption toggle**: [`TemporalClientWrapper.terminate_running_workflows`](../server/services/temporal/client.py) — runs once at server lifespan startup, between client connect and worker start, gated on `TEMPORAL_TERMINATE_RUNNING_ON_STARTUP` (default `true`). Queries Visibility for every `Running` workflow and calls `handle.terminate(reason="MachinaOS startup: auto-resumption disabled")`. **History is preserved** (UI shows workflows as `Terminated`, not deleted); only active execution stops. Disables resumption while `DeploymentManager` has no boot-time reconcile against Temporal Visibility yet — resumed workflows would otherwise keep executing but be invisible to the MachinaOS UI. Flip to `false` once the reconcile lands.
 
-**Direct CLI access** is still possible — the `temporal` binary on PATH (or under `pooch.os_cache("machinaos-temporal")`) supports `temporal server start --config <yaml>`, `temporal-sql-tool` subcommands, and `tctl`. The supervisor invokes these binaries; you can too.
+**Port management**: Temporal owns ports 7233 (gRPC) + 8080 (Web UI). Both bound by the same `temporal.exe` process; both listed in `cli.config.Config.all_ports` so `machina stop`'s port-freeing pre-flight covers them.
 
-**Cluster tunables** (all live in [`core/config.py:Settings`](../server/core/config.py); zero magic numbers in the runtime / config / supervisor wiring):
+**Direct CLI access**: the pooch-installed `temporal` binary lives under `~/.cache/MachinaOs/machinaos-temporal/` (Linux) / `~/Library/Caches/MachinaOs/machinaos-temporal/` (macOS) / `%LOCALAPPDATA%\MachinaOs\Cache\machinaos-temporal\` (Windows). Run `temporal --version`, `temporal workflow list`, etc. directly from there.
 
-| Setting | Env var | Default | Purpose |
+**Cluster tunables** — all sourced from `.env.template` (canonical defaults; no Python-side fallbacks). Settings fields with `Field(env="...")` require the env var to be present, surfaced via `cli.config.load_config()`'s `.env.template` → `.env` → `os.environ` merge.
+
+| Setting | Env var | `.env.template` default | Purpose |
 |---|---|---|---|
-| `temporal_backend` | `TEMPORAL_BACKEND` | `postgres` | Backend selector — `postgres` (default, durable) / `sqlite` (fast-iteration dev). |
-| `temporal_frontend_grpc_port` | `TEMPORAL_FRONTEND_GRPC_PORT` | `7233` | gRPC port the SDK client connects to. Drives the readiness probe + cluster `rpcAddress`. |
-| `temporal_matching_grpc_port` | `TEMPORAL_MATCHING_GRPC_PORT` | `7235` | Internal matching service. |
-| `temporal_history_grpc_port` | `TEMPORAL_HISTORY_GRPC_PORT` | `7234` | Internal history service. |
-| `temporal_worker_grpc_port` | `TEMPORAL_WORKER_GRPC_PORT` | `7239` | Internal worker service. |
-| `temporal_bind_local_only` | `TEMPORAL_BIND_LOCAL_ONLY` | `true` | When `true`, all gRPC ports bind `127.0.0.1`. Flip to `false` for multi-host deployments (`0.0.0.0`). |
-| `temporal_num_history_shards` | `TEMPORAL_NUM_HISTORY_SHARDS` | `4` | History-shard count. Bump for higher write throughput; not online-resizable. |
-| `temporal_default_max_conns` | `TEMPORAL_DEFAULT_MAX_CONNS` | `20` | Postgres pool size for the `temporal` (history) datastore. |
-| `temporal_visibility_max_conns` | `TEMPORAL_VISIBILITY_MAX_CONNS` | `4` | Postgres pool size for the `temporal_visibility` datastore. |
-| `temporal_max_conn_lifetime` | `TEMPORAL_MAX_CONN_LIFETIME` | `5m` | Postgres connection rotation interval. Accepts Go-duration strings (`30m`, `2h`, etc.). Short window forces periodic refresh — Temporal community recommendation. |
-| `temporal_binary_version` | `TEMPORAL_BINARY_VERSION` | `1.31.0` | Pinned `temporalio/temporal` release tag. Bumping requires a matching entry in `_install.py:_CHECKSUMS_BY_VERSION`. |
-| `temporal_graceful_shutdown_seconds` | `TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS` | `30` | SIGTERM → SIGKILL grace window for the Temporal binary supervisor. Shared with the embedded worker shutdown. |
-| `temporal_postgres_dsn` | `TEMPORAL_POSTGRES_DSN` | (unset) | Reserved for multi-host deployments — when set, bypasses pgserver and points Temporal at an external Postgres. Out of scope for current sprint. |
+| `temporal_enabled` | `TEMPORAL_ENABLED` | `true` | Master toggle. When false, `WorkflowService` falls back to parallel/sequential executor. |
+| `temporal_server_address` | `TEMPORAL_SERVER_ADDRESS` | `localhost:7233` | Address the Python SDK client connects to. |
+| `temporal_namespace` | `TEMPORAL_NAMESPACE` | `default` | Bootstrapped at server start. |
+| `temporal_task_queue` | `TEMPORAL_TASK_QUEUE` | `machina-tasks` | Default task queue for the embedded worker. |
+| `temporal_per_type_dispatch` | `TEMPORAL_PER_TYPE_DISPATCH` | `true` | F4.A flag — per-type activity dispatch. |
+| `temporal_agent_workflow_enabled` | `TEMPORAL_AGENT_WORKFLOW_ENABLED` | `true` | F4.B flag — agent-as-child-workflow. |
+| `temporal_frontend_grpc_port` | `TEMPORAL_FRONTEND_GRPC_PORT` | `7233` | gRPC port (`--port`). Drives the readiness probe. |
+| `temporal_ui_port` | `TEMPORAL_UI_PORT` | `8080` | Web UI port (`--ui-port`). CLI default is `--port + 1000 = 8233`; we override to 8080 for muscle memory. |
+| `temporal_sqlite_path` | `TEMPORAL_SQLITE_PATH` | `temporal.db` | SQLite file (`--db-filename`). Resolved relative to `DATA_DIR` (= `~/.machina/`) unless absolute — flat under `~/.machina/` like `credentials.db` / `workflow.db`. |
+| `temporal_graceful_shutdown_seconds` | `TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS` | `30` | `CTRL_BREAK_EVENT` (Windows) / `SIGTERM` (POSIX) → tree-kill grace window. Shared with the embedded worker shutdown. |
+| `temporal_terminate_running_on_startup` | `TEMPORAL_TERMINATE_RUNNING_ON_STARTUP` | `true` | Resumption toggle (see above). |
 
-Two supervisor-build-time env vars (read inside `_temporal_specs.py`, not in `Settings`):
+One supervisor-build-time env var (read inside `_temporal_specs.py`, not in `Settings`):
 
-| Env var | Default | Purpose |
+| Env var | `.env.template` default | Purpose |
 |---|---|---|
-| `TEMPORAL_PG_READY_TIMEOUT_SECONDS` | `60` | How long the supervisor waits for pgserver to be ready before marking the spec failed. |
-| `TEMPORAL_SERVER_READY_TIMEOUT_SECONDS` | `120` | How long the supervisor waits for Temporal's gRPC port to come up. Includes the first-run binary download (~90 MB). |
-
-### Known benign log noise
-
-Temporal's matching engine periodically writes task-queue metadata for the **internal `temporal-system` namespace** (e.g. `/_sys/default-worker-tq/1`). When two writes contend, the older one's request context gets canceled — Temporal then auto-retries, and workflow execution is unaffected. The cancellation surfaces in the server log as:
-
-```
-ERROR msg="Operation failed with internal error." error="UpdateTaskQueue failed. Failed to start transaction. Error: context canceled" operation=UpdateTaskQueue
-ERROR msg="Persistent store operation failure" component=matching-engine wf-task-queue-name=/_sys/default-worker-tq/1 wf-namespace=temporal-system
-```
-
-These are **not caused by the Postgres backend** — they appeared identically with the previous SQLite path and are reported as benign across the Temporal community ([forum thread](https://community.temporal.io/t/persistent-store-operation-failure-on-updatetaskqueue-operations/11173)). The connection-pool tunables above (`temporal_default_max_conns`, `temporal_max_conn_lifetime`) are sized per Temporal's recommended baseline to minimise the frequency. No further action is required unless you see them in a **user namespace** (e.g. `default` instead of `temporal-system`), which would indicate a real persistence problem.
+| `TEMPORAL_SERVER_READY_TIMEOUT_SECONDS` | `120` | How long the supervisor waits for Temporal's gRPC port to come up. Covers the first-run binary download (~114 MB) if `machina build` didn't pre-cache. |
 
 ## Debugging
 
 ```bash
-# Check task queue pollers
-curl http://localhost:8233/api/v1/namespaces/default/task-queues/machina-tasks
-
-# List recent workflows
-curl "http://localhost:8233/api/v1/namespaces/default/workflows"
-
-# Get workflow history
-curl "http://localhost:8233/api/v1/namespaces/default/workflows/{id}/history"
-
 # Temporal Web UI
 open http://localhost:8080
 
-# Temporal HTTP API
-open http://localhost:8233
+# List workflows via the local CLI binary (under platformdirs cache)
+~/.cache/MachinaOs/machinaos-temporal/.../temporal.exe workflow list --address localhost:7233
+
+# Re-fetch the binary at any time
+uv run python -m services.temporal._install
 ```

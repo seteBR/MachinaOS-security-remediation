@@ -12,67 +12,25 @@ MachinaOS integrates external services that manage their own lifecycle via CLI t
 
 ## Integrated CLI Services
 
-### Temporal Server (`temporal-server`)
+### Temporal Server (official `temporal` CLI)
 
-Bundles the official Temporal CLI binary with SQLite persistence for local development.
+Wraps the official `temporal` CLI's `server start-dev` mode (per [docs.temporal.io/develop/python/set-up-your-local-python](https://docs.temporal.io/develop/python/set-up-your-local-python)) — SQLite-backed dev server, single process, gRPC + Web UI both embedded.
 
-**Install:**
-```bash
-npm install -g temporal-server
-```
+**Install:** Automated. `machina build` step [6/6] runs `python -m services.temporal._install`, which uses `pooch` to download the official CLI archive from `https://temporal.download/cli/archive/latest?platform=<os>&arch=<arch>` into a per-OS cache (`~/.cache/MachinaOs/machinaos-temporal/` on Linux, `~/Library/Caches/MachinaOs/machinaos-temporal/` on macOS, `%LOCALAPPDATA%\MachinaOs\Cache\machinaos-temporal\` on Windows). No npm package, no system install required.
 
-**CLI:**
-```bash
-temporal-server start       # Daemon (background)
-temporal-server api         # Foreground (blocks)
-temporal-server stop        # Stop
-temporal-server status      # Show status
-temporal-server restart     # Restart
-temporal-server clean       # Stop + remove data
-```
+**Lifecycle:** Managed entirely by the CLI commands (`machina start` / `machina dev` / `machina stop`) — there's no separate `temporal:start` npm script. The supervisor at [cli/supervisor.py](../cli/supervisor.py) spawns the official CLI via the supervised-runtime shim at [server/services/temporal/_supervised_runtime.py](../server/services/temporal/_supervised_runtime.py).
 
-**Ports (managed by temporal-server, NOT by MachinaOS):**
-| Service  | Port |
-|----------|------|
-| gRPC     | 7233 |
-| HTTP API | 8233 |
-| Web UI   | 8080 |
-| Metrics  | 9090 |
+**Ports (declared in `.env.template`, freed by `machina stop`'s port-kill pre-flight):**
+| Service | Port | Env var |
+|---------|------|---------|
+| gRPC    | 7233 | `TEMPORAL_FRONTEND_GRPC_PORT` |
+| Web UI  | 8080 | `TEMPORAL_UI_PORT` (CLI default is 8233; we override) |
 
-**npm scripts:**
-```json
-{
-  "temporal:start": "temporal-server api",
-  "temporal:stop": "temporal-server stop",
-  "temporal:status": "temporal-server status"
-}
-```
+Both bound by the same `temporal.exe` process. Killing the process releases both.
 
-**Integration in start.js:**
-```javascript
-// Check CLI status before building service list
-let temporalRunning = false;
-try {
-  const status = execSync('temporal-server status', {
-    encoding: 'utf-8', timeout: 5000, stdio: 'pipe'
-  });
-  temporalRunning = /running|UP/i.test(status);
-} catch {
-  temporalRunning = false;
-}
-
-// Only add to concurrently if NOT already running
-if (!temporalRunning) services.push('npm:temporal:start');
-```
-
-**Integration in dev.js:**
-No status check needed -- `dev.js` does not use `--kill-others`, so `temporal-server api` exiting early (because it's already running) is harmless.
-
-**Integration in stop.js:**
-```javascript
-// Kill temporal processes by name pattern (not by port)
-const temporalPids = await killByPattern('temporal');
-```
+**Persistence + resumption:**
+- SQLite db at `~/.machina/temporal.db` (`TEMPORAL_SQLITE_PATH=temporal.db`, resolved under `DATA_DIR`). History is preserved across restarts; the Temporal UI keeps showing every workflow that ever ran.
+- Workflow auto-resumption is disabled at boot: [`TemporalClientWrapper.terminate_running_workflows`](../server/services/temporal/client.py) runs once after client connect and terminates every `Running` workflow with `reason="MachinaOS startup: auto-resumption disabled"`. Workflows show as `Terminated` (not deleted) in the UI. Gated by `TEMPORAL_TERMINATE_RUNNING_ON_STARTUP=true`. Flip to `false` once `DeploymentManager` reconcile-against-Visibility lands.
 
 **Embedded worker:**
 The Temporal worker runs inside the Python backend via `TemporalWorkerManager` in `main.py` lifespan. No separate worker process needed for single-server deployments. For horizontal scaling, run standalone workers:

@@ -102,3 +102,49 @@ class TemporalClientWrapper:
         if self._client is not None:
             self._client = None
             logger.info("Disconnected from Temporal server")
+
+    async def terminate_running_workflows(
+        self, *, reason: str = "MachinaOS startup: auto-resumption disabled",
+    ) -> int:
+        """Terminate every workflow in ``Running`` state in our namespace.
+
+        Preserves history — terminated workflows remain visible in the
+        Temporal UI as ``Terminated``, only the active execution stops.
+        Run from ``main.py`` lifespan between client connect and worker
+        start so the worker doesn't accept activities from workflows
+        that are about to be terminated. Gated by
+        ``Settings.temporal_terminate_running_on_startup`` at the call
+        site; this method always terminates when invoked.
+
+        Returns the count of workflows terminated. Failures on
+        individual workflows are logged but don't abort the sweep —
+        terminating a workflow that completed mid-query is a benign
+        race that produces ``WorkflowNotFoundError``.
+        """
+        if self._client is None:
+            logger.warning(
+                "terminate_running_workflows called before connect; no-op"
+            )
+            return 0
+
+        count = 0
+        async for wf in self._client.list_workflows(
+            "ExecutionStatus = 'Running'",
+        ):
+            try:
+                handle = self._client.get_workflow_handle(
+                    wf.id, run_id=wf.run_id,
+                )
+                await handle.terminate(reason=reason)
+                count += 1
+            except Exception as exc:  # noqa: BLE001 — best-effort sweep
+                logger.debug(
+                    f"Failed to terminate workflow id={wf.id} "
+                    f"run_id={wf.run_id}: {exc}"
+                )
+        if count:
+            logger.info(
+                f"Terminated {count} running workflow(s) at startup "
+                "(history preserved; resumption disabled)"
+            )
+        return count

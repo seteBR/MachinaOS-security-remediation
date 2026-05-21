@@ -17,6 +17,7 @@ State layout under ``~/.machina/`` (flat, no redundant nesting):
   - ``~/.machina/claude/``       OAuth state for spawned claude subprocesses
   - ``~/.machina/workspaces/``   per-workflow scratch dirs
   - ``~/.machina/whatsapp/``     persistent WhatsApp session DB
+  - ``~/.machina/temporal/``     temporal-server cwd + SQLite db when persist=true
   - ``~/.machina/credentials.db``  Fernet-encrypted secrets
   - ``~/.machina/workflow.db``     SQLite app DB
 
@@ -31,11 +32,11 @@ uses:
   - macOS:   ``~/Library/Caches/MachinaOs/<service>/``
   - Windows: ``%LOCALAPPDATA%\\MachinaOs\\Cache\\<service>\\``
 
-Out of scope here: ``temporal`` (separate ``pooch`` cache, postgres
-backend only — see ``services/temporal/_install.py``), Himalaya
-(``cargo``/``brew`` system install), and npm packages declared in
-``package.json`` whose binaries pnpm manages directly under
-``node_modules/`` (e.g. ``whatsapp-rpc``'s ``edgymeow``).
+Out of scope here: the downloaded Temporal CLI binary (pooch cache
+under :func:`packages_dir`, see ``services/temporal/_install.py``),
+Himalaya (``cargo``/``brew`` system install), and npm packages
+declared in ``package.json`` whose binaries pnpm manages directly
+under ``node_modules/`` (e.g. ``whatsapp-rpc``'s ``edgymeow``).
 
 The split keeps ``machina clean`` semantics clear: wiping
 :func:`packages_dir` forces a fresh redownload of MachinaOs-managed

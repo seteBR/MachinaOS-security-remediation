@@ -1632,45 +1632,45 @@ Workflows execute via Temporal for durability and horizontal scaling. Three disp
 
 Full architecture, dispatch matrix, per-node lifecycle, heartbeat semantics, the 14 migrating agent types + 2 bypass agents (rlm_agent / claude_code_agent), the 6 F4.B agent activities (`prepare_payload.v1` / `execute_llm_step.v1` / `persist_turn.v1` / `compact_memory.v1` / `store_output.v1` / `broadcast_progress.v1`), and the future `TemporalWorkerPool` per-queue routing live in [docs-internal/TEMPORAL_ARCHITECTURE.md](./docs-internal/TEMPORAL_ARCHITECTURE.md). Tool-call dispatch under F4.A documented at [docs-internal/tool_building_pipeline.md §9](./docs-internal/tool_building_pipeline.md).
 
-**Configuration** (`.env`):
+**Configuration** (`.env.template` — canonical defaults; `.env` layers user overrides):
 ```env
+TEMPORAL_ENABLED=true
 TEMPORAL_SERVER_ADDRESS=localhost:7233
 TEMPORAL_NAMESPACE=default
 TEMPORAL_TASK_QUEUE=machina-tasks
 TEMPORAL_PER_TYPE_DISPATCH=true         # F4.A flag — per-type activity dispatch
 TEMPORAL_AGENT_WORKFLOW_ENABLED=true    # F4.B flag — agent-as-child-workflow
+TEMPORAL_FRONTEND_GRPC_PORT=7233
+TEMPORAL_UI_PORT=8080                   # Web UI (override of CLI default 8233)
+TEMPORAL_SQLITE_PATH=temporal.db        # Flat under DATA_DIR (~/.machina/temporal.db)
+TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS=30
+TEMPORAL_SERVER_READY_TIMEOUT_SECONDS=120
+TEMPORAL_TERMINATE_RUNNING_ON_STARTUP=true   # see "Resumption" below
 ```
 
-**Temporal binary + persistence** are managed in-process by the plugin-folder pattern under [`server/services/temporal/`](./server/services/temporal/) — the `temporal-server` npm package is no longer used. Binary distribution + lifecycle = standard libs, zero custom code:
+**Temporal binary + persistence** are managed in-process by the plugin-folder pattern under [`server/services/temporal/`](./server/services/temporal/). Single supervised process — the official `temporal` CLI's `server start-dev` mode (per [docs.temporal.io/develop/python/set-up-your-local-python](https://docs.temporal.io/develop/python/set-up-your-local-python)):
 
-- **`_install.py`** — [`pooch`](https://pypi.org/project/pooch/) downloads `temporal-server` + `temporal-sql-tool` from `temporalio/temporal` GitHub releases (SHA-256 verified, XDG-cached cross-platform). Falls back to `shutil.which("temporal-server")` when a system install is on PATH (brew / scoop / cargo).
-- **`_runtime.py`** — `PostgresRuntime` (subclasses `BaseSupervisor`; wraps [`pgserver`](https://pypi.org/project/pgserver/) which bundles PostgreSQL 16.2 binaries cross-platform) + `TemporalServerRuntime` (subclasses `BaseProcessSupervisor`; runs the binary with a Python-rendered YAML config). Same singleton + lifecycle surface every other supervised service uses ([`nodes/whatsapp/_runtime.py`](./server/nodes/whatsapp/_runtime.py) is the template).
-- **`_config.py`** — `pyyaml.safe_dump` of the Temporal cluster config; `temporal-sql-tool create-database` + `setup-schema` + `update-schema` for both `temporal` and `temporal_visibility` Postgres databases (idempotent).
+- **`_install.py`** — [`pooch`](https://pypi.org/project/pooch/) downloads the official `temporal` CLI archive from `https://temporal.download/cli/archive/latest?platform=<os>&arch=<arch>`. Cross-platform (Windows zip / macOS+Linux tar.gz), XDG-cached. Standalone entry: `python -m services.temporal._install` (invoked by `machina build` step [6/6]).
+- **`_runtime.py`** — `TemporalServerRuntime(BaseProcessSupervisor)` spawns `temporal server start-dev` with `--port`, `--ui-port`, `--db-filename`, `--namespace`. Same singleton + lifecycle surface every other supervised service uses ([`nodes/whatsapp/_runtime.py`](./server/nodes/whatsapp/_runtime.py) is the template).
 - **`_handlers.py` + `_refresh.py`** — `temporal_status` / `_start` / `_stop` WS commands and the WS-connect status snapshot, registered through `services.ws_handler_registry` and `services.status_broadcaster.register_service_refresh`.
-
-**Backend selection** via `TEMPORAL_BACKEND` env var:
-- `sqlite` (dev default) — single ServiceSpec runs `temporal api` against an in-memory / file-based SQLite. Same dev experience as before.
-- `postgres` (prod) — two ServiceSpecs run via the `_supervised_runtime.py` shim: `temporal-postgres` (pgserver) then `temporal-server` (Temporal binary). The supervisor's TCP readiness probe orders postgres → temporal automatically.
+- **`client.py`** — `TemporalClientWrapper.connect()` + `terminate_running_workflows()` (resumption toggle, see below).
 
 **Ports:**
-| Service   | Port | URL                    |
-|-----------|------|------------------------|
-| gRPC      | 7233 | localhost:7233          |
-| HTTP API  | 8233 | http://localhost:8233   |
-| Web UI    | 8080 | http://localhost:8080   |
-| Metrics   | 9090 | http://localhost:9090   |
-| Postgres  | dyn  | postgresql://...:NNNNN  (`postgres` backend; pgserver picks a free port — read via `get_postgres_runtime().uri`) |
+| Service | Port | URL                    |
+|---------|------|------------------------|
+| gRPC    | 7233 | localhost:7233         |
+| Web UI  | 8080 | http://localhost:8080  |
 
-**CLI commands** (still available when `temporal` is on PATH or pooch-installed):
-```bash
-temporal-server start --config <yaml>   # what TemporalServerRuntime invokes
-temporal api                            # what the sqlite ServiceSpec invokes
-temporal --version
-```
+Both ports are bound by the same `temporal.exe` process (per docs.temporal.io/cli/server — "all running in a single process").
 
-**Start script integration** ([`cli/commands/start.py`](./cli/commands/start.py) + [`cli/commands/dev.py`](./cli/commands/dev.py)): both call `temporal_specs(root, cfg)` ([`cli/commands/_temporal_specs.py`](./cli/commands/_temporal_specs.py)) which returns the ServiceSpec for the supervised Temporal dev server. The supervised-runtime shim lives at [`server/services/temporal/_supervised_runtime.py`](./server/services/temporal/_supervised_runtime.py) (relocated from `cli/commands/` so the spawned `uv run python -m services.temporal._supervised_runtime` resolves out of the workspace `.venv` without any cross-tree path plumbing). The supervisor's `_temporal_running()` probe still short-circuits if Temporal is already running on 7233 (lets you run `temporal-server start` standalone for debugging).
+**Resumption** — controlled by `TEMPORAL_TERMINATE_RUNNING_ON_STARTUP` (default `true`):
+- Temporal SQLite is always persisted (history preserved across restarts; UI keeps showing every workflow that ever ran).
+- On server boot, after the Temporal client connects but BEFORE the worker starts, `TemporalClientWrapper.terminate_running_workflows()` queries Visibility for every `Running` workflow and calls `handle.terminate(reason="MachinaOS startup: auto-resumption disabled")`. Workflows show as `Terminated` (not deleted) in the Temporal UI.
+- Why: `DeploymentManager` has no boot-time reconcile against Temporal Visibility yet — resumed workflows would otherwise keep executing but be invisible to the MachinaOS UI. Flip to `false` once the reconcile lands.
 
-**Docker**: Optional. The Python supervisor handles cross-platform lifecycle without Docker; production-scale Temporal+Postgres runs identically on Linux / macOS / Windows via pip-installed binaries.
+**Start script integration** ([`cli/commands/start.py`](./cli/commands/start.py) + [`cli/commands/dev.py`](./cli/commands/dev.py)): both call `temporal_specs(root, cfg)` ([`cli/commands/_temporal_specs.py`](./cli/commands/_temporal_specs.py)) which returns the single ServiceSpec for the supervised Temporal dev server. The supervised-runtime shim lives at [`server/services/temporal/_supervised_runtime.py`](./server/services/temporal/_supervised_runtime.py) so the spawned `uv run python -m services.temporal._supervised_runtime` resolves out of the workspace `.venv` without any cross-tree path plumbing. The supervisor's `_temporal_running()` probe short-circuits if Temporal is already running on 7233 (lets you run `temporal server start-dev` standalone for debugging).
+
+**Docker**: Not used. The Python supervisor handles cross-platform lifecycle via the pooch-downloaded CLI — single binary, single process, single SQLite file.
 
 **Execution Routing** (`workflow.py`):
 1. If `TEMPORAL_ENABLED=true` and Temporal configured → `_execute_temporal()`
