@@ -38,7 +38,7 @@ corresponding `start.log` measurement.
 | 2026-05-05 | Vite `manualChunks` (split reactflow / radix / lobehub-icons / TanStack Query / markdown stack) + `target: 'es2022'` | main bundle 232 KB gz, 7 vendor chunks separately cached | `0b45fb1` | same |
 | 2026-05-05 | Pre-bundle Node.js sidecar with esbuild (`tsx src/index.ts` → `node dist/index.js`) | ~500 ms-1 s of tsx startup per server boot | `0b45fb1` | same |
 | 2026-05-05 | Scoped `python -O -m compileall` over project source dirs (excludes `.venv/`, `tests/`) | 3-5 s on warm-disk imports | `0b45fb1` | same |
-| 2026-05-05 | Test coverage: 12 build-orchestrator + 32 config-contract tests under `machina/tests/` | n/a (regression guard) | `0f1e55e` | same |
+| 2026-05-05 | Test coverage: 12 build-orchestrator + 32 config-contract tests under `cli/tests/` | n/a (regression guard) | `0f1e55e` | same |
 | 2026-05-06 | Frontend WS reconnect → PartySocket; auth bootstrap → TanStack Query; CloudEvents envelope typed | **~20 s** (eliminates +12 s WS drop + +7 s reconnect cycle on cold start) | `e77215c` | inline plan |
 
 ## Where launch time is spent today (post `e77215c`, warm cache)
@@ -127,10 +127,10 @@ uv run python -O -m compileall -q -j 0 services core nodes routers models middle
 ```
 
 `machina build` runs this as step `[5/6]`. The path list lives in
-[machina/commands/build.py](../machina/commands/build.py)'s
+[cli/commands/build.py](../cli/commands/build.py)'s
 `COMPILEALL_SOURCE_DIRS` constant; install.js mirrors the same list.
 Tests at
-[machina/tests/test_build_compile_pipeline.py](../machina/tests/test_build_compile_pipeline.py)
+[cli/tests/test_build_compile_pipeline.py](../cli/tests/test_build_compile_pipeline.py)
 lock the contract.
 
 Without this step on first launch, every `.py` import compiles

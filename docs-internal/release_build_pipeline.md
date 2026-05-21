@@ -11,7 +11,7 @@ User scope (confirmed before this work): stay on npm distribution; **no** Nuitka
 | TypeScript type-check | `@typescript/native-preview` (tsgo) | Microsoft's Go-port of `tsc`, ~10x faster on `--noEmit`. Type-check only — JS emit in tsgo is still preview. Vite/esbuild keep producing the actual JS bundles. Stays in `devDependencies`, never ships to users. |
 | Vite output | `manualChunks` + `target: 'es2022'` | Split heavy libs (reactflow, radix-ui, lobehub, react-markdown stack) so the main bundle no longer hits the 1500KB warning ceiling. ES2022 unlocks `findLast` / optional-chaining-assignment without polyfills (Chrome 94+, FF 93+, Safari 15.4+ — within React 19 / Tailwind 4 baseline). |
 | Node sidecar | `esbuild` bundle to `dist/index.js`, run via `node` | Drops tsx interpreter startup (~500ms-1s every server boot). `--packages=external` keeps Express in `node_modules/` for patch flow. |
-| Python | `python -O -m compileall -q -j 0 server/` | Pre-compile bytecode. CLAUDE.md aspirationally documents this; `machina/commands/build.py` doesn't actually do it today. ~5-10s cold-start gain. `-O` strips asserts + `__debug__` branches. |
+| Python | `python -O -m compileall -q -j 0 server/` | Pre-compile bytecode. Implemented as step `[5/6]` in [`cli/commands/build.py`](../cli/commands/build.py) (`COMPILEALL_SOURCE_DIRS` constant lists the dirs). ~5-10s cold-start gain. `-O` strips asserts + `__debug__` branches. |
 
 ## Implementation steps
 
@@ -48,12 +48,15 @@ Keep `sourcemap: analyze` (already correct), keep React Compiler config.
 
 ### 4. Python bytecode pre-compile
 
-- `machina/commands/build.py` → after `uv sync`, add:
+- [`cli/commands/build.py`](../cli/commands/build.py) → after `uv sync` (step `[4/6]`), step `[5/6]` runs:
+  ```python
+  run(
+      uv_run("python", "-O", "-m", "compileall", "-q", "-j", "0", *COMPILEALL_SOURCE_DIRS),
+      cwd=server_cwd,
+      check=False,  # missing pyc is non-fatal — runtime regenerates as needed
+  )
   ```
-  console.log("[5/5] Compiling Python bytecode...")
-  run(["uv", "run", "python", "-O", "-m", "compileall", "-q", "-j", "0", "."], cwd=server_dir)
-  ```
-  Fix the existing mislabeled `[3/4]` and `[4/4]` lines to match the new `/5` total.
+  The list of source dirs is the public `cli.commands.build.COMPILEALL_SOURCE_DIRS` constant — `scripts/install.js` mirrors it.
 
 The npm tarball still excludes `__pycache__/` per `package.json` `files` (cross-Python-minor pyc fragility) — `compileall` runs on the user's machine via `machina build` or `scripts/install.js` post-install.
 
@@ -77,7 +80,7 @@ Idempotent on re-runs (compileall only rewrites stale pyc; esbuild is determinis
 | `client/vite.config.js` | + manualChunks, target, lower warning |
 | `server/nodejs/package.json` | + esbuild devDep, build script, change start |
 | `server/nodejs/.gitignore` | new — ignore `dist/` |
-| `machina/commands/build.py` | + compileall step, fix step numbering |
+| `cli/commands/build.py` | + compileall step (`[5/6]`), `COMPILEALL_SOURCE_DIRS` constant |
 | `scripts/install.js` | + sidecar bundle + compileall calls |
 | `.github/workflows/release.yml` | + typecheck gate before build |
 

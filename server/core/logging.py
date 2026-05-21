@@ -23,7 +23,7 @@ from core.config import Settings
 # ``routers.websocket``). The Terminal panel renders a single
 # ``source`` column, so we collapse the dotted path to a concise tag
 # (≤12 chars suits the supervisor's Honcho-style alignment, see
-# ``machina/colors.py``).
+# ``cli/colors.py``).
 #
 # Three resolution stages, in order:
 #
@@ -241,7 +241,7 @@ def configure_logging(settings: Settings) -> None:
     """Configure structured logging based on settings.
 
     Console-mode output is deliberately timestamp-less — the supervisor
-    (``machina/colors.py``) prepends ``[HH:MM:SS.fff]`` to every line
+    (``cli/colors.py``) prepends ``[HH:MM:SS.fff]`` to every line
     it aggregates, so an inner ``TimeStamper`` would produce double-time
     output. JSON mode keeps the ISO timestamp because machine
     consumers (log shippers, query engines) parse it as a field.
