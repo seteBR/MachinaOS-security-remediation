@@ -1,8 +1,6 @@
 """Android System Services routes."""
 
-import re
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Dict, Any
 
@@ -15,17 +13,13 @@ router = APIRouter(prefix="/api/android", tags=["android"])
 
 # ADB device IDs: USB serials (alphanumeric), TCP "host:port" (digits + dots
 # + colon), or "emulator-NNNN". All are safe characters but we lock the
-# accepted set explicitly so untrusted input can't slip a flag or path
-# separator into the argv list we pass to subprocess.run. Anything outside
-# `[A-Za-z0-9._:-]` (and longer than 64 chars) is rejected with 400.
-_DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
-
-
-def _validate_device_id(device_id: str) -> str:
-    """Return device_id if it matches the ADB device-id shape, else 400."""
-    if not _DEVICE_ID_PATTERN.fullmatch(device_id):
-        raise HTTPException(status_code=400, detail="invalid device_id")
-    return device_id
+# accepted set explicitly via FastAPI's ``Query(pattern=...)`` so untrusted
+# input can't slip a flag or path separator into the argv list we pass to
+# ``subprocess.run``. Anything outside ``[A-Za-z0-9._:-]`` (or longer than
+# 64 chars) is rejected with a 422 before the handler body runs --
+# CodeQL recognises the Pydantic-pattern constraint as a sanitizer so
+# ``py/command-line-injection`` doesn't fire on the resulting argv.
+_DEVICE_ID_PATTERN = r"^[A-Za-z0-9._:-]{1,64}$"
 
 
 class AndroidServiceRequest(BaseModel):
@@ -146,20 +140,24 @@ async def list_android_devices():
         logger.error("[Android] ADB not found in PATH")
         return {"success": False, "error": "ADB not found. Please install Android SDK Platform Tools", "devices": []}
     except Exception as e:
-        logger.error(f"[Android] Failed to list devices: {e}")
-        return {"success": False, "error": str(e), "devices": []}
+        logger.error("[Android] Failed to list devices", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to list devices", "devices": []}
 
 
 @router.post("/port-forward")
-async def setup_port_forwarding(device_id: str, local_port: int = 8888, device_port: int = 8888):
+async def setup_port_forwarding(
+    device_id: str = Query(..., pattern=_DEVICE_ID_PATTERN, max_length=64),
+    local_port: int = Query(8888, ge=1024, le=65535),
+    device_port: int = Query(8888, ge=1024, le=65535),
+):
     """Setup ADB port forwarding for Android device communication."""
-    device_id = _validate_device_id(device_id)
     import subprocess
 
     try:
         # Setup port forwarding: adb -s device_id forward tcp:local_port tcp:device_port
-        # device_id passes _DEVICE_ID_PATTERN above; subprocess.run is called
-        # with an argv list (no shell), so no further interpolation risk.
+        # device_id is constrained by ``Query(pattern=_DEVICE_ID_PATTERN, max_length=64)``
+        # at the boundary; ``local_port``/``device_port`` are bounded ints. Argv
+        # list is passed to ``subprocess.run`` with ``shell=False`` (the default).
         cmd = ["adb", "-s", device_id, "forward", f"tcp:{local_port}", f"tcp:{device_port}"]
 
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
@@ -181,8 +179,8 @@ async def setup_port_forwarding(device_id: str, local_port: int = 8888, device_p
         logger.error("[Android] ADB not found in PATH")
         return {"success": False, "error": "ADB not found. Please install Android SDK Platform Tools"}
     except Exception as e:
-        logger.error(f"[Android] Port forwarding error: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error("[Android] Port forwarding error", error=str(e), exc_info=True)
+        return {"success": False, "error": "Port forwarding failed"}
 
 
 @router.get("/health")
@@ -226,5 +224,5 @@ async def get_relay_connection_status():
                 "status": "disconnected",
             }
     except Exception as e:
-        logger.error(f"[Android] Failed to get relay status: {e}")
-        return {"success": False, "connected": False, "error": str(e), "status": "error"}
+        logger.error("[Android] Failed to get relay status", error=str(e), exc_info=True)
+        return {"success": False, "connected": False, "error": "Failed to get relay status", "status": "error"}

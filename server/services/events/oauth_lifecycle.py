@@ -35,6 +35,8 @@ fail the callback CSRF check.
 
 from __future__ import annotations
 
+import html
+import json
 from typing import Any, Awaitable, Callable, Dict, Optional, Protocol
 
 from fastapi import APIRouter, Query, Request, WebSocket
@@ -493,9 +495,9 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     <script>
         if (window.opener) {{
             window.opener.postMessage({{
-                type: '{provider}_oauth_callback',
+                type: {provider_js},
                 success: {success_js},
-                message: '{message_js}',
+                message: {message_js},
             }}, '*');
         }}
         setTimeout(function() {{ window.close(); }}, 2000);
@@ -525,17 +527,58 @@ def render_oauth_callback_html(
     ``{provider}_oauth_callback`` message to ``window.opener`` (the
     popup's parent) and auto-closes after 2 seconds.
     """
+    # ``message`` reaches the page via the OAuth provider's ``?error_description=``
+    # query string -- attacker-controllable. Escape for both contexts the
+    # template interpolates it into:
+    #   * ``<p>{message}</p>``                      → ``html.escape`` neutralises
+    #                                                  ``<script>`` / attribute breakouts.
+    #   * ``postMessage({ message: '{message_js}' })`` → ``json.dumps`` wraps the
+    #                                                  string in correctly-escaped
+    #                                                  JS source (matching quotes,
+    #                                                  ``</script>`` neutralised,
+    #                                                  unicode literals).
+    # CodeQL recognises both as ``py/reflective-xss`` sanitizers.
+    # ``message`` reaches the page via the OAuth provider's
+    # ``?error_description=`` query string -- attacker-controllable.
+    # Two sinks need separate escaping:
+    #
+    # * ``<p>{message}</p>``         → ``html.escape`` neutralises ``<script>``,
+    #                                   attribute breakouts, ampersand-entities.
+    # * ``postMessage({message: X})`` → ``json.dumps`` + ``_js_safe`` post-escape.
+    #                                   ``json.dumps`` alone does NOT escape ``<``
+    #                                   or ``</``: an attacker-controlled message
+    #                                   containing ``</script>`` would close the
+    #                                   surrounding ``<script>`` tag because the
+    #                                   browser tokenizer scans for that pattern
+    #                                   before parsing the JS string. Per OWASP
+    #                                   guidance we ``\u``-escape ``<`` ``>`` ``&``
+    #                                   so the JSON literal is also safe inside
+    #                                   a ``<script>`` block.
     is_success = status == "success"
     title = f"{provider.capitalize()} Connected" if is_success else "Connection Failed"
     return _HTML_TEMPLATE.format(
-        title=title,
-        message=message,
+        title=html.escape(title),
+        message=html.escape(message),
         color_hex=color_hex,
         icon_path=_SUCCESS_ICON if is_success else _ERROR_ICON,
-        provider=provider,
+        provider_js=_js_safe(json.dumps(f"{provider}_oauth_callback")),
         success_js=str(is_success).lower(),
-        message_js=message.replace("'", "\\'"),
+        message_js=_js_safe(json.dumps(message)),
     )
+
+
+def _js_safe(json_literal: str) -> str:
+    """Post-escape a ``json.dumps`` output for safe inlining inside ``<script>``.
+
+    ``json.dumps`` follows the JSON spec, which doesn't require ``<`` / ``>`` /
+    ``&`` to be escaped -- but an attacker-controlled string containing
+    ``</script>`` inside a JSON literal would still close the surrounding
+    ``<script>`` block (the browser tokenizer hunts for ``</script>`` regardless
+    of JS string-literal state). The OWASP Cheat Sheet recommends ``\\u``-encoding
+    those three characters before emission. CodeQL recognises this pattern as a
+    ``py/reflective-xss`` sanitizer.
+    """
+    return json_literal.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 __all__ = [

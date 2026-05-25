@@ -107,14 +107,15 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
+        # ``cache:`` key intentionally omitted (release-job hardening).
+        # A poisoned cache from a previous CI run cannot taint the
+        # tarball when caching is disabled outright; zizmor's
+        # ``cache-poisoning`` audit requires the input absent, not just
+        # set to an empty string.
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-          # cache: false in release jobs (wrangler hardening). A
-          # poisoned cache from previous CI runs cannot taint the
-          # tarball; release-time installs always pull fresh.
-          cache: ''
 
       - name: Download built client
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -174,12 +175,13 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
+        # ``cache:`` key intentionally omitted (release-job hardening
+        # -- matches the publish-npm job above; zizmor's
+        # ``cache-poisoning`` audit requires the input absent).
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           registry-url: 'https://npm.pkg.github.com'
-          # cache: false in release jobs (wrangler hardening).
-          cache: ''
 
       - name: Download built client
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

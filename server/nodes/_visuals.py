@@ -171,13 +171,14 @@ def get_plugin_icon_path(node_type: str, variant: str = "light") -> Optional[Pat
         return None
 
     # Candidate filenames in resolution order. Per-node-type first so
-    # multi-node folders can override the shared icon for specific
-    # node types. ``node_type`` is already constrained to
-    # ``NODE_TYPE_PATTERN`` (``^[A-Za-z_][A-Za-z0-9_]*$``) by
-    # ``is_valid_node_type`` above -- no path separators possible --
-    # but resolving + ``is_relative_to(plugin_dir)`` gives CodeQL a
-    # path-injection sanitizer it can statically prove (closes the
-    # ``py/path-injection`` alert without weakening the contract).
+    # multi-node folders can override the shared icon for specific node
+    # types. ``node_type`` is already constrained to ``NODE_TYPE_PATTERN``
+    # (``^[A-Za-z_][A-Za-z0-9_]*$``) by ``is_valid_node_type`` above --
+    # no path separators possible -- but we resolve the candidate and
+    # call ``Path.relative_to(plugin_dir)`` (which raises ``ValueError``
+    # on traversal). CodeQL's taint tracker recognises
+    # ``Path.relative_to`` as a ``py/path-injection`` sanitizer; the
+    # ``is_relative_to`` predicate it does not.
     candidates: list[str] = []
     if variant == "dark":
         candidates.append(f"icon_{node_type}.dark.svg")
@@ -188,7 +189,9 @@ def get_plugin_icon_path(node_type: str, variant: str = "light") -> Optional[Pat
 
     for name in candidates:
         candidate = (plugin_dir / name).resolve()
-        if not candidate.is_relative_to(plugin_dir):
+        try:
+            candidate.relative_to(plugin_dir)
+        except ValueError:
             continue
         if candidate.exists():
             return candidate

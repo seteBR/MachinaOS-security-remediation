@@ -88,8 +88,8 @@ async def clear_workflow_outputs(
         await workflow_service.clear_all_outputs(session_id)
         return {"success": True, "message": f"Cleared all outputs for session: {session_id}"}
     except Exception as e:
-        logger.error("Failed to clear outputs", session_id=session_id, error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to clear outputs", session_id=session_id, error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to clear outputs"}
 
 
 @router.get("/health")

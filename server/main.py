@@ -489,13 +489,16 @@ class CatchAllExceptionsMiddleware(BaseHTTPMiddleware):
         try:
             return await call_next(request)
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            logger.error(f"Unhandled exception: {type(e).__name__}: {str(e)}", exc_info=True)
+            # Full traceback goes to the structured log + file handler;
+            # the HTTP response body intentionally carries a generic
+            # message so an attacker hitting an unhandled-exception code
+            # path can't enumerate stack frames, file paths, or library
+            # versions. Matches the OWASP ``py/stack-trace-exposure``
+            # mitigation pattern.
+            logger.error("Unhandled exception", error_type=type(e).__name__, error=str(e), exc_info=True)
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={"success": False, "error": f"{type(e).__name__}: {str(e)}", "detail": "Internal server error"},
+                content={"success": False, "error": "Internal server error", "detail": "Internal server error"},
             )
 
 

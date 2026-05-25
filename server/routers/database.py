@@ -31,8 +31,8 @@ async def save_node_parameters(request: NodeParameterRequest, database: Database
         success = await database.save_node_parameters(request.node_id, request.parameters)
         return {"success": success}
     except Exception as e:
-        logger.error("Failed to save node parameters", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to save node parameters", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to save node parameters"}
 
 
 @router.get("/node-parameters/{node_id}")
@@ -42,8 +42,8 @@ async def get_node_parameters(node_id: str, database: Database = Depends(lambda:
         parameters = await database.get_node_parameters(node_id)
         return {"success": True, "parameters": parameters}
     except Exception as e:
-        logger.error("Failed to get node parameters", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to get node parameters", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to get node parameters"}
 
 
 @router.delete("/node-parameters/{node_id}")
@@ -53,8 +53,8 @@ async def delete_node_parameters(node_id: str, database: Database = Depends(lamb
         success = await database.delete_node_parameters(node_id)
         return {"success": success}
     except Exception as e:
-        logger.error("Failed to delete node parameters", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to delete node parameters", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to delete node parameters"}
 
 
 # ============================================================================
@@ -69,8 +69,8 @@ async def save_workflow(request: WorkflowSaveRequest, database: Database = Depen
         success = await database.save_workflow(workflow_id=request.workflow_id, name=request.name, data=request.data)
         return {"success": success, "workflow_id": request.workflow_id}
     except Exception as e:
-        logger.error("Failed to save workflow", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to save workflow", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to save workflow"}
 
 
 @router.get("/workflows")
@@ -107,8 +107,8 @@ async def get_all_workflows(database: Database = Depends(lambda: container.datab
             ],
         }
     except Exception as e:
-        logger.error("Failed to get workflows", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to get workflows", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to get workflows"}
 
 
 @router.get("/workflows/{workflow_id}")
@@ -129,8 +129,8 @@ async def get_workflow(workflow_id: str, database: Database = Depends(lambda: co
             }
         return {"success": False, "error": "Workflow not found"}
     except Exception as e:
-        logger.error("Failed to get workflow", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to get workflow", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to get workflow"}
 
 
 @router.delete("/workflows/{workflow_id}")
@@ -140,5 +140,5 @@ async def delete_workflow(workflow_id: str, database: Database = Depends(lambda:
         success = await database.delete_workflow(workflow_id)
         return {"success": success, "workflow_id": workflow_id}
     except Exception as e:
-        logger.error("Failed to delete workflow", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to delete workflow", error=str(e), exc_info=True)
+        return {"success": False, "error": "Failed to delete workflow"}
