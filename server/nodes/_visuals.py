@@ -172,7 +172,12 @@ def get_plugin_icon_path(node_type: str, variant: str = "light") -> Optional[Pat
 
     # Candidate filenames in resolution order. Per-node-type first so
     # multi-node folders can override the shared icon for specific
-    # node types.
+    # node types. ``node_type`` is already constrained to
+    # ``NODE_TYPE_PATTERN`` (``^[A-Za-z_][A-Za-z0-9_]*$``) by
+    # ``is_valid_node_type`` above -- no path separators possible --
+    # but resolving + ``is_relative_to(plugin_dir)`` gives CodeQL a
+    # path-injection sanitizer it can statically prove (closes the
+    # ``py/path-injection`` alert without weakening the contract).
     candidates: list[str] = []
     if variant == "dark":
         candidates.append(f"icon_{node_type}.dark.svg")
@@ -182,9 +187,11 @@ def get_plugin_icon_path(node_type: str, variant: str = "light") -> Optional[Pat
     candidates.append("icon.svg")
 
     for name in candidates:
-        path = plugin_dir / name
-        if path.exists():
-            return path
+        candidate = (plugin_dir / name).resolve()
+        if not candidate.is_relative_to(plugin_dir):
+            continue
+        if candidate.exists():
+            return candidate
     return None
 
 

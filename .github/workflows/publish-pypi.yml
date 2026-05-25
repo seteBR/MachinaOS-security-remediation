@@ -66,8 +66,13 @@ jobs:
 
       - name: Locate dist directory
         id: locate
+        # Reusable-workflow input read via env per the zizmor
+        # template-injection check -- caller-controlled string would
+        # otherwise execute shell when interpolated directly.
+        env:
+          PACKAGE_DIR: ${{ inputs.package_dir }}
         run: |
-          echo "dist_path=${{ inputs.package_dir }}/dist" >> "$GITHUB_OUTPUT"
+          echo "dist_path=${PACKAGE_DIR}/dist" >> "$GITHUB_OUTPUT"
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

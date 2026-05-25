@@ -28,11 +28,14 @@ on:
         type: boolean
         default: true
 
-# Top-level permissions for all jobs (jobs can narrow further)
+# Workflow-level permissions are deliberately narrow (least-privilege).
+# Each publish job grants only what it needs at the job level -- per
+# the zizmor ``excessive-permissions`` audit, write scopes at the
+# workflow level apply to every job and to reusable workflows called
+# via ``uses:`` (including ``predeploy.yml``), which is broader than
+# any single job's actual needs.
 permissions:
-  contents: write
-  packages: write
-  id-token: write
+  contents: read
 
 # `dry_run` is only meaningful on workflow_dispatch; tag-pushed
 # releases always publish. Computed once and surfaced to each
@@ -250,11 +253,17 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
+        # ``github.ref_name`` + step output read via env (not direct
+        # ``${{ }}`` interpolation) per the zizmor template-injection
+        # check -- tag names are user-controllable via push and would
+        # otherwise execute attacker-controlled shell inside ``run:``.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "MachinaOS ${{ steps.version.outputs.version }}" \
+          gh release create "${REF_NAME}" \
+            --title "MachinaOS ${VERSION}" \
             --generate-notes \
             --verify-tag
 

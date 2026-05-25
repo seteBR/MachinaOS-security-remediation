@@ -49,9 +49,7 @@ class WhatsAppRuntime(BaseProcessSupervisor):
         # ``<repo>/.machina/whatsapp/`` (not ``<repo>/server/.machina/...``,
         # which the old ad-hoc ``_PROJECT_ROOT / "server" / data_dir``
         # logic produced when ``DATA_DIR`` was relative).
-        return Path(
-            self.settings._resolve_under_data(self.settings.whatsapp_data_subdir)
-        )
+        return Path(self.settings._resolve_under_data(self.settings.whatsapp_data_subdir))
 
     @property
     def port(self) -> int:

@@ -33,6 +33,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["cli"]
 
+# The CLI runs under the user's global / pipx-managed Python — it is
+# NOT a uv-managed project. ``managed = false`` tells ``uv`` to leave
+# this project alone: ``uv sync`` at the repo root is a no-op, no
+# ``<repo>/.venv/`` is created, ``python`` on PATH resolves to the
+# user's global interpreter instead of being shadowed by a workspace
+# venv. The server is the only uv-managed project (``server/.venv``).
+[tool.uv]
+managed = false
+
 [dependency-groups]
 dev = []
 

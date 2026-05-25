@@ -70,28 +70,32 @@ jobs:
       - name: Normalise version
         id: ver
         # `npm deprecate` wants a bare semver (e.g. 0.0.72), not a tag
-        # (e.g. v0.0.72). Strip the leading `v` if present.
+        # (e.g. v0.0.72). Strip the leading `v` if present. Read input
+        # via env to keep zizmor template-injection check happy --
+        # ``${{ inputs.X }}`` directly inside ``run:`` lets an attacker
+        # who can dispatch the workflow inject shell metacharacters.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          v="${{ inputs.version }}"
-          v="${v#v}"
+          v="${INPUT_VERSION#v}"
           echo "semver=${v}" >> "$GITHUB_OUTPUT"
 
       - name: Deprecate on npm (unscoped)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          SEMVER: ${{ steps.ver.outputs.semver }}
+          DEPRECATE_MSG: ${{ inputs.deprecate_msg }}
         run: |
-          npm deprecate \
-            "machinaos@${{ steps.ver.outputs.semver }}" \
-            "${{ inputs.deprecate_msg }}"
+          npm deprecate "machinaos@${SEMVER}" "${DEPRECATE_MSG}"
 
       - name: Deprecate on GitHub Packages (scoped)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEMVER: ${{ steps.ver.outputs.semver }}
+          DEPRECATE_MSG: ${{ inputs.deprecate_msg }}
         run: |
           npm config set @zeenie-ai:registry https://npm.pkg.github.com
-          npm deprecate \
-            "@zeenie-ai/machinaos@${{ steps.ver.outputs.semver }}" \
-            "${{ inputs.deprecate_msg }}"
+          npm deprecate "@zeenie-ai/machinaos@${SEMVER}" "${DEPRECATE_MSG}"
 
   yank-pypi-notice:
     name: PyPI yank reminder
@@ -102,9 +106,14 @@ jobs:
       - name: Print PyPI yank instructions
         # PyPI yank is gated on UI access -- no API path that the
         # release token can take. Emit a notice so the operator
-        # remembers to do this by hand.
+        # remembers to do this by hand. Input read via env (not direct
+        # ``${{ }}`` interpolation) per the zizmor template-injection
+        # check -- ``::notice::`` is rendered into the workflow log
+        # and would otherwise execute attacker-controlled shell.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          echo "::notice title=Manual PyPI yank required::Yank machinaos-server@${{ inputs.version }} via https://pypi.org/manage/project/machinaos-server/release/${{ inputs.version }}/ -- 'Options' -> 'Yank'."
+          echo "::notice title=Manual PyPI yank required::Yank machinaos-server@${INPUT_VERSION} via https://pypi.org/manage/project/machinaos-server/release/${INPUT_VERSION}/ -- 'Options' -> 'Yank'."
 
   open-revert-pr:
     name: Open revert PR
@@ -124,32 +133,38 @@ jobs:
         id: commit
         # The release commit is the one the tag points at. `git
         # rev-list -n1 <tag>` works regardless of whether the tag
-        # is annotated or lightweight.
+        # is annotated or lightweight. Input read via env per the
+        # zizmor template-injection check.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          sha=$(git rev-list -n1 "${{ inputs.version }}")
+          sha=$(git rev-list -n1 "${INPUT_VERSION}")
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 
       - name: Create revert branch + commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DEPRECATE_MSG: ${{ inputs.deprecate_msg }}
+          REVERT_SHA: ${{ steps.commit.outputs.sha }}
         run: |
-          branch="rollback/${{ inputs.version }}"
+          branch="rollback/${INPUT_VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "${branch}"
-          git revert --no-edit "${{ steps.commit.outputs.sha }}"
+          git revert --no-edit "${REVERT_SHA}"
           git push origin "${branch}"
 
           gh pr create \
             --base main \
             --head "${branch}" \
-            --title "Revert: ${{ inputs.version }} (rollback)" \
-            --body "Automated revert of ${{ inputs.version }}.
+            --title "Revert: ${INPUT_VERSION} (rollback)" \
+            --body "Automated revert of ${INPUT_VERSION}.
 
           npm package deprecated via rollback.yml.
           PyPI yank pending manual action -- see https://pypi.org/manage/project/machinaos-server/.
 
-          Reason: ${{ inputs.deprecate_msg }}"
+          Reason: ${INPUT_DEPRECATE_MSG}"
 
   summary:
     name: Rollback summary
@@ -158,19 +173,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Print summary
+        # Inputs + job results read via env per the zizmor
+        # template-injection check. ``$GITHUB_STEP_SUMMARY`` is markdown
+        # rendered in the GitHub UI -- attacker-controlled inputs
+        # would otherwise be rendered as raw HTML.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          NPM_DEPRECATE_RESULT: ${{ needs.deprecate-npm.result }}
+          YANK_REMINDER_RESULT: ${{ needs.yank-pypi-notice.result }}
+          REVERT_PR_STATUS: ${{ inputs.open_revert_pr == true && 'requested' || 'skipped (open_revert_pr=false)' }}
         run: |
           {
-            echo "## Rollback summary for ${{ inputs.version }}"
+            echo "## Rollback summary for ${INPUT_VERSION}"
             echo ""
             echo "| Step | Status |"
             echo "|---|---|"
-            echo "| npm deprecate | ${{ needs.deprecate-npm.result }} |"
-            echo "| PyPI yank reminder | ${{ needs.yank-pypi-notice.result }} |"
-            echo "| Revert PR | ${{ inputs.open_revert_pr == true && 'requested' || 'skipped (open_revert_pr=false)' }} |"
+            echo "| npm deprecate | ${NPM_DEPRECATE_RESULT} |"
+            echo "| PyPI yank reminder | ${YANK_REMINDER_RESULT} |"
+            echo "| Revert PR | ${REVERT_PR_STATUS} |"
             echo ""
             echo "Next steps:"
             echo ""
-            echo "1. Manually yank \`machinaos-server@${{ inputs.version }}\` from PyPI."
+            echo "1. Manually yank \`machinaos-server@${INPUT_VERSION}\` from PyPI."
             echo "2. If shipping a forward fix, bump version and re-run release.yml."
             echo "3. If reverting, merge the rollback PR (if requested)."
           } >> "$GITHUB_STEP_SUMMARY"
