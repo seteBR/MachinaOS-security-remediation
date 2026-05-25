@@ -93,18 +93,53 @@ def project_root() -> Path:
     return _REPO_ROOT
 
 
-def machina_root() -> Path:
-    """Absolute path of ``~/.machina/`` (or the configured DATA_DIR).
+def _resolve_data_path(base: str, subpath: str = "") -> Path:
+    """Canonical state-path resolution primitive. Always returns absolute.
 
-    ``Path.expanduser()`` is a no-op when there's no ``~`` to expand,
-    so we can always call it unconditionally. After expansion: if
-    absolute, use verbatim; if relative, resolve under repo root
-    (back-compat with ``DATA_DIR=data`` etc.). Settings is
-    instantiated lazily — Pydantic caches the result.
+    Shared by :func:`data_path` (public entry point) and
+    ``Settings._resolve_under_data`` (the Pydantic-side mirror used by
+    state-path properties like ``credentials_db_resolved``). One
+    implementation so the two never drift.
+
+    Rules:
+      - ``Path.expanduser()`` on ``base`` — no-op when no ``~`` present.
+      - Absolute resolved ``base`` → used verbatim.
+      - Relative ``base`` → resolved under :func:`project_root` (so
+        dev mode's ``DATA_DIR=.machina`` lands at ``<repo>/.machina/``
+        regardless of the subprocess's cwd).
+      - Empty ``subpath`` → returns the resolved base.
+      - Absolute ``subpath`` → returned verbatim.
+      - Relative ``subpath`` → joined onto the resolved base.
+    """
+    b = Path(base).expanduser()
+    if not b.is_absolute():
+        b = project_root() / b
+    if not subpath:
+        return b.resolve()
+    p = Path(subpath)
+    return p.resolve() if p.is_absolute() else (b / p).resolve()
+
+
+def data_path(subpath: str | Path = "") -> Path:
+    """Absolute path of ``<DATA_DIR>/<subpath>``.
+
+    Single entry point for every state location MachinaOS reads or
+    writes. Reads ``Settings.data_dir`` (env var ``DATA_DIR``) — so
+    the dev / daemon split (``.env.dev`` vs ``.env.template``) moves
+    every state path together. Pass an empty ``subpath`` to get the
+    DATA_DIR root.
+
+    Settings is instantiated lazily — Pydantic caches the result.
+    Resolution rules: see :func:`_resolve_data_path`.
     """
     from core.config import Settings
-    p = Path(Settings().data_dir).expanduser()
-    return p.resolve() if p.is_absolute() else (project_root() / p).resolve()
+
+    return _resolve_data_path(Settings().data_dir, str(subpath))
+
+
+def machina_root() -> Path:
+    """Absolute path of the configured DATA_DIR (= ``data_path()``)."""
+    return data_path()
 
 
 def packages_dir() -> Path:
@@ -152,13 +187,13 @@ def package_dir(name: str) -> Path:
 def claude_config_dir() -> Path:
     """``CLAUDE_CONFIG_DIR`` for spawned claude subprocesses.
 
-    Resolves to ``<machina_root>/claude/``. Single source of truth for
+    Resolves to ``<DATA_DIR>/claude/``. Single source of truth for
     the plugin's ``MACHINA_CLAUDE_DIR`` constant (re-exported from
     ``nodes/agent/claude_code_agent/_oauth.py`` for back-compat).
     Stores OAuth tokens + session state — distinct from
     :func:`claude_npm_dir`, which holds the downloaded CLI binary.
     """
-    return machina_root() / "claude"
+    return data_path("claude")
 
 
 def claude_npm_dir() -> Path:
@@ -173,8 +208,16 @@ def claude_npm_dir() -> Path:
 
 
 def workspaces_dir() -> Path:
-    """Root for per-workflow workspaces."""
-    return machina_root() / "workspaces"
+    """Root for per-workflow workspaces.
+
+    Routes through ``data_path(Settings().workspace_base_dir)`` (env
+    var ``WORKSPACE_BASE_DIR``) so the path stays in lockstep with
+    every other state location — no hardcoded ``"workspaces"`` literal
+    that drifts when the env var changes.
+    """
+    from core.config import Settings
+
+    return data_path(Settings().workspace_base_dir)
 
 
 def workspace_dir(workflow_id: str) -> Path:
@@ -204,18 +247,32 @@ def example_workflows_dir() -> Path:
 
 
 def whatsapp_dir() -> Path:
-    """Persistent WhatsApp session DB / state dir."""
-    return machina_root() / "whatsapp"
+    """Persistent WhatsApp session DB / state dir.
+
+    Routes through ``data_path(Settings().whatsapp_data_subdir)``
+    (env var ``WHATSAPP_DATA_SUBDIR``) so the WhatsApp tree moves
+    with ``DATA_DIR``.
+    """
+    from core.config import Settings
+
+    return data_path(Settings().whatsapp_data_subdir)
 
 
 def credentials_db_path() -> Path:
-    """Encrypted credentials store (Fernet + PBKDF2)."""
-    return machina_root() / "credentials.db"
+    """Encrypted credentials store (Fernet + PBKDF2).
+
+    Routes through ``data_path(Settings().credentials_db_path)`` (env
+    var ``CREDENTIALS_DB_PATH``) so the DB moves with ``DATA_DIR``.
+    """
+    from core.config import Settings
+
+    return data_path(Settings().credentials_db_path)
 
 
 __all__ = [
     "project_root",
     "machina_root",
+    "data_path",
     "packages_dir",
     "package_dir",
     "claude_config_dir",

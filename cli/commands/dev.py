@@ -21,6 +21,7 @@ import typer
 
 from cli._common import build_backend_spec, free_all_ports, preflight
 from cli.colors import console
+from cli.config import load_dev_overrides
 from cli.platform_ import (
     node_modules_dir,
     platform_name,
@@ -32,10 +33,9 @@ from cli.commands._temporal_specs import temporal_specs
 
 
 def _has_vite(root: Path) -> bool:
-    return (
-        (node_modules_dir(root) / "vite").exists()
-        or (root / "client" / "node_modules" / "vite").exists()
-    )
+    return (node_modules_dir(root) / "vite").exists() or (
+        root / "client" / "node_modules" / "vite"
+    ).exists()
 
 
 def _clear_vite_cache(root: Path) -> None:
@@ -73,9 +73,18 @@ def _build_specs(root: Path, cfg, *, daemon: bool, use_vite: bool) -> list[Servi
 
 def dev_command(
     daemon: bool = typer.Option(
-        False, "--daemon", help="Bind backend to 0.0.0.0 instead of 127.0.0.1.",
+        False,
+        "--daemon",
+        help="Bind backend to 0.0.0.0 instead of 127.0.0.1.",
     ),
 ) -> None:
+    # Layer ``.env.dev`` (committed) on top of ``.env.template`` + ``.env``
+    # so dev state lands at ``<repo>/.machina/`` (per-checkout) instead
+    # of ``~/.machina/`` (user home). Called BEFORE ``preflight()`` so
+    # ``load_config``'s ``setdefault`` pass sees the dev values already
+    # in ``os.environ``. ``machina start`` / ``machina daemon`` skip
+    # this hook, falling through to the ``.env.template`` defaults.
+    load_dev_overrides()
     cfg, root = preflight()
     os.environ.setdefault("PYTHONUTF8", "1")
 
@@ -83,7 +92,9 @@ def dev_command(
 
     console.print("\n[bold]=== MachinaOS Starting ===[/]\n")
     console.print(f"Platform: {platform_name()}")
-    console.print(f"Mode:     {'Daemon (uvicorn)' if daemon else 'Development (uvicorn)'}")
+    console.print(
+        f"Mode:     {'Daemon (uvicorn)' if daemon else 'Development (uvicorn)'}"
+    )
     console.print(f"Ports:    {', '.join(str(p) for p in cfg.all_ports)}")
 
     console.log("Freeing ports...")

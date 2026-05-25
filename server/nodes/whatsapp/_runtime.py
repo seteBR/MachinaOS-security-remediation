@@ -36,6 +36,7 @@ class WhatsAppRuntime(BaseProcessSupervisor):
         super().__init__()
         if settings is None:
             from core.config import Settings
+
             settings = Settings()
         self.settings = settings
 
@@ -43,11 +44,14 @@ class WhatsAppRuntime(BaseProcessSupervisor):
 
     @property
     def data_root(self) -> Path:
-        sub = getattr(self.settings, "whatsapp_data_subdir", "whatsapp")
-        base = Path(self.settings.data_dir)
-        if not base.is_absolute():
-            base = _PROJECT_ROOT / "server" / base
-        return (base / sub).resolve()
+        # Routes through ``Settings._resolve_under_data`` so dev mode's
+        # ``DATA_DIR=.machina`` lands the WhatsApp tree at
+        # ``<repo>/.machina/whatsapp/`` (not ``<repo>/server/.machina/...``,
+        # which the old ad-hoc ``_PROJECT_ROOT / "server" / data_dir``
+        # logic produced when ``DATA_DIR`` was relative).
+        return Path(
+            self.settings._resolve_under_data(self.settings.whatsapp_data_subdir)
+        )
 
     @property
     def port(self) -> int:
@@ -107,7 +111,8 @@ class WhatsAppRuntime(BaseProcessSupervisor):
         config["server"]["port"] = self.port
         config["server"]["host"] = self.bind_host
         (self.data_root / "configs" / "config.yaml").write_text(
-            yaml.safe_dump(config, sort_keys=False), encoding="utf-8",
+            yaml.safe_dump(config, sort_keys=False),
+            encoding="utf-8",
         )
 
 

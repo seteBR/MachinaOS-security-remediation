@@ -33,8 +33,11 @@ class Settings(BaseSettings):
     secret_key: str = Field(env="SECRET_KEY", min_length=32)
     cors_origins: List[str] = Field(env="CORS_ORIGINS")
 
-    # Database Configuration
-    database_url: str = Field(env="DATABASE_URL")
+    # Database Configuration. ``database_url`` is a computed property
+    # (see below) — the SQLite file name lives in ``WORKFLOW_DB_FILENAME``
+    # and resolves under ``DATA_DIR`` like every other state path,
+    # rather than being hardcoded inside a SQLAlchemy URL string.
+    workflow_db_filename: str = Field(env="WORKFLOW_DB_FILENAME")
     database_echo: bool = Field(default=False, env="DATABASE_ECHO")
     database_pool_size: int = Field(default=20, env="DATABASE_POOL_SIZE", ge=5, le=100)
     database_max_overflow: int = Field(default=30, env="DATABASE_MAX_OVERFLOW", ge=10, le=100)
@@ -76,7 +79,8 @@ class Settings(BaseSettings):
     # heartbeat interval — a worker drain completes within one polling
     # cycle. Tune via env when SIGTERM-to-restart latency matters.
     temporal_graceful_shutdown_seconds: int = Field(
-        env="TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS", ge=1,
+        env="TEMPORAL_GRACEFUL_SHUTDOWN_SECONDS",
+        ge=1,
     )
     # Wave 12 canary-flag default flipped to True (2026-05-15).
     # The Temporal-native event dispatch path
@@ -89,7 +93,8 @@ class Settings(BaseSettings):
     # working unchanged for non-canary triggers. See
     # docs-internal/event_framework.md § Rollback procedure.
     event_framework_enabled: bool = Field(
-        default=True, env="EVENT_FRAMEWORK_ENABLED",
+        default=True,
+        env="EVENT_FRAMEWORK_ENABLED",
     )
 
     # gRPC frontend port — the port ``temporal server start-dev``
@@ -97,14 +102,18 @@ class Settings(BaseSettings):
     # ``.env.template`` (canonical default lives there). Reference:
     # https://docs.temporal.io/references/configuration
     temporal_frontend_grpc_port: int = Field(
-        env="TEMPORAL_FRONTEND_GRPC_PORT", ge=1024, le=65535,
+        env="TEMPORAL_FRONTEND_GRPC_PORT",
+        ge=1024,
+        le=65535,
     )
     # Web UI port. ``temporal server start-dev`` defaults this to
     # ``--port + 1000`` (i.e. 8233 alongside the default 7233 gRPC
     # port); declared explicitly via ``--ui-port`` so the binding is
     # intentional and surfaces in status snapshots.
     temporal_ui_port: int = Field(
-        env="TEMPORAL_UI_PORT", ge=1024, le=65535,
+        env="TEMPORAL_UI_PORT",
+        ge=1024,
+        le=65535,
     )
     # SQLite db path passed to ``temporal server start-dev
     # --db-filename ...``. Resolved relative to ``DATA_DIR``
@@ -183,10 +192,14 @@ class Settings(BaseSettings):
     # File-rotation knobs — only consulted when LOG_FILE is set.
     # Default ceiling = 10 MiB × 5 backups = ~50 MiB on disk.
     log_file_max_bytes: int = Field(
-        default=10 * 1024 * 1024, env="LOG_FILE_MAX_BYTES", ge=1024,
+        default=10 * 1024 * 1024,
+        env="LOG_FILE_MAX_BYTES",
+        ge=1024,
     )
     log_file_backup_count: int = Field(
-        default=5, env="LOG_FILE_BACKUP_COUNT", ge=0,
+        default=5,
+        env="LOG_FILE_BACKUP_COUNT",
+        ge=0,
     )
 
     # Rate Limiting
@@ -251,25 +264,20 @@ class Settings(BaseSettings):
     def _expanduser_path(cls, v: Optional[str]) -> Optional[str]:
         return str(Path(v).expanduser()) if v else v
 
-    @field_validator("database_url", mode="after")
-    @classmethod
-    def validate_database_url(cls, v: str) -> str:
-        """Expand ``~`` in sqlite paths + ensure parent dir exists.
+    @property
+    def database_url(self) -> str:
+        """Compose the SQLAlchemy URL from ``DATA_DIR`` + ``WORKFLOW_DB_FILENAME``.
 
-        Parses the URL via SQLAlchemy's canonical parser instead of
-        string surgery on ``:///``.
+        Always ``sqlite+aiosqlite:///<abspath>`` — the only DB engine
+        MachinaOS uses. Parent dir is mkdir'd here so the DB file can
+        be opened on first access without a separate bootstrap step.
+        Reads :meth:`_resolve_under_data` so the same DEV / daemon
+        toggle (``.env.dev`` swapping ``DATA_DIR=.machina``) that moves
+        every other state path moves ``workflow.db`` too.
         """
-        if not v:
-            return v
-        from sqlalchemy.engine.url import make_url
-        url = make_url(v)
-        if url.drivername.startswith("sqlite") and url.database:
-            db_path = Path(url.database).expanduser()
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            if str(db_path) != url.database:
-                v = url.set(database=str(db_path)).render_as_string(hide_password=False)
-        return v
-
+        db_path = Path(self._resolve_under_data(self.workflow_db_filename))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        return f"sqlite+aiosqlite:///{db_path}"
 
     @property
     def is_development(self) -> bool:
@@ -282,11 +290,17 @@ class Settings(BaseSettings):
         return not self.debug
 
     def _resolve_under_data(self, path: str) -> str:
-        """Resolve a path relative to data_dir, unless already absolute."""
-        p = Path(path)
-        if p.is_absolute():
-            return str(p)
-        return str(Path(self.data_dir) / p)
+        """Resolve ``path`` under ``data_dir``, returning an absolute path.
+
+        Thin delegate to :func:`core.paths._resolve_data_path` so the
+        single resolution algorithm lives in one place. Used by the
+        ``credentials_db_resolved`` / ``workspace_base_resolved``
+        properties and any plugin that needs a DATA_DIR-relative path
+        without importing ``core.paths`` directly.
+        """
+        from core.paths import _resolve_data_path
+
+        return str(_resolve_data_path(self.data_dir, path))
 
     @property
     def credentials_db_resolved(self) -> str:

@@ -1,16 +1,25 @@
-"""Project configuration -- typed view over ``.env`` / ``.env.template``.
+"""Project configuration -- typed view over ``.env.dev`` / ``.env`` / ``.env.template``.
 
-Stdlib-only env-var loader. ``.env.template`` ships with every install
-and is the canonical source of defaults; ``.env`` (created by
-``scripts/postinstall.js`` on ``npm install -g machinaos``) layers user
-overrides on top; ``os.environ`` wins over both at the call site.
+Stdlib-only env-var loader. Three env files, lowest precedence first:
 
-Merged values are pushed into ``os.environ`` so downstream consumers
-that read ``os.environ`` directly see the same view as this module.
+  1. ``.env.template`` — canonical production defaults. Ships with every
+     install. ``DATA_DIR=~/.machina`` (user home) is the daemon
+     behaviour: ``machina start`` / ``machina daemon`` use these.
+  2. ``.env`` — user overrides (created by ``scripts/postinstall.js`` on
+     ``npm install -g machinaos``). Gitignored.
+  3. ``.env.dev`` — dev-mode overrides. Loaded ONLY by ``machina dev``
+     via :func:`load_dev_overrides`. Pins ``DATA_DIR=.machina`` so
+     per-checkout dev state lives at ``<repo>/.machina/`` instead of
+     ``~/.machina/``. Committed to git.
 
-No Python-side hardcoded defaults: ``.env.template`` is the single
-source of truth. If the template is missing (broken install), we error
-out loudly with a remediation hint rather than silently substituting
+Process env (``os.environ``) wins over all three. Merged file values
+are pushed into ``os.environ`` via ``setdefault`` so downstream
+consumers that read ``os.environ`` directly see the same view as this
+module.
+
+No Python-side hardcoded defaults: env files are the single source of
+truth. If ``.env.template`` is missing (broken install), we error out
+loudly with a remediation hint rather than silently substituting
 duplicate hardcoded values that drift from the shipped template.
 """
 
@@ -92,6 +101,27 @@ class Config:
             self.temporal_port,
             self.temporal_ui_port,
         ]
+
+
+def load_dev_overrides(root: Path | None = None) -> None:
+    """Layer ``.env.dev`` on top of ``.env.template`` + ``.env``.
+
+    Called by ``machina dev`` BEFORE :func:`load_config` so dev-only env
+    vars (notably ``DATA_DIR=.machina``, the per-checkout dev state
+    root) land in ``os.environ`` first. ``load_config`` then sees them
+    via its own ``setdefault`` pass and skips its template fallbacks.
+
+    Uses ``setdefault`` so an explicit shell override
+    (``DATA_DIR=/foo machina dev``) still wins. Missing ``.env.dev``
+    file is a no-op — production-style invocations never trigger this.
+
+    The daemon path (``machina start`` / ``machina daemon``) does not
+    call this, so daemon installs keep the ``.env.template`` default
+    of ``DATA_DIR=~/.machina``.
+    """
+    root = root or project_root()
+    for key, value in _load_env_file(root / ".env.dev").items():
+        os.environ.setdefault(key, value)
 
 
 @lru_cache(maxsize=1)

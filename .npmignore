@@ -7,10 +7,10 @@
 .gitignore
 .github/
 
-# Environment & secrets
-.env
-.env.*
-!.env.template
+# Env files ship with the package — they hold only non-sensitive config
+# (ports, paths, feature flags). Credentials live in the encrypted
+# ``credentials.db`` (Fernet + PBKDF2 via server/core/encryption.py),
+# never in env files. Matches the .gitignore policy.
 
 # Database files
 *.db
