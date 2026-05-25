@@ -30,6 +30,10 @@ repos:
       - id: trailing-whitespace
         exclude: '\.md$'  # Markdown trailing whitespace = line break
       - id: end-of-file-fixer
+        # SVG icons are vendored single-line assets (from lobehub /
+        # lucide / vendor brand kits); they ship without a trailing
+        # newline and reformatting drifts the SHA against upstream.
+        exclude: '\.svg$'
       - id: check-yaml
         args: ['--allow-multiple-documents']
       - id: check-toml
