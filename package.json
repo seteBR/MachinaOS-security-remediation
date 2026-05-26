@@ -53,6 +53,7 @@
     "!**/node_modules/",
     "!**/.vite/",
     ".env.template",
+    "pyproject.toml",
     "README.md",
     "install.sh",
     "install.ps1"

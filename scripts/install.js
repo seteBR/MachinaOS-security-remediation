@@ -23,12 +23,20 @@ const ROOT = resolve(__dirname, '..');
 process.env.PYTHONUTF8 = '1';
 
 function run(cmd, cwd = ROOT, timeoutMs = 300000) {
+  // Strip VIRTUAL_ENV from the spawned env. When the user runs
+  // ``npm install -g machinaos`` from a shell that has activated a
+  // venv (very common during dev), uv emits a noisy ``VIRTUAL_ENV
+  // ... does not match the project environment path`` warning per
+  // invocation. uv only honours VIRTUAL_ENV with ``--active``, which
+  // we never pass, so dropping it at the source is the documented
+  // workaround. Same fix applied to cli/supervisor.py's _full_env.
+  const { VIRTUAL_ENV, ...cleanEnv } = process.env;
   execSync(cmd, {
     cwd,
     stdio: 'inherit',
     shell: true,
     timeout: timeoutMs,
-    env: { ...process.env, MACHINAOS_INSTALLING: 'true' }
+    env: { ...cleanEnv, MACHINAOS_INSTALLING: 'true' }
   });
 }
 
