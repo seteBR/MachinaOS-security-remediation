@@ -48,10 +48,25 @@ on:
 permissions:
   contents: read
 
+# zizmor/concurrency-limits — serialize rollbacks on the same version
+# so two operators can't double-deprecate the same npm tarball or
+# open duplicate revert PRs. ``cancel-in-progress: false`` because
+# rolling back a rollback would leave the registry in an inconsistent
+# state.
+concurrency:
+  group: rollback-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   deprecate-npm:
     name: npm deprecate
     runs-on: ubuntu-latest
+    # zizmor/secrets-outside-env — share the ``npm`` environment with
+    # publish-npm so ``NPM_TOKEN`` is gated by the same protection
+    # rules.
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/machinaos
     # No id-token needed -- this uses NPM_TOKEN, not OIDC, because
     # `npm deprecate` is not in the trusted-publisher allowlist.
     permissions:
@@ -59,6 +74,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -120,6 +137,10 @@ jobs:
     needs: deprecate-npm
     if: inputs.open_revert_pr == true
     runs-on: ubuntu-latest
+    # ``contents: write`` for ``git push`` of the revert branch;
+    # ``pull-requests: write`` for ``gh pr create``. The
+    # ``persist-credentials: true`` on the checkout below is
+    # intentional and audited by zizmor accordingly.
     permissions:
       contents: write
       pull-requests: write

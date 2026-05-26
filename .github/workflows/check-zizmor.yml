@@ -42,14 +42,23 @@ on:
 permissions:
   contents: read
 
+# zizmor/concurrency-limits — cancel an in-flight zizmor run on the same
+# ref when a new push arrives (PRs typically push multiple times; only
+# the latest matters).
+concurrency:
+  group: check-zizmor-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   zizmor:
     name: Lint workflows
     runs-on: ubuntu-latest
 
+    # zizmor's static analysis emits SARIF that GitHub renders in the
+    # Security → Code scanning tab. ``security-events: write`` is the
+    # minimum scope for that upload; ``contents``/``actions: read``
+    # cover repository + workflow metadata the analyzer reads.
     permissions:
-      # SARIF upload to the Security tab so findings render alongside
-      # CodeQL results.
       security-events: write
       contents: read
       actions: read
@@ -57,6 +66,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5

@@ -42,6 +42,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Detect changed paths
         id: filter
@@ -80,6 +82,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup environment
         uses: ./.github/actions/setup
@@ -135,6 +139,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup environment
         uses: ./.github/actions/setup
@@ -158,6 +164,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup environment
         uses: ./.github/actions/setup
@@ -190,6 +198,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup environment
         uses: ./.github/actions/setup

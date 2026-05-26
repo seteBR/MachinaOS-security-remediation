@@ -37,6 +37,14 @@ on:
 permissions:
   contents: read
 
+# zizmor/concurrency-limits — DO NOT cancel an in-flight release.
+# Concurrent releases against the same tag would race on npm publish
+# anyway; the group key here is purely so two operators can't manually
+# dispatch the workflow twice in the same minute and both hit npm.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 # `dry_run` is only meaningful on workflow_dispatch; tag-pushed
 # releases always publish. Computed once and surfaced to each
 # publish job via `if:` gates below.
@@ -60,6 +68,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup environment
         uses: ./.github/actions/setup
@@ -79,6 +89,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup environment
         uses: ./.github/actions/setup
@@ -99,12 +111,26 @@ jobs:
     name: Publish to npm (with provenance)
     needs: build-for-publish
     runs-on: ubuntu-latest
+    # zizmor/secrets-outside-env — pin ``NPM_TOKEN`` access to the
+    # ``npm`` environment so it's only available to runs that pass
+    # the environment's protection rules (manual approval / branch
+    # restrictions configured on Settings → Environments).
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/machinaos
+    # ``id-token: write`` powers npm provenance (Sigstore-signed
+    # publish via OIDC exchange) AND the ``attest-build-provenance``
+    # action below; ``contents: read`` for the source-tree
+    # checkout. ``NPM_TOKEN`` is read from secrets at the env-var
+    # level, so no extra scope.
     permissions:
       contents: read
       id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup Node.js
         # ``cache:`` key intentionally omitted (release-job hardening).
@@ -167,12 +193,18 @@ jobs:
     name: Publish to GitHub Packages
     needs: build-for-publish
     runs-on: ubuntu-latest
+    # ``packages: write`` is the scope ``npm publish`` against
+    # npm.pkg.github.com needs; ``contents: read`` for the source-tree
+    # checkout. No ``id-token`` because GHCR uses the workflow's
+    # default ``GITHUB_TOKEN`` rather than OIDC.
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup Node.js
         # ``cache:`` key intentionally omitted (release-job hardening
@@ -225,6 +257,9 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: [predeploy, audit]
+    # The reusable ``publish-pypi.yml`` workflow declares its own
+    # ``id-token: write`` at the job level (the only scope OIDC needs);
+    # the caller passes through ``contents: read`` for source checkout.
     permissions:
       contents: read
       id-token: write
@@ -242,6 +277,9 @@ jobs:
     # and we don't want to leave stale release notes around.
     if: needs.publish-npm.result == 'success' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
+    # ``contents: write`` is the scope ``gh release create`` needs to
+    # publish the release notes back to the repo. No other scope; this
+    # job neither pushes commits nor reads secrets.
     permissions:
       contents: write
     steps:
@@ -249,6 +287,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false  # zizmor/artipacked — gh release uses GH_TOKEN env, no git push
 
       - name: Extract version from tag
         id: version

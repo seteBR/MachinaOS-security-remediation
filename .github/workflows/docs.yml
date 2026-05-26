@@ -13,12 +13,27 @@ on:
 permissions:
   contents: read
 
+# zizmor/concurrency-limits — coalesce in-flight deploys to the latest
+# commit so a fast-pushed docs change doesn't deploy a stale revision
+# after a fresh one. Mintlify's deploy endpoint is idempotent.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
+    name: Deploy to Mintlify
     runs-on: ubuntu-latest
+    # zizmor/secrets-outside-env — pin secret access to a deployment
+    # environment so ``MINTLIFY_TOKEN`` is only available to runs that
+    # pass the ``docs`` environment's protection rules (configure on
+    # the repo Settings → Environments page).
+    environment: docs
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false  # zizmor/artipacked — read-only checkout
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
