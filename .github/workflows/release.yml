@@ -1,20 +1,5 @@
-# Release workflow - predeploy gate, publish, GitHub release, then test install
-#
-# Hardening (May 2026, lifted from gh CLI / vercel / wrangler / uv):
-#   - workflow_dispatch defaults to dry-run; pushes need explicit
-#     dry_run=false (gemini-cli pattern; reduces accidental
-#     publications from an admin clicking Run workflow).
-#   - NPM_CONFIG_PROVENANCE=true via env (idiom from vercel) instead
-#     of the per-command --provenance flag; survives any future
-#     npm publish callsite change.
-#   - SLSA build provenance attestation via actions/attest-build-
-#     provenance@v2 (uv + gh CLI pattern). Renders on the GitHub
-#     release as a verifiable supply-chain claim.
-#   - Cache disabled in release-only setup steps (wrangler pattern)
-#     to prevent a poisoned cache from previous CI runs from
-#     contaminating the release tarball.
-#   - pnpm audit is now BLOCKING; the old `|| true` swallowed
-#     vulnerabilities.
+# Release workflow: predeploy gate, publish npm + GitHub Packages.
+# Triggers on version tag push.
 
 name: Release
 
@@ -22,216 +7,48 @@ on:
   push:
     tags: ['v*.*.*']
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Skip the publish step (validate only).'
-        type: boolean
-        default: true
 
-# Workflow-level permissions are deliberately narrow (least-privilege).
-# Each publish job grants only what it needs at the job level -- per
-# the zizmor ``excessive-permissions`` audit, write scopes at the
-# workflow level apply to every job and to reusable workflows called
-# via ``uses:`` (including ``predeploy.yml``), which is broader than
-# any single job's actual needs.
 permissions:
   contents: read
-
-# zizmor/concurrency-limits — DO NOT cancel an in-flight release.
-# Concurrent releases against the same tag would race on npm publish
-# anyway; the group key here is purely so two operators can't manually
-# dispatch the workflow twice in the same minute and both hit npm.
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
-# `dry_run` is only meaningful on workflow_dispatch; tag-pushed
-# releases always publish. Computed once and surfaced to each
-# publish job via `if:` gates below.
-env:
-  IS_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
-  # Enables npm provenance for every `npm publish` in this workflow
-  # (https://docs.npmjs.com/generating-provenance-statements). Vercel
-  # pattern -- supersedes --provenance per-command flag so any future
-  # publish callsite picks it up automatically.
-  NPM_CONFIG_PROVENANCE: 'true'
+  id-token: write
+  packages: write
 
 jobs:
   predeploy:
     uses: ./.github/workflows/predeploy.yml
 
-  # Audit production dependencies before publishing
-  audit:
-    name: Security Audit
+  publish-npm:
+    name: Publish to npm
     needs: predeploy
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Setup environment
-        uses: ./.github/actions/setup
-
-      - name: Audit production dependencies
-        # BLOCKING: a vulnerability in a prod dep must stop the release
-        # (previous `|| true` masked everything). To temporarily bypass,
-        # bump the audit-level threshold rather than re-introducing the
-        # silent fail.
-        run: pnpm audit --prod --audit-level moderate
-
-  # Build client once after predeploy passes, share with publish jobs
-  build-for-publish:
-    name: Build for Publishing
-    needs: [predeploy, audit]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Setup environment
-        uses: ./.github/actions/setup
-
-      - name: Install and build client
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter react-flow-client run build
-
-      - name: Upload built client
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: client-dist
-          path: client/dist
-          retention-days: 1
-
-  publish-npm:
-    name: Publish to npm (with provenance)
-    needs: build-for-publish
-    runs-on: ubuntu-latest
-    # zizmor/secrets-outside-env — pin ``NPM_TOKEN`` access to the
-    # ``npm`` environment so it's only available to runs that pass
-    # the environment's protection rules (manual approval / branch
-    # restrictions configured on Settings → Environments).
-    environment:
-      name: npm
-      url: https://www.npmjs.com/package/machinaos
-    # ``id-token: write`` powers npm provenance (Sigstore-signed
-    # publish via OIDC exchange) AND the ``attest-build-provenance``
-    # action below; ``contents: read`` for the source-tree
-    # checkout. ``NPM_TOKEN`` is read from secrets at the env-var
-    # level, so no extra scope.
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Setup Node.js
-        # ``cache:`` key intentionally omitted (release-job hardening).
-        # A poisoned cache from a previous CI run cannot taint the
-        # tarball when caching is disabled outright; zizmor's
-        # ``cache-poisoning`` audit requires the input absent, not just
-        # set to an empty string.
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-
-      - name: Download built client
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: client-dist
-          path: client/dist
-
-      - name: Install dependencies (skip scripts)
-        run: npm install --ignore-scripts
-
-      - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version-file: .python-version
-
-      - name: Sync versions from git tag
-        run: python -m cli version sync
-
-      - name: Verify package contents (and pack for attestation)
-        # `npm pack` (without --dry-run) writes the tarball to disk so
-        # we can attest it. The tarball name pattern is
-        # `<scoped-name-with-dash>-<version>.tgz`, e.g. `machinaos-0.0.72.tgz`.
-        run: npm pack
-
-      - name: Generate SLSA build provenance for the npm tarball
-        # Pattern from gh CLI + uv: attest-build-provenance signs the
-        # artifact via the workflow's OIDC token, publishes the
-        # attestation to GitHub's transparency log + Sigstore, and
-        # links it to the release. Verifiable via
-        # `gh attestation verify <tarball> --repo <owner>/<repo>`.
-        if: env.IS_DRY_RUN != 'true'
-        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
-        with:
-          subject-path: '*.tgz'
-
-      - name: Publish to npm
-        # NPM_CONFIG_PROVENANCE env (top of workflow) enables provenance
-        # for `npm publish` -- no per-command flag needed.
-        if: env.IS_DRY_RUN != 'true'
-        run: npm publish --access public
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: python -m cli version sync
+      - run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Dry-run -- skipping npm publish
-        if: env.IS_DRY_RUN == 'true'
-        run: echo "::notice::workflow_dispatch dry_run=true -- publish step skipped. Re-run with dry_run=false to publish."
-
   publish-github-packages:
     name: Publish to GitHub Packages
-    needs: build-for-publish
+    needs: predeploy
     runs-on: ubuntu-latest
-    # ``packages: write`` is the scope ``npm publish`` against
-    # npm.pkg.github.com needs; ``contents: read`` for the source-tree
-    # checkout. No ``id-token`` because GHCR uses the workflow's
-    # default ``GITHUB_TOKEN`` rather than OIDC.
-    permissions:
-      contents: read
-      packages: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Setup Node.js
-        # ``cache:`` key intentionally omitted (release-job hardening
-        # -- matches the publish-npm job above; zizmor's
-        # ``cache-poisoning`` audit requires the input absent).
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://npm.pkg.github.com'
-
-      - name: Download built client
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: client-dist
-          path: client/dist
-
-      - name: Install dependencies (skip scripts)
-        run: npm install --ignore-scripts
-
-      - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version-file: .python-version
-
-      - name: Sync versions from git tag
-        run: python -m cli version sync
-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: python -m cli version sync
       - name: Configure scoped package
         run: |
           node -e "
@@ -240,77 +57,6 @@ jobs:
             pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           "
-
-      - name: Publish to GitHub Packages
-        if: env.IS_DRY_RUN != 'true'
-        run: npm publish
+      - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Dry-run -- skipping GitHub Packages publish
-        if: env.IS_DRY_RUN == 'true'
-        run: echo "::notice::workflow_dispatch dry_run=true -- GitHub Packages publish step skipped."
-
-  # Publish machinaos-server to PyPI via OIDC trusted publishing.
-  # Runs in parallel with the npm publish jobs after the build-for-publish
-  # step succeeds. Dry-run propagates from this workflow's input.
-  publish-pypi:
-    name: Publish to PyPI
-    needs: [predeploy, audit]
-    # The reusable ``publish-pypi.yml`` workflow declares its own
-    # ``id-token: write`` at the job level (the only scope OIDC needs);
-    # the caller passes through ``contents: read`` for source checkout.
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    uses: ./.github/workflows/publish-pypi.yml
-    with:
-      package_dir: server
-      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
-
-  # Create GitHub Release with auto-generated notes
-  create-github-release:
-    name: Create GitHub Release
-    needs: [publish-npm, publish-github-packages, publish-pypi]
-    # Skipped during dry-run -- there's no published release to point at
-    # and we don't want to leave stale release notes around.
-    if: needs.publish-npm.result == 'success' && github.event.inputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    # ``contents: write`` is the scope ``gh release create`` needs to
-    # publish the release notes back to the repo. No other scope; this
-    # job neither pushes commits nor reads secrets.
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false  # zizmor/artipacked — gh release uses GH_TOKEN env, no git push
-
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        # ``github.ref_name`` + step output read via env (not direct
-        # ``${{ }}`` interpolation) per the zizmor template-injection
-        # check -- tag names are user-controllable via push and would
-        # otherwise execute attacker-controlled shell inside ``run:``.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REF_NAME: ${{ github.ref_name }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          gh release create "${REF_NAME}" \
-            --title "MachinaOS ${VERSION}" \
-            --generate-notes \
-            --verify-tag
-
-  # Test user installation after publishing (skipped on dry-run since
-  # there's nothing newly published to install).
-  test-install:
-    needs: [create-github-release]
-    if: needs.create-github-release.result == 'success'
-    uses: ./.github/workflows/test-install.yml

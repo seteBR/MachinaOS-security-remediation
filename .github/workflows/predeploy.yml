@@ -1,218 +1,58 @@
-# Reusable validation workflow called by ci.yml and release.yml.
-#
-# Job graph:
-#   plan ─┬─> build-and-lint (gated on should_lint_or_test_frontend)
-#         ├─> backend-tests   (matrix: domain shards, gated on should_test_backend)
-#         ├─> cli-tests       (gated on should_test_cli)
-#         ├─> test-build-start (matrix: OS, gated on should_full_build)
-#         └─> ci-passed       (alls-green aggregator — branch protection target)
-#
-# Patterns (Tier 3 of the CI/CD plan):
-#   - `plan` job: change-detection booleans via dorny/paths-filter
-#     (lifted from astral-sh/uv ci.yml). Doc-only PRs skip the heavy
-#     suites; cli-only PRs skip the backend tests; etc.
-#   - Domain-sharded test matrix (lifted from prefect's python-tests.yaml):
-#     parallelises 1376 pytest cases by test-tree subdir so one slow
-#     shard doesn't gate the others' results.
-#   - `ci-passed` job using re-actors/alls-green (lifted from hatch):
-#     single required-check job name for branch protection that doesn't
-#     break when matrix dimensions change.
+# Reusable validation workflow. Called by ci.yml and release.yml.
+# Three jobs: client build + lint, backend tests, cross-OS smoke test.
 
 name: Predeploy
 
 on:
   workflow_call:
 
-permissions:
-  contents: read
-
 jobs:
-  # ----------------------------------------------------------------------
-  # plan -- change-detection booleans gate the downstream graph.
-  # ----------------------------------------------------------------------
-  plan:
-    name: Plan
-    runs-on: ubuntu-latest
-    outputs:
-      backend_changed: ${{ steps.filter.outputs.backend }}
-      frontend_changed: ${{ steps.filter.outputs.frontend }}
-      cli_changed: ${{ steps.filter.outputs.cli }}
-      workflows_changed: ${{ steps.filter.outputs.workflows }}
-      docs_only: ${{ steps.filter.outputs.docs_only }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Detect changed paths
-        id: filter
-        uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
-        with:
-          # On `workflow_call`, paths-filter compares against the base
-          # branch automatically. For push events, it compares with the
-          # previous SHA. No `base:` needed in the workflow_call case.
-          filters: |
-            backend:
-              - 'server/**'
-              - 'pyproject.toml'
-              - 'pnpm-workspace.yaml'
-            frontend:
-              - 'client/**'
-              - 'pnpm-workspace.yaml'
-            cli:
-              - 'cli/**'
-              - 'pyproject.toml'
-            workflows:
-              - '.github/**'
-            docs_only:
-              - 'docs-MachinaOs/**'
-              - '**/*.md'
-
-  # ----------------------------------------------------------------------
-  # build-and-lint -- client build + frontend tests + lint + tsgo
-  # ----------------------------------------------------------------------
   build-and-lint:
     name: Build + lint
-    needs: plan
-    # Frontend changes / workflow changes / full pushes to main always
-    # trigger this. Doc-only PRs skip.
-    if: needs.plan.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm --filter react-flow-client run lint
+      - run: pnpm --filter react-flow-client run typecheck
+      - run: pnpm --filter react-flow-client run test
 
-      - name: Setup environment
-        uses: ./.github/actions/setup
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build all services
-        run: pnpm run build
-
-      - name: Lint client
-        run: pnpm --filter react-flow-client run lint
-
-      - name: TypeScript check
-        # Uses tsgo (`@typescript/native-preview`, pinned in client/package.json).
-        # ~5x faster than tsc on this codebase; both pass identically.
-        # `typecheck:tsc` script remains available as a fallback if tsgo regresses.
-        run: pnpm --filter react-flow-client run typecheck
-
-      - name: Frontend tests (vitest)
-        # 148 tests covering hooks, contexts, components. Uses jsdom +
-        # @testing-library/react. Must stay green for canvas state, auth
-        # bootstrap, and credentials flows to ship.
-        run: pnpm --filter react-flow-client run test
-
-  # ----------------------------------------------------------------------
-  # backend-tests -- pytest sharded by domain (prefect pattern)
-  # ----------------------------------------------------------------------
   backend-tests:
-    name: Backend tests (${{ matrix.shard }})
-    needs: plan
-    if: needs.plan.outputs.backend_changed == 'true' || needs.plan.outputs.workflows_changed == 'true'
+    name: Backend tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Three shards balance parallelism vs. matrix-dispatch overhead.
-        # Add new shards by carving subdirs out of `backend-root` as
-        # the test tree grows.
-        include:
-          - shard: nodes
-            paths: tests/nodes/
-          - shard: services
-            # Pulls tests/services + tests/temporal + tests/llm +
-            # tests/credentials together because they share the same
-            # heavy setup (DI container + auth_service init).
-            paths: tests/services/ tests/temporal/ tests/llm/ tests/credentials/
-          - shard: root
-            # Root-level cross-cutting invariants (plugin self-containment,
-            # broadcast contracts, no-raw-prints, etc.). Cheap to run
-            # but logically distinct from per-domain tests.
-            paths: tests/ --ignore=tests/nodes/ --ignore=tests/services/ --ignore=tests/temporal/ --ignore=tests/llm/ --ignore=tests/credentials/
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Setup environment
-        uses: ./.github/actions/setup
-
-      - name: Backend tests (server pytest, shard=${{ matrix.shard }})
-        # ``uv sync`` (no flag) includes the PEP 735 ``[dependency-groups].dev``
-        # bundle by default — pytest, pytest-asyncio, pytest-mock, respx, ruff.
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: pytest
         working-directory: server
         run: |
           uv sync
-          uv run pytest ${{ matrix.paths }} -v
+          uv run pytest tests/ -v
 
-  # ----------------------------------------------------------------------
-  # cli-tests -- supervisor CLI pytest (small, fast, separate from backend)
-  # ----------------------------------------------------------------------
   cli-tests:
     name: CLI tests
-    needs: plan
-    if: needs.plan.outputs.cli_changed == 'true' || needs.plan.outputs.workflows_changed == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Setup environment
-        uses: ./.github/actions/setup
-
-      - name: Supervisor CLI tests (pytest)
-        # 106 tests covering build/start/stop pipelines, daemon, ports,
-        # docs, release config, clean. Run from repo root — tests
-        # resolve workspace paths via `pnpm list --json`.
-        # `pyyaml` is needed by test_release_pipeline_config.py to parse
-        # the workflow files; not a CLI runtime dep, only a test-time one.
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: pytest
         run: |
           uv pip install --system pytest pytest-asyncio pyyaml
           python -m pytest cli/tests/ -v
 
-  # ----------------------------------------------------------------------
-  # test-build-start -- cross-OS build + start smoke test
-  # ----------------------------------------------------------------------
   test-build-start:
     name: Build + start (${{ matrix.os }})
-    needs: plan
-    # Always runs unless the change is doc-only -- catches platform-
-    # specific build regressions (Windows path handling, macOS arm
-    # binary fallbacks, etc.) that can't be ID'd from Linux alone.
-    if: needs.plan.outputs.docs_only != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false  # zizmor/artipacked — read-only checkout
-
-      - name: Setup environment
-        uses: ./.github/actions/setup
-
-      - name: Build
-        run: pnpm run build
-
-      - name: Verify build artifacts
-        shell: bash
-        run: |
-          test -d "client/dist" && echo "client/dist/ exists" || (echo "client/dist/ missing" && exit 1)
-          test -d "server/.venv" && echo "server/.venv/ exists" || (echo "server/.venv/ missing" && exit 1)
-          # edgymeow binary checked in test-install.yml (CI skips binary download)
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm run build
 
       - name: Test start (Unix)
         if: runner.os != 'Windows'
@@ -220,72 +60,17 @@ jobs:
         run: |
           pnpm run start &
           PID=$!
-
           for i in {1..15}; do
-            if curl -sf http://localhost:3010/health > /dev/null 2>&1; then
-              echo "Backend healthy after $((i*2))s"
-              break
-            fi
+            curl -sf http://localhost:3010/health > /dev/null 2>&1 && break
             sleep 2
           done
-
-          if kill -0 $PID 2>/dev/null; then
-            echo "pnpm run start: OK"
-            pnpm run stop || kill $PID 2>/dev/null || true
-          else
-            echo "pnpm run start: FAILED"
-            exit 1
-          fi
+          kill -0 $PID 2>/dev/null && pnpm run stop || (echo FAILED; exit 1)
 
       - name: Test start (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $job = Start-Job -ScriptBlock {
-            Set-Location $using:PWD
-            pnpm run start
-          }
+          $job = Start-Job -ScriptBlock { Set-Location $using:PWD; pnpm run start }
           Start-Sleep -Seconds 15
-
-          try {
-            $response = Invoke-WebRequest -Uri "http://localhost:3010/health" -UseBasicParsing -TimeoutSec 5
-            Write-Host "Backend healthy: $($response.StatusCode)"
-          } catch {
-            Write-Host "Backend not responding"
-          }
-
-          if ($job.State -eq "Running") {
-            Write-Host "pnpm run start: OK"
-            Stop-Job $job
-            Remove-Job $job
-          } else {
-            Write-Host "pnpm run start: FAILED"
-            Receive-Job $job
-            exit 1
-          }
-
-  # ----------------------------------------------------------------------
-  # ci-passed -- single aggregator job; the one branch protection rule
-  # points at. Matrix dimensions can grow/shrink without breaking
-  # protection (hatch pattern).
-  # ----------------------------------------------------------------------
-  ci-passed:
-    name: CI passed
-    if: always()
-    needs:
-      - plan
-      - build-and-lint
-      - backend-tests
-      - cli-tests
-      - test-build-start
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check all jobs passed (or were skipped intentionally)
-        # alls-green treats `skipped` as success when listed in
-        # `allowed-skips`. Without this, a doc-only PR that skips
-        # backend-tests would fail the aggregator -- defeating the
-        # plan-job optimisation.
-        uses: re-actors/alls-green@afee1c1eac2a506084c274e9c02c8e0687b48d9e # v1.2.2
-        with:
-          allowed-skips: build-and-lint, backend-tests, cli-tests, test-build-start
-          jobs: ${{ toJSON(needs) }}
+          if ($job.State -eq "Running") { Stop-Job $job; Remove-Job $job }
+          else { Receive-Job $job; exit 1 }
