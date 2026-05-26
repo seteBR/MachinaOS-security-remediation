@@ -148,7 +148,7 @@ try {
   // Calculate total steps
   let totalSteps = 1;  // .env always
   if (!clientDistExists) totalSteps += 2;  // client deps + build
-  totalSteps += 2;  // Python deps + bytecode compile
+  totalSteps += 3;  // Python deps + bytecode compile + CLI venv
   let step = 0;
 
   // Create .env if needed
@@ -201,6 +201,24 @@ try {
   } catch (err) {
     console.log(`  Warning: bytecode compilation failed (non-fatal): ${err.message}`);
   }
+
+  // Provision a private venv for the CLI runtime deps (typer, rich,
+  // anyio, psutil, platformdirs, pywin32-on-Windows). ``python -m cli``
+  // re-execs itself under this venv (see ``cli/__main__.py``), so the
+  // system Python never needs the deps -- avoids the PEP 668
+  // ``externally-managed-environment`` failure on Ubuntu 24.04+,
+  // Debian 12+, Homebrew Python, NixOS, etc.
+  // (https://peps.python.org/pep-0668/)
+  step++;
+  console.log(`[${step}/${totalSteps}] Provisioning CLI runtime venv...`);
+  const cliVenvDir = resolve(ROOT, '.cli-venv');
+  const cliVenvPython = process.platform === 'win32'
+    ? resolve(cliVenvDir, 'Scripts', 'python.exe')
+    : resolve(cliVenvDir, 'bin', 'python');
+  if (!existsSync(cliVenvPython)) {
+    run(`uv venv "${cliVenvDir}"`, ROOT);
+  }
+  run(`uv pip install --python "${cliVenvPython}" --quiet -e .`, ROOT);
 
   // WhatsApp RPC is now an npm dependency - binary downloaded via postinstall
   console.log('');

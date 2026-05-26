@@ -3,7 +3,7 @@
 import { spawn, execSync } from 'child_process';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PKG = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8'));
@@ -126,7 +126,33 @@ function doctor() {
   console.log('');
 }
 
+// Resolve <ROOT>/.cli-venv Python if the postinstall step provisioned it.
+// Returns null on source checkouts (no venv -> fall back to ``npm run``).
+function venvPython() {
+  const py = process.platform === 'win32'
+    ? resolve(ROOT, '.cli-venv', 'Scripts', 'python.exe')
+    : resolve(ROOT, '.cli-venv', 'bin', 'python');
+  return existsSync(py) ? py : null;
+}
+
 function run(script, extraArgs = []) {
+  // Global-install fast path: spawn the venv's Python directly with
+  // ``-m cli <cmd>``. Skips the ``npm run`` shim that previously re-
+  // resolved the system ``python`` (which on PEP 668 systems lacks
+  // the CLI runtime deps -- typer/rich/anyio/psutil). The npm-run
+  // path stays as the source-checkout fallback (``pnpm run start``
+  // uses package.json scripts directly).
+  const venvPy = venvPython();
+  if (venvPy) {
+    const child = spawn(venvPy, ['-m', 'cli', script, ...extraArgs], {
+      cwd: ROOT,
+      stdio: 'inherit',
+    });
+    child.on('error', (e) => { console.error(`Failed: ${e.message}`); process.exit(1); });
+    child.on('close', (code) => process.exit(code || 0));
+    return;
+  }
+
   const npmArgs = ['run', script];
   if (extraArgs.length) npmArgs.push('--', ...extraArgs);
   const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', npmArgs, {
