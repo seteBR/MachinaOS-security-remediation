@@ -30,6 +30,38 @@ class KillResult:
     port_free: bool
 
 
+def _ancestor_pids() -> set[int]:
+    """Return PIDs of the current process + every ancestor up the tree.
+
+    Used by the pattern-matching kill functions below so we never
+    terminate our own parent / grandparent. When invoked through the
+    npm bin shim the chain is ``powershell -> node.exe (bin/cli.js)
+    -> python.exe (-m cli ...)`` -- if ``kill_orphaned_machina_processes``
+    matches ``node.exe`` (its cmdline carries the npm install path),
+    killing it tears down stdio mid-execution and the Python child
+    exits with whatever garbage code Windows assigns to an
+    abruptly-orphaned process (observed: 58). Walk up the tree once
+    and exclude every ancestor PID.
+
+    Bounded loop (20 hops) defends against process-tree cycles
+    (theoretically impossible but cheap insurance).
+    """
+    pids: set[int] = set()
+    try:
+        cur: psutil.Process | None = psutil.Process(os.getpid())
+        for _ in range(20):
+            if cur is None:
+                break
+            pids.add(cur.pid)
+            try:
+                cur = cur.parent()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                break
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pids.add(os.getpid())
+    return pids
+
+
 def find_pids_by_port(port: int) -> set[int]:
     """Find PIDs listening on ``port`` via psutil's native APIs."""
     pids: set[int] = set()
@@ -137,7 +169,7 @@ def kill_by_pattern(pattern: str, *, root_dir: str | None = None) -> list[int]:
     """
     pattern_lower = pattern.lower()
     root_norm = root_dir.lower().replace("\\", "/") if root_dir else None
-    my_pid = os.getpid()
+    safe_pids = _ancestor_pids()
     killed: list[int] = []
 
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
@@ -148,7 +180,7 @@ def kill_by_pattern(pattern: str, *, root_dir: str | None = None) -> list[int]:
                 continue
             if root_norm and root_norm not in cmd:
                 continue
-            if proc.pid == my_pid:
+            if proc.pid in safe_pids:
                 continue
             proc.kill()
             killed.append(proc.pid)
@@ -163,7 +195,7 @@ def kill_orphaned_machina_processes(
     """Kill stray python/node processes whose cmdline references the project root."""
     root_norm = root_dir.lower().replace("\\", "/")
     target_names = {"python", "python3", "python.exe", "node", "node.exe"}
-    my_pid = os.getpid()
+    safe_pids = _ancestor_pids()
     killed: list[int] = []
 
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
@@ -176,7 +208,7 @@ def kill_orphaned_machina_processes(
                 continue
             if exclude_substring and exclude_substring.lower() in cmd:
                 continue
-            if proc.pid == my_pid:
+            if proc.pid in safe_pids:
                 continue
             if kill_pid(proc.pid, graceful_timeout=2.0):
                 killed.append(proc.pid)
