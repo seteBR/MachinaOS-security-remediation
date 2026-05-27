@@ -31,6 +31,10 @@ When a request involves **3 or more steps**, use the `write_todos` tool to plan 
 
 For simple requests (1-2 steps), skip the todo list and respond directly.
 
+## Advisor
+
+If a chat-model is wired as a tool (`anthropic_chat_model` / `openai_chat_model` / `gemini_chat_model`), it's a stronger advisor model. Call it at the start of any complex task for a plan, when stuck, and before declaring done. Pass only `prompt`; the operator configured `model` and `api_key`. See the `advisor` skill for the full playbook.
+
 ## Communication Style
 
 - Be concise but thorough

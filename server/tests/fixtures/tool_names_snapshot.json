@@ -74,5 +74,8 @@
   "twitterSend": "twitter_send",
   "twitterSearch": "twitter_search",
   "twitterUser": "twitter_user",
-  "httpRequest": "http_request"
+  "httpRequest": "http_request",
+  "anthropicChatModel": "anthropic_chat_model",
+  "openaiChatModel": "openai_chat_model",
+  "geminiChatModel": "gemini_chat_model"
 }

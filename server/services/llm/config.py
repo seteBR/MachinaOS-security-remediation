@@ -173,12 +173,21 @@ def resolve_max_tokens(params: dict, model: str, provider: str) -> int:
 
 
 def resolve_temperature(params: dict, model: str, provider: str, thinking_enabled: bool) -> float:
-    """Resolve temperature with model-specific constraints."""
+    """Resolve temperature with model-specific constraints.
+
+    Default sourced from ``llm_defaults.json`` (``agent.default_temperature``)
+    when the caller passes ``None`` or omits the field — chat-model Params
+    declare ``temperature: Optional[float] = None`` so the merge produced by
+    the default tool-execution service can legitimately carry ``None`` here.
+    """
     from services.model_registry import get_model_registry
 
     registry = get_model_registry()
 
-    user_temp = float(params.get("temperature", 0.7))
+    user_val = params.get("temperature")
+    if user_val is None:
+        user_val = registry.get_agent_defaults()["default_temperature"]
+    user_temp = float(user_val)
 
     if registry.is_reasoning_model(model, provider):
         return 1.0

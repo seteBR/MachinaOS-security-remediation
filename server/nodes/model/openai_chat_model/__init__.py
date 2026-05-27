@@ -32,8 +32,20 @@ class OpenAIChatModelNode(ChatModelBase):
     type = "openaiChatModel"
     display_name = "OpenAI"
     subtitle = "Chat Model"
-    group = ("model",)
+    group = ("model", "tool")
     description = "OpenAI GPT models for chat completion and generation"
+
+    usable_as_tool = True
+    tool_name = "openai_chat_model"
+    tool_description = (
+        "Consult OpenAI GPT as an advisor — a stronger model the operator wired in to guide "
+        "your reasoning. Call AT THE START of any complex task to plan your approach, WHEN "
+        "STUCK (errors recurring, approach not converging), and BEFORE DECLARING DONE to "
+        "sanity-check completeness. Pose ONE focused question in `prompt` — include the context "
+        "the advisor needs (the advisor cannot see your conversation). Do NOT set `model`, "
+        "`api_key`, `temperature`, or other fields; the operator configured them. Returns brief "
+        "tactical guidance — you do the work."
+    )
 
     credentials = (OpenAICredential,)
     Params = OpenAIChatModelParams
