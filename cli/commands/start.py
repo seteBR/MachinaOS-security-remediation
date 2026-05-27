@@ -24,7 +24,6 @@ from cli._common import build_backend_spec, error_block, free_all_ports, preflig
 from cli.colors import console
 from cli.platform_ import (
     IS_WINDOWS,
-    IS_WSL,
     platform_name,
     server_dir,
     server_venv,
@@ -122,10 +121,13 @@ def _read_version(root: Path) -> str:
 
 
 def _build_specs(root: Path, cfg, *, temporal_running: bool) -> list[ServiceSpec]:
-    # Match the existing behaviour: production uses python:start
-    # (bind 127.0.0.1) on Windows/WSL, python:daemon (bind 0.0.0.0)
-    # on POSIX.
-    backend_host = "127.0.0.1" if (IS_WINDOWS or IS_WSL) else "0.0.0.0"
+    # Bind host: ``MACHINA_BIND_HOST`` overrides the auto-pick (escape
+    # hatch when the platform detection is wrong or the operator wants
+    # a specific interface). Default — native Windows stays private on
+    # 127.0.0.1; WSL + POSIX bind 0.0.0.0 so the service is reachable
+    # both via in-VM ``localhost`` AND via the WSL VM IP from the
+    # Windows host, regardless of WSL2's localhostForwarding state.
+    backend_host = os.environ.get("MACHINA_BIND_HOST") or ("127.0.0.1" if IS_WINDOWS else "0.0.0.0")
 
     specs: list[ServiceSpec] = [
         ServiceSpec(

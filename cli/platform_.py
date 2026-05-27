@@ -28,6 +28,7 @@ of the project agree on per-OS conventions.
 from __future__ import annotations
 
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -35,7 +36,12 @@ from pathlib import Path
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
-IS_WSL = IS_LINUX and ("WSL_DISTRO_NAME" in os.environ or "WSLENV" in os.environ)
+# ``platform.release()`` returns the kernel version string. On WSL2 it
+# always contains ``"microsoft"`` (e.g. ``5.15.167.4-microsoft-standard-WSL2``)
+# regardless of whether ``WSL_DISTRO_NAME`` is exported into the current
+# subprocess. Stdlib, kernel-level — survives daemonised / cron / systemd
+# launches that strip WSL env vars.
+IS_WSL = IS_LINUX and "microsoft" in platform.release().lower()
 IS_GIT_BASH = IS_WINDOWS and bool(
     os.environ.get("MSYSTEM") or "bash" in (os.environ.get("SHELL") or "")
 )
