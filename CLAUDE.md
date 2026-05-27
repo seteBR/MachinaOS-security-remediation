@@ -2055,9 +2055,23 @@ The workflow record carries three identity fields with strict separation:
 |---|---|---|---|
 | `Workflow.id` | opaque 32-hex UUID (`uuid.uuid4().hex`) | yes — never changes on rename | FK target (`Execution.workflow_id`), `EventWorkflowId` Search Attribute in Temporal Visibility, `WorkflowEvent.workflow_id` CloudEvents extension, `log_context(workflow_id=...)`, Redis cache keys, `DeploymentManager._deployments` dict key, frontend `useAppStore.currentWorkflow.id` |
 | `Workflow.name` | free-form display ("AI Assistant") | mutable | sidebar, parameter panel, exported JSON |
-| `Workflow.slug` | `<Sanitized_Name>_<N>` (`AI_Assistant_1`) | mutable, recomputed on rename | `~/.machina/workspaces/<slug>/`, Temporal start id (`<slug>_<uuid8>` visible in Temporal Web UI), cron Schedule IDs, export filenames |
+| `Workflow.slug` | `<Sanitized_Name>_<N>` (`AI_Assistant_1`) | mutable, recomputed on rename | `~/.machina/workspaces/<slug>/`, Temporal workflow IDs (visible in Temporal Web UI), cron Schedule IDs, export filenames |
 
-Single source of truth: [`server/services/workflow_naming.py`](./server/services/workflow_naming.py) — `slugify_name` (via `python-slugify` for Unicode transliteration, emoji strip, case preservation, length cap), `next_available_slug(name, database, *, exclude_id=None)` (fill-gap counter; pass `exclude_id=workflow_id` on rename so the row doesn't bump itself), `new_workflow_id()` (bare hex UUID).
+Single source of truth: [`server/services/workflow_naming.py`](./server/services/workflow_naming.py) — `slugify_name` (via `python-slugify` for Unicode transliteration, emoji strip, case preservation, length cap), `next_available_slug(name, database, *, exclude_id=None)` (fill-gap counter; pass `exclude_id=workflow_id` on rename so the row doesn't bump itself), `new_workflow_id()` (bare hex UUID), `node_label_slug(node)` (sandbox-safe stdlib slug from `node.data.label` or `node.type`, used inside Temporal `@workflow.defn` modules where `python-slugify` can't import safely).
+
+**Temporal workflow ID convention** — uniform `<workflow_slug>-<node_label>` shape across every workflow type. The Temporal Web UI's "Workflow Type" column already distinguishes the kind (TriggerListenerWorkflow / PollingTriggerWorkflow / CronTriggerWorkflow / AgentWorkflow / MachinaWorkflow), so no middle `-trigger-` / `-agent-` tag in the id.
+
+| Surface | Format | Example |
+|---|---|---|
+| Trigger listener (push/poll) | `<slug>-<trigger_label>` | `AI_Assistant_1-chatTrigger` (or `AI_Assistant_1-Customer_Inbox` after F2 rename) |
+| Per-firing run (child of listener) | `<slug>-<trigger_label>-<event_id>` | `AI_Assistant_1-chatTrigger-evt-abc` |
+| Cron Schedule | `<slug>-<trigger_label>` | `AI_Assistant_1-cronScheduler` |
+| Cron firing (per-tick child) | `<slug>-<trigger_label>-<ScheduledStartTime>` | `AI_Assistant_1-cronScheduler-2026-05-27T12:00:00Z` |
+| Agent child workflow | `<slug>-<agent_label>` | `AI_Assistant_1-aiAgent` (or `AI_Assistant_1-Bot` after F2 rename) |
+| Direct MachinaWorkflow exec | `<slug>-<uuid8>` | `AI_Assistant_1-a1b2c3d4` |
+| Per-node activity (inside MachinaWorkflow) | `activity_id = <node_id>` | `chatTrigger-1779...-47c2f5` |
+
+`node_label` is `node.data.label` (the F2-renamed canvas label) when set, falling back to `node.type` (`chatTrigger` / `telegramReceive` / `aiAgent` / etc.). Computed once at deploy time via `node_label_slug(node)` and passed into Temporal workflows as `trigger_label` (in `listener_data` for the trigger path) or read directly from the node dict (in `MachinaWorkflow.run` for the agent path). Stable `TriggerNodeId` / `EventWorkflowId` Search Attributes still use the immutable node_id / UUID so admin queries don't break across rename.
 
 **Rename path** — there is NO dedicated rename endpoint. The frontend's auto-save chain (`TopToolbar` inline edit → `updateWorkflow({name})` → debounced save → REST `POST /api/database/workflows` → `services.workflow_storage.handlers.handle_save_workflow`) IS the rename path. When `name` changes between saves, the handler (1) allocates a fresh slug via `next_available_slug`, (2) `database.rename_workflow` updates name + slug atomically (id UUID stays put), (3) renames the on-disk workspace dir via `Path.rename()`, (4) broadcasts a CloudEvents `workflow.renamed` envelope (`broadcaster.broadcast_workflow_lifecycle("renamed", workflow_id=..., name=..., slug=..., old_slug=...)`) so other tabs invalidate their workflows query.
 

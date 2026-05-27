@@ -83,6 +83,11 @@ class CronTriggerWorkflow:
         edges = listener_data["edges"]
         session_id = listener_data.get("session_id", "default")
         deployment_workflow_id = listener_data.get("workflow_id")
+        # Wave 14: human-readable id components — slug + trigger label
+        # set at deploy time. Both fall back to their UUID/id counterparts
+        # so older listener_data payloads still produce a valid id.
+        workflow_slug = listener_data.get("workflow_slug") or deployment_workflow_id
+        trigger_label = listener_data.get("trigger_label") or trigger_node_id
         tenant_id = listener_data.get("tenant_id")
 
         filtered_nodes, filtered_edges = _build_run_graph(
@@ -97,8 +102,11 @@ class CronTriggerWorkflow:
         # WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY guards
         # against a duplicate at the same instant (Temporal retry of
         # the schedule action) double-spawning a successful run.
+        # Format: ``<slug>-<trigger_label>-<firing_iso>`` — same
+        # convention as push / poll triggers, with firing time as the
+        # per-tick uniqueness suffix.
         firing_iso = trigger_output["timestamp"]
-        child_id = f"cron-{deployment_workflow_id}-{trigger_node_id}-{firing_iso}"
+        child_id = f"{workflow_slug}-{trigger_label}-{firing_iso}"
 
         await workflow.start_child_workflow(
             "MachinaWorkflow",
@@ -108,6 +116,7 @@ class CronTriggerWorkflow:
                     "edges": filtered_edges,
                     "session_id": session_id,
                     "workflow_id": deployment_workflow_id,
+                    "workflow_slug": workflow_slug,
                     "tenant_id": tenant_id,
                 }
             ],

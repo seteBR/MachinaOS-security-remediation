@@ -43,35 +43,37 @@ from core.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Schedule ID prefix used by both create + cancel-sweep. Mirrors the
-# ``trigger-listener-{wf}-{node}`` deterministic-id shape that the C1
-# canary uses for its listener workflows — same locality + uniqueness
-# properties.
-def cron_schedule_id(deployment_workflow_id: str, node_id: str) -> str:
-    """Deterministic Schedule ID for a (deployment, cron-node) pair.
+# Schedule + child-workflow IDs follow the ``<slug>-<trigger_label>``
+# shape — same convention as the push listener id in
+# DeploymentManager._listener_workflow_id. The label conveys the kind
+# (``cronScheduler`` / F2-renamed), so no middle tag.
+def cron_schedule_id(workflow_slug: str, trigger_label: str) -> str:
+    """Deterministic Schedule ID for a (workflow_slug, cron-node label) pair.
 
-    Mapped to the business entity so re-deploying the same MachinaOs
-    workflow targets the same Schedule. Pairs with the create call's
+    Re-deploying the same MachinaOs workflow (slug + label unchanged)
+    targets the same Schedule. Pairs with the create call's
     ``"already exists" → no-op`` semantics (per
     :exc:`temporalio.client.ScheduleAlreadyRunningError`).
     """
-    return f"cron-schedule-{deployment_workflow_id}-{node_id}"
+    return f"{workflow_slug}-{trigger_label}"
 
 
-# Child workflow ID prefix Temporal stamps onto each firing. The
+# Child workflow ID Temporal stamps onto each firing. The
 # ``{{.ScheduledStartTime}}`` placeholder is substituted by Temporal
 # server-side, so each tick produces a unique workflow_id without us
 # needing per-tick code (per
 # https://docs.temporal.io/develop/python/schedules#use-a-pre-generated-workflow-id).
-def cron_action_workflow_id(deployment_workflow_id: str, node_id: str) -> str:
-    return f"cron-fire-{deployment_workflow_id}-{node_id}-{{{{.ScheduledStartTime}}}}"
+def cron_action_workflow_id(workflow_slug: str, trigger_label: str) -> str:
+    return f"{workflow_slug}-{trigger_label}-{{{{.ScheduledStartTime}}}}"
 
 
 async def create_cron_schedule(
     client: Client,
     *,
-    deployment_workflow_id: str,
+    workflow_id: str,
+    workflow_slug: str,
     node_id: str,
+    trigger_label: str,
     cron_expression: str,
     timezone: str,
     listener_data: Dict[str, Any],
@@ -81,14 +83,22 @@ async def create_cron_schedule(
     """Create-or-reuse a Temporal Schedule for a cron trigger.
 
     Returns the Schedule's id. Idempotent: a re-deploy with the same
-    ``(deployment_workflow_id, node_id)`` pair reuses the existing
-    Schedule (Temporal raises
-    :exc:`ScheduleAlreadyRunningError` which we swallow as a no-op).
+    ``(workflow_slug, node_id)`` pair reuses the existing Schedule
+    (Temporal raises :exc:`ScheduleAlreadyRunningError` which we swallow
+    as a no-op).
 
     Args:
         client: Connected Temporal client.
-        deployment_workflow_id: MachinaOs deployment workflow_id.
-        node_id: Cron-trigger node id.
+        workflow_id: Stable UUID for ``EventWorkflowId`` Search Attribute
+            (used by the cancel sweep + Visibility queries — must
+            survive workflow rename).
+        workflow_slug: Human-readable slug for the Schedule + child
+            workflow IDs visible in Temporal Web UI.
+        node_id: Canvas node id for the ``TriggerNodeId`` Search
+            Attribute (used by admin queries — stable, not label).
+        trigger_label: Cron-trigger node's label (``cronScheduler`` by
+            default, or F2-renamed). Forms the suffix of the Schedule
+            id and child workflow ids.
         cron_expression: Crontab string (5 or 6 field).
         timezone: IANA tz name (e.g. ``"America/New_York"``).
         listener_data: Frozen action args for the workflow run
@@ -98,8 +108,8 @@ async def create_cron_schedule(
             drops a firing if the prior run is still going; mirrors the
             pre-Wave-12 APScheduler behaviour for slow workflows.
     """
-    schedule_id = cron_schedule_id(deployment_workflow_id, node_id)
-    action_workflow_id = cron_action_workflow_id(deployment_workflow_id, node_id)
+    schedule_id = cron_schedule_id(workflow_slug, trigger_label)
+    action_workflow_id = cron_action_workflow_id(workflow_slug, trigger_label)
 
     schedule = Schedule(
         action=ScheduleActionStartWorkflow(
@@ -126,7 +136,7 @@ async def create_cron_schedule(
         [
             SearchAttributePair(
                 SearchAttributeKey.for_keyword("EventWorkflowId"),
-                deployment_workflow_id,
+                workflow_id,
             ),
             SearchAttributePair(
                 SearchAttributeKey.for_keyword("TriggerNodeId"),

@@ -66,12 +66,13 @@ class TemporalExecutor:
             Dict with success, outputs, execution_trace, and timing info
         """
         start_time = time.time()
-        # Temporal start ID surfaces in the Web UI — prefix with the
-        # human-readable slug so an operator browsing the workflows
-        # listing can find runs by name. The uuid8 suffix keeps per-run
-        # uniqueness.
+        # Temporal start ID surfaces in the Web UI. Format:
+        # ``<workflow_slug>-<uuid8>`` — workflow name leads, short uuid
+        # disambiguates per-run uniqueness. No middle kind tag — the
+        # Temporal Web UI's "Workflow Type" column already shows
+        # MachinaWorkflow.
         slug_prefix = workflow_slug or "workflow"
-        execution_id = f"{slug_prefix}_{uuid.uuid4().hex[:8]}"
+        execution_id = f"{slug_prefix}-{uuid.uuid4().hex[:8]}"
 
         logger.info(
             "Starting Temporal workflow execution",

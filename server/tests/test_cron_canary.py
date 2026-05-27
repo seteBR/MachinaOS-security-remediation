@@ -110,9 +110,10 @@ class TestScheduleIdDerivation:
     def test_deterministic_id(self):
         from services.temporal.schedules import cron_schedule_id
 
+        # Wave 14: id = ``<workflow_slug>-<trigger_label>``.
         a = cron_schedule_id("wf-1", "cron-1")
         b = cron_schedule_id("wf-1", "cron-1")
-        assert a == b == "cron-schedule-wf-1-cron-1"
+        assert a == b == "wf-1-cron-1"
 
     def test_different_node_different_id(self):
         from services.temporal.schedules import cron_schedule_id
@@ -138,16 +139,20 @@ class TestCreateCronSchedule:
             "cron_expression": "*/5 * * * *",
         }
 
+        # Wave 14: signature now takes workflow_id (Search Attribute) +
+        # workflow_slug (id prefix) + trigger_label (id suffix).
         schedule_id = await create_cron_schedule(
             client,
-            deployment_workflow_id="wf-1",
+            workflow_id="wf-1",
+            workflow_slug="wf-1",
             node_id="cron-1",
+            trigger_label="cron-1",
             cron_expression="*/5 * * * *",
             timezone="America/New_York",
             listener_data=listener_data,
         )
 
-        assert schedule_id == "cron-schedule-wf-1-cron-1"
+        assert schedule_id == "wf-1-cron-1"
         assert client.create_schedule.await_count == 1
 
         passed_id, passed_schedule = client.create_schedule.call_args.args
@@ -169,14 +174,16 @@ class TestCreateCronSchedule:
 
         schedule_id = await create_cron_schedule(
             client,
-            deployment_workflow_id="wf-1",
+            workflow_id="wf-1",
+            workflow_slug="wf-1",
             node_id="cron-1",
+            trigger_label="cron-1",
             cron_expression="0 * * * *",
             timezone="UTC",
             listener_data={},
         )
 
-        assert schedule_id == "cron-schedule-wf-1-cron-1"
+        assert schedule_id == "wf-1-cron-1"
 
 
 class _FakeScheduleIterator:
@@ -362,17 +369,19 @@ class TestDeploymentCronCanaryRouting:
 
         recorded: List[Dict[str, Any]] = []
 
-        async def fake_create(client, *, deployment_workflow_id, node_id, cron_expression, timezone, listener_data, **kw):
+        async def fake_create(client, *, workflow_id, workflow_slug, node_id, trigger_label, cron_expression, timezone, listener_data, **kw):
             recorded.append(
                 {
-                    "deployment_workflow_id": deployment_workflow_id,
+                    "workflow_id": workflow_id,
+                    "workflow_slug": workflow_slug,
                     "node_id": node_id,
+                    "trigger_label": trigger_label,
                     "cron_expression": cron_expression,
                     "timezone": timezone,
                     "listener_data": listener_data,
                 }
             )
-            return f"cron-schedule-{deployment_workflow_id}-{node_id}"
+            return f"{workflow_slug}-{trigger_label}"
 
         from services.temporal import schedules
 
@@ -395,7 +404,11 @@ class TestDeploymentCronCanaryRouting:
             schedule_desc="Every 5 minutes",
         )
 
-        assert result == "cron-schedule-wf-1-cron-1"
+        # Wave 14: id = ``<workflow_slug>-<trigger_label>``.
+        # Slug + label both fall back to workflow_id / node.type when
+        # the test doesn't pre-populate DeploymentState.workflow_slug
+        # or set a custom node label.
+        assert result == "wf-1-cronScheduler"
         assert len(recorded) == 1
         call = recorded[0]
         assert call["cron_expression"] == "*/5 * * * *"

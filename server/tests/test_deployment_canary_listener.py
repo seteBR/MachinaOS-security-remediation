@@ -114,7 +114,7 @@ class TestDeterministicListenerId:
 
         first = DeploymentManager._listener_workflow_id("wf-1", "wh-1")
         second = DeploymentManager._listener_workflow_id("wf-1", "wh-1")
-        assert first == second == "trigger-listener-wf-1-wh-1"
+        assert first == second == "wf-1-wh-1"
 
     def test_id_differs_per_node_in_same_workflow(self):
         from services.deployment.manager import DeploymentManager
@@ -255,11 +255,14 @@ class TestStartCanaryListener:
         node = _node("wh-1", "webhookTrigger")
         listener_id = await mgr._start_canary_listener(node, "wf-abc", params={"path": "hook"})
 
-        assert listener_id == "trigger-listener-wf-abc-wh-1"
+        # Wave 14: listener id = ``<workflow_slug>-<trigger_label>``.
+        # Slug falls back to workflow_id ("wf-abc") when no DB row;
+        # label falls back to node.type ("webhookTrigger") when no F2 rename.
+        assert listener_id == "wf-abc-webhookTrigger"
         assert len(recorded_start) == 1
         call = recorded_start[0]
         assert call["name"] == "TriggerListenerWorkflow"
-        assert call["id"] == "trigger-listener-wf-abc-wh-1"
+        assert call["id"] == "wf-abc-webhookTrigger"
         assert call["id_conflict_policy"] == WorkflowIDConflictPolicy.USE_EXISTING
         assert call["task_queue"] == "machina-tasks"
 
@@ -338,7 +341,7 @@ class TestStartCanaryListener:
         monkeypatch.setattr(container_mod.container, "temporal_client", lambda: wrapper)
 
         listener_id = await mgr._start_canary_listener(_node("ct-1", "chatTrigger"), "wf-chat", params={"session_id": "default"})
-        assert listener_id == "trigger-listener-wf-chat-ct-1"
+        assert listener_id == "wf-chat-chatTrigger"
 
         sa = recorded[0]["search_attributes"]
         attrs_by_name = {pair.key.name: pair.value for pair in sa}
@@ -381,7 +384,7 @@ class TestCancelCanaryListeners:
 
         async def fake_list_workflows(query):
             recorded_queries.append(query)
-            for wf_id in ["trigger-listener-wf-1-wh-1", "trigger-listener-wf-1-wh-2"]:
+            for wf_id in ["wf-1-trigger-wh-1", "wf-1-trigger-wh-2"]:
                 yield MagicMock(id=wf_id)
 
         handles_by_id: Dict[str, MagicMock] = {}
@@ -424,8 +427,8 @@ class TestCancelCanaryListeners:
 
         assert cancelled == 2
         assert sorted(cancelled_ids) == [
-            "trigger-listener-wf-1-wh-1",
-            "trigger-listener-wf-1-wh-2",
+            "wf-1-trigger-wh-1",
+            "wf-1-trigger-wh-2",
         ]
 
     @pytest.mark.asyncio
@@ -460,12 +463,12 @@ class TestCancelCanaryListeners:
         cancelled_ids: List[str] = []
 
         async def list_two(query):
-            for wf_id in ["trigger-listener-wf-1-wh-1", "trigger-listener-wf-1-wh-2"]:
+            for wf_id in ["wf-1-trigger-wh-1", "wf-1-trigger-wh-2"]:
                 yield MagicMock(id=wf_id)
 
         def get_handle(wf_id):
             handle = MagicMock()
-            if wf_id == "trigger-listener-wf-1-wh-1":
+            if wf_id == "wf-1-trigger-wh-1":
 
                 async def boom():
                     raise RuntimeError("simulated handle.cancel failure")
@@ -492,7 +495,7 @@ class TestCancelCanaryListeners:
         cancelled = await mgr._cancel_canary_listeners("wf-1")
         # Only the second one succeeded.
         assert cancelled == 1
-        assert cancelled_ids == ["trigger-listener-wf-1-wh-2"]
+        assert cancelled_ids == ["wf-1-trigger-wh-2"]
 
     @pytest.mark.asyncio
     async def test_returns_zero_when_temporal_disconnected(self, monkeypatch):
@@ -689,4 +692,4 @@ class TestNoInstanceStateForCanaryListeners:
         from services.deployment.manager import DeploymentManager
 
         # Both helpers can be called on the class without an instance.
-        assert DeploymentManager._listener_workflow_id("wf", "node") == "trigger-listener-wf-node"
+        assert DeploymentManager._listener_workflow_id("wf", "node") == "wf-node"

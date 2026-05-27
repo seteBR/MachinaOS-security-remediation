@@ -153,6 +153,14 @@ class TriggerListenerWorkflow:
         edges = listener_data["edges"]
         session_id = listener_data.get("session_id", "default")
         workflow_id = listener_data.get("workflow_id")
+        # Human-readable slug prefix for the Temporal Web UI listing.
+        # Set at deploy time from the workflow's display name; falls back
+        # to workflow_id for one-off deploys without a saved DB row.
+        workflow_slug = listener_data.get("workflow_slug") or workflow_id
+        # Trigger node's label (``telegramReceive`` / ``chatTrigger`` /
+        # F2-renamed). Pre-computed at deploy time so the workflow
+        # sandbox doesn't have to slugify.
+        trigger_label = listener_data.get("trigger_label") or trigger_node_id
         tenant_id = listener_data.get("tenant_id")
 
         # event.data is the producer-supplied payload (webhook body /
@@ -175,8 +183,10 @@ class TriggerListenerWorkflow:
         # listener restart), Temporal rejects the duplicate start.
         # Lazy fallback to workflow.uuid4() only if event.id is missing
         # (shouldn't happen — on_event drops malformed payloads).
+        # Format: ``<slug>-<trigger_label>-<event_id>`` — workflow name
+        # + trigger label (which conveys the kind) + per-firing event id.
         event_id = event.get("id") or workflow.uuid4().hex
-        child_id = f"run-{workflow_id}-{event_id}"
+        child_id = f"{workflow_slug}-{trigger_label}-{event_id}"
 
         await _broadcast_trigger_idle(
             node_id=trigger_node_id,
@@ -193,6 +203,7 @@ class TriggerListenerWorkflow:
                     "edges": filtered_edges,
                     "session_id": session_id,
                     "workflow_id": workflow_id,
+                    "workflow_slug": workflow_slug,
                     "tenant_id": tenant_id,
                 }
             ],

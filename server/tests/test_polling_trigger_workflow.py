@@ -430,8 +430,11 @@ class TestPollingTriggerWorkflowBody:
 
         # Spawn called for 'c' (cycle 2), 'd' (cycle 3). The duplicate
         # 'c' in cycle 3 is deduped via _seen_event_ids.
+        # Wave 14: child id = ``<workflow_slug>-<trigger_label>-<event_id>``.
+        # Both slug + label fall back to workflow_id / trigger_node_id
+        # when listener_data omits them (this test does).
         spawn_ids = [c["id"] for c in spawn_calls]
-        assert spawn_ids == ["run-wf-1-c", "run-wf-1-d"]
+        assert spawn_ids == ["wf-1-gm-1-c", "wf-1-gm-1-d"]
 
     @pytest.mark.asyncio
     async def test_cycle_failure_does_not_break_loop(self, monkeypatch):

@@ -27,10 +27,9 @@ Temporal-safe up to 1000 chars).
 
 from __future__ import annotations
 
+import re
 import uuid
-from typing import Set
-
-from slugify import slugify
+from typing import Any, Dict, Set
 
 from core.logging import get_logger
 
@@ -40,6 +39,17 @@ logger = get_logger(__name__)
 _SLUG_SEPARATOR = "_"
 _SLUG_MAX_LEN = 50
 _FALLBACK_SLUG = "Workflow"
+
+# Stdlib-only fallback regex for ``node_label_slug``. Plain ``re`` is on
+# Temporal's default sandbox allow-list, so Temporal workflows
+# (``MachinaWorkflow``, ``TriggerListenerWorkflow``,
+# ``PollingTriggerWorkflow``) can call ``node_label_slug`` directly to
+# build human-readable child workflow IDs from the user's F2-renamed
+# node labels. ``slugify_name`` (which uses ``python-slugify`` for full
+# Unicode transliteration) is deferred-imported so the workflow-side
+# import doesn't drag the heavier dep into the sandbox.
+_NODE_LABEL_PATTERN = re.compile(r"[^A-Za-z0-9]+")
+_FALLBACK_NODE_LABEL = "Node"
 
 
 def slugify_name(name: str) -> str:
@@ -57,6 +67,11 @@ def slugify_name(name: str) -> str:
     Always returns a non-empty ASCII string suitable as a slug BASE.
     Callers append ``_<N>`` to dedupe via :func:`next_available_slug`.
     """
+    # Deferred import — ``python-slugify`` is heavy and Temporal
+    # workflows that only need :func:`node_label_slug` shouldn't pay
+    # the cost (or risk the sandbox tripping on transitive imports).
+    from slugify import slugify
+
     slug = slugify(
         name or "",
         separator=_SLUG_SEPARATOR,
@@ -65,6 +80,19 @@ def slugify_name(name: str) -> str:
         word_boundary=False,
     )
     return slug or _FALLBACK_SLUG
+
+
+def node_label_slug(node: Dict[str, Any]) -> str:
+    """Sandbox-safe slug for a node's user-assigned label.
+
+    Returns the canvas label (set via F2 rename) sanitized to ASCII
+    alphanumerics + underscores, suitable for Temporal workflow IDs.
+    Falls back to the node type, then to ``"Node"`` for ill-formed
+    inputs. Stdlib-only — safe to call inside ``@workflow.defn``
+    sandboxes (no ``python-slugify`` / ``text-unidecode`` imports).
+    """
+    label = (node.get("data") or {}).get("label") or node.get("type") or _FALLBACK_NODE_LABEL
+    return _NODE_LABEL_PATTERN.sub(_SLUG_SEPARATOR, label).strip(_SLUG_SEPARATOR) or _FALLBACK_NODE_LABEL
 
 
 async def next_available_slug(
@@ -122,6 +150,7 @@ def new_workflow_id() -> str:
 
 __all__ = [
     "slugify_name",
+    "node_label_slug",
     "next_available_slug",
     "new_workflow_id",
 ]

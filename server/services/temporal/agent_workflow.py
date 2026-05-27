@@ -159,6 +159,7 @@ class AgentWorkflow:
         payload = await workflow.execute_activity(
             "agent.prepare_payload.v1",
             args=[context],
+            activity_id="prepare-payload",
             start_to_close_timeout=PERSIST_TURN_TIMEOUT * 2,  # 60s default
             retry_policy=AGENT_ACTIVITY_RETRY,
         )
@@ -258,6 +259,7 @@ class AgentWorkflow:
             step_result = await workflow.execute_activity(
                 "agent.execute_llm_step.v1",
                 args=[llm_payload],
+                activity_id=f"llm-step-{iteration + 1}",
                 start_to_close_timeout=LLM_STEP_TIMEOUT,
                 retry_policy=AGENT_ACTIVITY_RETRY,
             )
@@ -380,6 +382,7 @@ class AgentWorkflow:
                     tool_result = await workflow.execute_activity(
                         tool_activity_name,
                         args=[tool_payload],
+                        activity_id=f"tool-{tool_info['tool_node_id']}-{iteration + 1}",
                         start_to_close_timeout=TOOL_STEP_TIMEOUT,
                         heartbeat_timeout=TOOL_HEARTBEAT_TIMEOUT,
                     )
@@ -435,6 +438,7 @@ class AgentWorkflow:
                             "model": payload["model"],
                         }
                     ],
+                    activity_id=f"compact-memory-{iteration + 1}",
                     start_to_close_timeout=COMPACT_MEMORY_TIMEOUT,
                     retry_policy=AGENT_ACTIVITY_RETRY,
                 )
@@ -491,6 +495,7 @@ class AgentWorkflow:
                     "result": result_payload,
                 }
             ],
+            activity_id="store-output",
             start_to_close_timeout=PERSIST_TURN_TIMEOUT,
             retry_policy=AGENT_ACTIVITY_RETRY,
         )

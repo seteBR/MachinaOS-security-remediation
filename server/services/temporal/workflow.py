@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Set
 from temporalio import workflow
 
 from ._retry_policies import DEFAULT_ACTIVITY_RETRY
+from services.workflow_naming import node_label_slug
 
 # Config handles - nodes connecting via these are config nodes (not executed)
 # AI Agent handles: input-memory, input-tools, input-model, input-task, input-teammates
@@ -191,6 +192,10 @@ class MachinaWorkflow:
         edges = workflow_data.get("edges", [])
         session_id = workflow_data.get("session_id", "default")
         workflow_id = workflow_data.get("workflow_id")
+        # Human-readable slug for child workflow IDs visible in the
+        # Temporal Web UI. Falls back to workflow_id when missing
+        # (one-off Runs without a saved DB row).
+        workflow_slug = workflow_data.get("workflow_slug") or workflow_id
         tenant_id = workflow_data.get("tenant_id")
 
         workflow.logger.info(f"Starting workflow orchestration: {len(nodes)} nodes, {len(edges)} edges")
@@ -300,6 +305,7 @@ class MachinaWorkflow:
                     "node_data": node.get("data", {}),
                     "inputs": self._get_node_inputs(node_id, deps, outputs),
                     "workflow_id": workflow_id,
+                    "workflow_slug": workflow_slug,
                     "tenant_id": tenant_id,
                     "session_id": session_id,
                     "nodes": nodes,  # Full list for tool/memory detection
@@ -321,9 +327,15 @@ class MachinaWorkflow:
                     # blocking on child completion). The handle is a
                     # Task-like with ``.done()`` so it slots into the same
                     # FIRST_COMPLETED loop as activity handles.
+                    # Child id format: ``<slug>-<node_label>`` — same
+                    # ``<workflow_slug>-<node_label>`` convention as the
+                    # trigger ids. ``node_label`` is the user-renamed
+                    # F2 label or the node type (``aiAgent`` / ``orchestrator_agent``
+                    # / ...) — already conveys "agent" so no middle tag.
                     handle = await workflow.start_child_workflow(
                         dispatch["name"],
                         args=[context],
+                        id=f"{workflow_slug}-{node_label_slug(node)}",
                         # Child workflow execution timeout: agent loops can run
                         # 10+ minutes with multiple LLM turns. Set generously.
                         execution_timeout=timedelta(hours=1),
@@ -334,9 +346,12 @@ class MachinaWorkflow:
                 else:
                     # F4.A activity path: per-type when the plugin class is
                     # registered AND the per-type flag is on; legacy
-                    # execute_node_activity otherwise.
+                    # execute_node_activity otherwise. ``activity_id`` =
+                    # node_id so the Temporal Web UI history tab labels
+                    # each activity by the canvas node it ran.
                     start_kwargs: Dict[str, Any] = dict(
                         args=[context],
+                        activity_id=node_id,
                         start_to_close_timeout=timedelta(minutes=10),
                         heartbeat_timeout=timedelta(minutes=2),
                         retry_policy=retry_policy,

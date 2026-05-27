@@ -131,6 +131,12 @@ class DeploymentManager:
                 "deployment_id": self._deployments[workflow_id].deployment_id,
             }
 
+        # Human-readable slug for Temporal Web UI prefixing. Falls back
+        # to workflow_id when the DB row is missing OR slug is empty
+        # (one-off deploys / tests without a saved record).
+        wf = await self.database.get_workflow(workflow_id)
+        workflow_slug = (wf and wf.slug) or workflow_id
+
         # Setup
         deployment_id = f"deploy_{workflow_id}_{int(time.time() * 1000)}"
         self._status_callbacks[workflow_id] = status_callback
@@ -155,6 +161,7 @@ class DeploymentManager:
         self._deployments[workflow_id] = DeploymentState(
             deployment_id=deployment_id,
             workflow_id=workflow_id,
+            workflow_slug=workflow_slug,
             is_running=True,
             nodes=nodes,
             edges=edges,
@@ -579,15 +586,17 @@ class DeploymentManager:
     # =========================================================================
 
     @staticmethod
-    def _listener_workflow_id(workflow_id: str, node_id: str) -> str:
+    def _listener_workflow_id(workflow_slug: str, trigger_label: str) -> str:
         """Deterministic Temporal workflow_id for a canary listener.
 
-        Mapped to the business entity (deployment workflow_id + trigger
-        node_id) so re-deploy of the same workflow produces the same
-        listener id. Pairs with ``WorkflowIDConflictPolicy.USE_EXISTING``
-        for idempotent start.
+        Format: ``<workflow_slug>-<trigger_label>`` — workflow name leads,
+        trigger node's label is the suffix (``telegramReceive`` /
+        ``chatTrigger`` by default, or the F2-renamed label). The label
+        itself conveys the kind, so no middle ``trigger`` tag. Re-deploy
+        of the same (workflow, trigger label) pair reuses the existing
+        listener via ``WorkflowIDConflictPolicy.USE_EXISTING``.
         """
-        return f"trigger-listener-{workflow_id}-{node_id}"
+        return f"{workflow_slug}-{trigger_label}"
 
     @staticmethod
     def _trigger_kind_for(node_type: str) -> str:
@@ -732,14 +741,24 @@ class DeploymentManager:
         workflow_type_name = _POLLING_LISTENER_WORKFLOW_TYPE if is_polling else _PUSH_LISTENER_WORKFLOW_TYPE
         trigger_kind = "polling" if is_polling else self._trigger_kind_for(node_type)
 
-        listener_id = self._listener_workflow_id(workflow_id, node_id)
+        from services.workflow_naming import node_label_slug
 
-        # Common payload shape for both workflow types (signal-driven
-        # TriggerListenerWorkflow ignores poll-specific fields like
-        # ``version`` / ``seen_ids``; polling workflow reads them).
+        trigger_label = node_label_slug(node)
+        # ``workflow_slug`` is populated by deploy(); falls back to
+        # workflow_id for tests / direct-call paths that bypass deploy.
+        slug = state.workflow_slug or workflow_id
+        listener_id = self._listener_workflow_id(slug, trigger_label)
+
+        # ``trigger_label`` flows into the per-firing run id
+        # (``<slug>-<label>-<event_id>``) inside both child workflows so
+        # the trigger's name surfaces on every firing in the Temporal
+        # Web UI. Polling workflow reads ``version`` / ``seen_ids``;
+        # signal-driven listener ignores them.
         listener_args: Dict[str, Any] = {
             "workflow_id": workflow_id,
+            "workflow_slug": slug,
             "trigger_node_id": node_id,
+            "trigger_label": trigger_label,
             "node_type": node_type,
             "event_type": event_type,
             "filter_params": params,
@@ -869,9 +888,16 @@ class DeploymentManager:
         if state is None:
             raise RuntimeError(f"No deployment state for workflow {workflow_id}")
 
+        from services.workflow_naming import node_label_slug
+
+        trigger_label = node_label_slug(node)
+        slug = state.workflow_slug or workflow_id
+
         listener_data: Dict[str, Any] = {
             "workflow_id": workflow_id,
+            "workflow_slug": slug,
             "trigger_node_id": node_id,
+            "trigger_label": trigger_label,
             "node_type": node.get("type", "cronScheduler"),
             "cron_expression": cron_expr,
             "frequency": frequency,
@@ -885,8 +911,10 @@ class DeploymentManager:
 
         schedule_id = await create_cron_schedule(
             wrapper.client,
-            deployment_workflow_id=workflow_id,
+            workflow_id=workflow_id,
+            workflow_slug=slug,
             node_id=node_id,
+            trigger_label=trigger_label,
             cron_expression=cron_expr,
             timezone=timezone,
             listener_data=listener_data,

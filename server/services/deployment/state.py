@@ -15,6 +15,12 @@ class DeploymentState:
     nodes: List[Dict]
     edges: List[Dict]
     session_id: str
+    # Human-readable slug resolved from DB at deploy time. Used to
+    # prefix Temporal workflow IDs (listener + per-firing run) so
+    # operators browsing the Temporal Web UI can identify runs by
+    # name instead of by UUID. Falls back to ``workflow_id`` when the
+    # DB row is missing (one-off deploys, tests).
+    workflow_slug: str = ""
     settings: Dict[str, Any] = field(default_factory=dict)
     deployed_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -22,6 +28,7 @@ class DeploymentState:
         return {
             "deployment_id": self.deployment_id,
             "workflow_id": self.workflow_id,
+            "workflow_slug": self.workflow_slug,
             "is_running": self.is_running,
             "session_id": self.session_id,
             "settings": self.settings,

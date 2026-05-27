@@ -17,8 +17,10 @@ C1c — ``_build_run_graph`` produces the correct filtered (nodes, edges)
       payload; sibling triggers carry ``_pre_executed=True`` +
       ``{not_triggered: True}``; downstream nodes are reachable;
       cross-graph nodes are excluded.
-C1d — Spawned child workflows use a stable ``run-<workflow_id>-<event.id>``
-      ID so server-side dedup catches producer retries.
+C1d — Spawned child workflows use a stable
+      ``<workflow_slug>-<trigger_label>-<event.id>`` ID (Wave 14) so the
+      Temporal Web UI surfaces the workflow + firing trigger by name
+      while server-side dedup catches producer retries.
 """
 
 from __future__ import annotations
@@ -316,7 +318,10 @@ class TestSpawnChildRun:
         assert len(recorded) == 1
         call = recorded[0]
         assert call["name"] == "MachinaWorkflow"
-        assert call["id"] == "run-wf-abc-evt-42"
+        # Wave 14: ``<workflow_slug>-<trigger_label>-<event_id>``.
+        # workflow_slug falls back to workflow_id when listener_data
+        # doesn't carry it; trigger_label falls back to trigger_node_id.
+        assert call["id"] == "wf-abc-wh-1-evt-42"
         # Trigger output carries both the user data AND the envelope for
         # downstream introspection.
         child_args = call["args"][0]
