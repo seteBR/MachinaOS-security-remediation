@@ -86,7 +86,8 @@ context = {
     "inputs": {  # Outputs from upstream nodes
         "chatTrigger-456": {"message": "Hello", "timestamp": "..."},
     },
-    "workflow_id": "workflow-789",
+    "workflow_id": "6868cbbf4a36409fbd07ca24999f8b66",  # 32-hex UUID, stable across rename
+    "workflow_slug": "AI_Assistant_1",                  # Human-readable, used for Temporal child IDs
     "session_id": "session-xyz",
     "nodes": [...],  # Full list for tool/memory detection
     "edges": [...],  # Full list for tool/memory detection

@@ -629,12 +629,13 @@ This resolves to the `message` property from the Start node's output data.
 
 ## Validation Rules
 
-1. Workflow must have required fields: id, name, nodes, edges, createdAt, lastModified
-2. Workflow ID must match pattern: `workflow_[0-9]+`
-3. Each node must have: id, type, position (with x and y)
-4. Each edge must have: id, source, target
-5. Edge source and target must reference existing nodes
-6. Node types must be one of the supported types
+1. Workflow must have required fields: id, name, slug, nodes, edges, createdAt, lastModified
+2. Workflow ID must be a 32-char lowercase hex UUID (`^[0-9a-f]{32}$`) — stable for the lifetime of the workflow, never changes on rename
+3. Workflow slug must be `<Sanitized_Name>_<N>` (`^[A-Za-z0-9]+(_[0-9]+)?$`) — derived from `name` via `services.workflow_naming.next_available_slug`; unique across active workflows; mutable on rename
+4. Each node must have: id, type, position (with x and y)
+5. Each edge must have: id, source, target
+6. Edge source and target must reference existing nodes
+7. Node types must be one of the supported types
 
 ## Version History
 
