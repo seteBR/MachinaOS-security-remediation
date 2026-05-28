@@ -250,6 +250,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 disabled={isSaving}
               />
             </Row>
+            <Row
+              label="Auto-Rebind Tools After Canvas Changes"
+              description="When an agent's Agent Builder tool spawns new tools/skills/teammates mid-run, immediately rebind the LLM so the new wiring is callable in the same turn. Disable to require a Run-stop-Run cycle before the LLM can call the new tool."
+            >
+              <Switch
+                checked={settings.autoRebindToolsAfterCanvasChange}
+                onCheckedChange={(checked) => handleChange('autoRebindToolsAfterCanvasChange', checked)}
+                disabled={isSaving}
+              />
+            </Row>
           </Section>
 
           {/* Auto-save */}

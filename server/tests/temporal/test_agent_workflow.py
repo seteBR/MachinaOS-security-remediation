@@ -62,11 +62,12 @@ class TestAgentActivities:
         defn = getattr(compact_agent_memory, "__temporal_activity_definition")
         assert defn.name == "agent.compact_memory.v1"
 
-    def test_collect_returns_all_six(self):
+    def test_collect_returns_all_seven(self):
         """Each successive sprint added one F4.B agent activity:
         infra (3) → per-agent-wiring +prepare_payload (4) → CloudEvents
-        cleanup +broadcast_progress (5). All five must register so the
-        AgentWorkflow loop can schedule them by name."""
+        cleanup +broadcast_progress (5) → +store_output (6) →
+        +refresh_tools (7). All must register so the AgentWorkflow loop
+        can schedule them by name."""
         from services.temporal.agent_activities import collect_agent_activities
 
         activities = collect_agent_activities()
@@ -77,6 +78,7 @@ class TestAgentActivities:
             "agent.execute_llm_step.v1",
             "agent.persist_turn.v1",
             "agent.prepare_payload.v1",
+            "agent.refresh_tools.v1",
             "agent.store_output.v1",
         ]
 
@@ -212,4 +214,126 @@ class TestDelegationToolDispatch:
             "AgentWorkflow tool dispatch must read ``context.get('edges')`` "
             "for the same reason — both are needed by "
             "``collect_agent_connections``."
+        )
+
+
+class TestAutoRebindTools:
+    """Mid-run tool rebind after canvas-mutating tools return
+    ``operations`` (workflow_ops batch). The flag is read once in
+    ``prepare_agent_payload``, forwarded into every tool's payload, and
+    surfaced into ``ctx.raw["auto_rebind_tools"]`` so agentBuilder's
+    summary text reflects the user's preference. The rebind itself
+    happens in ``AgentWorkflow.run`` via a new
+    ``agent.refresh_tools.v1`` activity.
+    """
+
+    def test_refresh_tools_activity_registered(self):
+        from services.temporal.agent_activities import refresh_agent_tools
+
+        defn = getattr(refresh_agent_tools, "__temporal_activity_definition", None)
+        assert defn is not None, "refresh_agent_tools missing @activity.defn"
+        assert defn.name == "agent.refresh_tools.v1"
+
+    def test_refresh_tools_in_collect(self):
+        """Worker registration must include the new activity so
+        AgentWorkflow can schedule it."""
+        from services.temporal.agent_activities import collect_agent_activities, refresh_agent_tools
+
+        names = {getattr(a, "__temporal_activity_definition").name for a in collect_agent_activities()}
+        assert "agent.refresh_tools.v1" in names
+        assert refresh_agent_tools in collect_agent_activities()
+
+    def test_workflow_calls_refresh_after_ops(self):
+        """AgentWorkflow.run must schedule ``agent.refresh_tools.v1``
+        when a tool result carries an ``operations`` field."""
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+        assert '"agent.refresh_tools.v1"' in src, (
+            "AgentWorkflow tool dispatch must schedule agent.refresh_tools.v1 "
+            "when a tool result returns workflow_ops operations."
+        )
+        # The rebind branch must extend `tools` and `tool_index` so the
+        # next execute_llm_step iteration sees the new tools.
+        assert "tools.append" in src or "tools.extend" in src, (
+            "AgentWorkflow must extend its tools list after refresh."
+        )
+        assert "tool_index[" in src, "AgentWorkflow must extend tool_index after refresh."
+
+    def test_prepare_payload_surfaces_auto_rebind_flag(self):
+        """prepare_agent_payload reads the UserSettings flag and includes
+        ``auto_rebind_tools`` in its returned payload so AgentWorkflow
+        + the tool dispatch see the user's preference."""
+        import inspect
+
+        from services.temporal.agent_activities import prepare_agent_payload
+
+        src = inspect.getsource(prepare_agent_payload)
+        assert "auto_rebind_tools_after_canvas_change" in src, (
+            "prepare_agent_payload must read the user setting."
+        )
+        assert '"auto_rebind_tools"' in src, (
+            "prepare_agent_payload return must include the resolved flag."
+        )
+
+    def test_tool_payload_forwards_auto_rebind(self):
+        """The per-tool activity payload must forward
+        ``auto_rebind_tools`` so the F4.A wrapper can land it into
+        ctx.raw for agentBuilder's summary text."""
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+        assert '"auto_rebind_tools"' in src, (
+            "AgentWorkflow tool_payload must include auto_rebind_tools "
+            "so the per-tool activity surfaces it into ctx.raw."
+        )
+
+
+class TestNeedsCanvasDispatch:
+    """Regression: regular (non-delegation) tools opt into canvas
+    propagation via the ``BaseNode.needs_canvas`` ClassVar. The F4.B
+    tool-dispatch path must read the flag via
+    ``services.node_registry.get_node_class`` rather than hardcoding
+    per-plugin type strings. Locks the principled fix for the
+    agentBuilder ``nodes=0 edges=0`` bug.
+    """
+
+    def test_dispatch_uses_get_node_class_lookup(self):
+        """The non-delegation branch must look the plugin class up at
+        dispatch time so ``cls.needs_canvas`` decides canvas
+        propagation. A hardcoded type-string check would silently break
+        for any future canvas-aware tool."""
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+        assert "get_node_class(" in src, (
+            "AgentWorkflow tool dispatch must call ``get_node_class("
+            "tool_info['node_type'])`` so it can read the plugin's "
+            "``needs_canvas`` ClassVar. Hardcoded type-string checks "
+            "are forbidden — they don't compose for future canvas-"
+            "aware tools."
+        )
+        assert "needs_canvas" in src, (
+            "AgentWorkflow tool dispatch must read the resolved "
+            "``plugin_cls.needs_canvas`` flag. Without it the canvas "
+            "never reaches agentBuilder and ``_resolve_caller`` falls "
+            "back to self-as-caller."
+        )
+
+    def test_get_node_class_imported_at_module_level(self):
+        """The helper must be importable from the workflow module
+        — Temporal's ``@workflow.defn(sandboxed=False)`` lets us touch
+        ``services.node_registry`` deterministically."""
+        from services.temporal import agent_workflow
+
+        assert hasattr(agent_workflow, "get_node_class"), (
+            "agent_workflow.py must import ``get_node_class`` at module "
+            "level so the workflow body can resolve plugin classes by "
+            "type string."
         )

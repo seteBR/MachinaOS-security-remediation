@@ -8,7 +8,7 @@ import time
 import httpx
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Callable, Type, TYPE_CHECKING
+from typing import Awaitable, Dict, Any, List, Optional, Callable, Type, TYPE_CHECKING
 
 # ---------------------------------------------------------------------------
 # LangChain imports — fully lazy except for ``BaseMessage``.
@@ -748,6 +748,7 @@ async def _run_agent_loop(
     tool_executor: Optional[Callable] = None,
     max_iterations: int = 500,
     progress_callback: Optional[Callable[[int], Any]] = None,
+    rebind_from_operations: Optional[Callable[[List[Dict[str, Any]]], Awaitable[List[Any]]]] = None,
 ) -> Dict[str, Any]:
     """Drive an LLM agent loop with optional tool calling.
 
@@ -779,7 +780,10 @@ async def _run_agent_loop(
     """
     from langchain_core.messages import AIMessage, ToolMessage
 
-    model = chat_model.bind_tools(tools) if tools else chat_model
+    # Local mutable tools list so canvas-mutating tools (agentBuilder)
+    # can extend the bound surface mid-loop via ``rebind_from_operations``.
+    current_tools: List[Any] = list(tools or [])
+    model = chat_model.bind_tools(current_tools) if current_tools else chat_model
     messages: List[BaseMessage] = list(initial_messages)
     thinking_accumulated = ""
     iteration = 0
@@ -832,6 +836,7 @@ async def _run_agent_loop(
                 "truncated": False,
             }
 
+        iteration_new_tools: List[Any] = []
         for call in tool_calls:
             tool_name = call.get("name", "")
             tool_args = call.get("args", {}) or {}
@@ -841,12 +846,41 @@ async def _run_agent_loop(
             except Exception as e:
                 logger.error(f"[Agent loop] Tool {tool_name!r} raised: {e}")
                 result = {"error": str(e)}
+
+            # Canvas-mutation rebind: any tool can return an ``operations``
+            # field (workflow_ops protocol). When the agent loop has a
+            # ``rebind_from_operations`` callback wired AND the toggle is
+            # on, build new StructuredTools off the ops list so the LLM
+            # can call them in the very next iteration without a restart.
+            if (
+                rebind_from_operations is not None
+                and isinstance(result, dict)
+                and result.get("operations")
+            ):
+                try:
+                    added = await rebind_from_operations(result["operations"])
+                    if added:
+                        iteration_new_tools.extend(added)
+                except Exception as exc:  # noqa: BLE001 — defensive; rebind is opt-in
+                    logger.warning(
+                        "[Agent loop] rebind_from_operations raised: %s", exc, exc_info=True
+                    )
+
             messages.append(
                 ToolMessage(
                     content=json.dumps(result, default=str),
                     tool_call_id=tool_id,
                     name=tool_name,
                 )
+            )
+
+        if iteration_new_tools:
+            current_tools.extend(iteration_new_tools)
+            model = chat_model.bind_tools(current_tools)
+            logger.info(
+                "[Agent loop] rebound %d tool(s) after canvas mutation (total bound=%d)",
+                len(iteration_new_tools),
+                len(current_tools),
             )
 
     # Loop exited without returning -- hit max_iterations. Append a
@@ -1762,6 +1796,9 @@ class AIService:
                 config["ai_service"] = self
                 config["database"] = self.database
                 config["parent_node_id"] = node_id
+                # Surface the auto-rebind toggle so agentBuilder's summary
+                # text reflects the user's current preference.
+                config["auto_rebind_tools"] = auto_rebind_enabled
                 if context:
                     config["nodes"] = context.get("nodes", [])
                     config["edges"] = context.get("edges", [])
@@ -1783,6 +1820,67 @@ class AIService:
 
                     # Re-raise to let _run_agent_loop surface the error to the LLM
                     raise
+
+            # Auto-rebind toggle: when the user enables "Auto-Rebind Tools
+            # After Canvas Changes" in Settings, canvas-mutating tools
+            # (agentBuilder) extend the LLM's bound surface mid-loop. The
+            # default is True; lookup failures fall back to True so the
+            # feature doesn't silently disable itself on a transient DB hiccup.
+            auto_rebind_enabled = True
+            try:
+                user_settings = await self.database.get_user_settings()
+                if user_settings is not None:
+                    auto_rebind_enabled = bool(
+                        user_settings.get("auto_rebind_tools_after_canvas_change", True)
+                    )
+            except Exception as exc:  # noqa: BLE001 — defensive read
+                logger.debug("[Agent] auto_rebind settings read failed: %s", exc)
+
+            async def _rebind_from_operations(operations: List[Dict[str, Any]]) -> List[Any]:
+                """Translate workflow_ops add_node ops (component_kind='tool')
+                into fresh ``StructuredTool``s via the canonical
+                :meth:`_build_tool_from_node` helper. The returned list is
+                appended to ``_run_agent_loop``'s ``current_tools`` and
+                rebound onto the LLM so the LLM can invoke the new tool in
+                its NEXT iteration without a Run-stop-Run cycle.
+
+                Tool configs are folded into the existing ``tool_configs``
+                closure so ``tool_executor`` can route the LLM's eventual
+                tool_call to the right node.
+                """
+                from services.node_registry import get_node_class
+
+                new_tools: List[Any] = []
+                for op in operations:
+                    if op.get("type") != "add_node":
+                        continue
+                    node_type = op.get("node_type")
+                    if not node_type:
+                        continue
+                    cls = get_node_class(node_type)
+                    if cls is None or getattr(cls, "component_kind", "") != "tool":
+                        continue
+                    tool_info = {
+                        "node_id": op.get("client_ref") or f"new_{node_type}",
+                        "node_type": node_type,
+                        "parameters": op.get("parameters") or {},
+                        "label": op.get("label") or node_type,
+                    }
+                    try:
+                        tool, tool_config = await self._build_tool_from_node(tool_info)
+                    except Exception as exc:  # noqa: BLE001 — log + skip one tool
+                        logger.warning(
+                            "[Agent] rebind: _build_tool_from_node raised for %s: %s",
+                            node_type,
+                            exc,
+                        )
+                        continue
+                    if tool is None:
+                        continue
+                    new_tools.append(tool)
+                    if tool_config:
+                        tool_configs[tool.name] = tool_config
+                return new_tools
 
             # Broadcast: Building agent
             await broadcast_status(
@@ -1836,6 +1934,7 @@ class AIService:
                 tool_executor=tool_executor if tools else None,
                 max_iterations=recursion_limit,
                 progress_callback=_emit_progress if broadcaster else None,
+                rebind_from_operations=_rebind_from_operations if auto_rebind_enabled else None,
             )
 
             # Extract the AI response (last message in the accumulated messages)
@@ -2227,6 +2326,7 @@ class AIService:
                     config["ai_service"] = self
                     config["database"] = self.database
                     config["parent_node_id"] = node_id
+                    config["auto_rebind_tools"] = auto_rebind_enabled
                     if context:
                         config["nodes"] = context.get("nodes", [])
                         config["edges"] = context.get("edges", [])
@@ -2239,6 +2339,56 @@ class AIService:
                     except Exception as e:
                         logger.error(f"[ChatAgent] Tool execution failed: {tool_name}", error=str(e))
                         return {"error": str(e)}
+
+                # Auto-rebind toggle: same machinery as ``execute_agent``.
+                auto_rebind_enabled = True
+                try:
+                    user_settings = await self.database.get_user_settings()
+                    if user_settings is not None:
+                        auto_rebind_enabled = bool(
+                            user_settings.get("auto_rebind_tools_after_canvas_change", True)
+                        )
+                except Exception as exc:  # noqa: BLE001 — defensive read
+                    logger.debug("[ChatAgent] auto_rebind settings read failed: %s", exc)
+
+                async def _rebind_from_operations(operations: List[Dict[str, Any]]) -> List[Any]:
+                    """Mirror of execute_agent._rebind_from_operations — see that
+                    function for the contract. We can't dedupe cleanly because
+                    the two agent paths capture different closure variables
+                    (``tool_configs`` vs ``tool_node_configs``)."""
+                    from services.node_registry import get_node_class
+
+                    new_tools: List[Any] = []
+                    for op in operations:
+                        if op.get("type") != "add_node":
+                            continue
+                        node_type = op.get("node_type")
+                        if not node_type:
+                            continue
+                        cls = get_node_class(node_type)
+                        if cls is None or getattr(cls, "component_kind", "") != "tool":
+                            continue
+                        tool_info = {
+                            "node_id": op.get("client_ref") or f"new_{node_type}",
+                            "node_type": node_type,
+                            "parameters": op.get("parameters") or {},
+                            "label": op.get("label") or node_type,
+                        }
+                        try:
+                            tool, tool_config = await self._build_tool_from_node(tool_info)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "[ChatAgent] rebind: _build_tool_from_node raised for %s: %s",
+                                node_type,
+                                exc,
+                            )
+                            continue
+                        if tool is None:
+                            continue
+                        new_tools.append(tool)
+                        if tool_config:
+                            tool_node_configs[tool.name] = tool_config
+                    return new_tools
 
                 # Run the agent loop. See ``execute_agent`` for the
                 # rationale on ``recursion_limit`` + the truncation
@@ -2263,6 +2413,7 @@ class AIService:
                     tool_executor=chat_tool_executor,
                     max_iterations=recursion_limit,
                     progress_callback=_emit_progress if broadcaster else None,
+                    rebind_from_operations=_rebind_from_operations if auto_rebind_enabled else None,
                 )
 
                 # Extract response

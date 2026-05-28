@@ -52,6 +52,8 @@ from typing import Any, Dict, List, Optional
 from temporalio import workflow
 from temporalio.common import RetryPolicy  # kept for type hints
 
+from services.node_registry import get_node_class
+
 from ._retry_policies import DEFAULT_ACTIVITY_RETRY
 from .workflow import AGENT_WORKFLOW_TYPES
 
@@ -355,8 +357,18 @@ class AgentWorkflow:
                         **(tool_info.get("parameters") or {}),
                         **call_args,
                     }
-                    child_nodes = []  # regular tool activity doesn't need full canvas
-                    child_edges = []
+                    # Canvas-aware tools (currently only agentBuilder, which
+                    # walks edges to resolve its calling agent + mutates
+                    # the canvas) opt in via the BaseNode.needs_canvas
+                    # ClassVar. Default tools execute against their own
+                    # params alone and don't see the parent canvas.
+                    plugin_cls = get_node_class(tool_info["node_type"])
+                    if plugin_cls is not None and plugin_cls.needs_canvas:
+                        child_nodes = context.get("nodes") or []
+                        child_edges = context.get("edges") or []
+                    else:
+                        child_nodes = []
+                        child_edges = []
 
                 tool_payload = {
                     "node_id": tool_info["tool_node_id"],
@@ -367,6 +379,10 @@ class AgentWorkflow:
                     "session_id": payload.get("session_id", "default"),
                     "nodes": child_nodes,
                     "edges": child_edges,
+                    # Surface the auto-rebind toggle into the tool's ctx
+                    # so canvas-mutating tools (agentBuilder) render their
+                    # summary text to match the user's current preference.
+                    "auto_rebind_tools": bool(payload.get("auto_rebind_tools", True)),
                 }
 
                 tool_activity_name = f"node.{tool_info['node_type']}.v{tool_info['version']}"
@@ -407,6 +423,36 @@ class AgentWorkflow:
                         phase="tool_completed",
                         extra={"tool_name": call.get("name", "")},
                     )
+
+                    # Hot-rebind: if the tool returned ``operations`` (canvas
+                    # mutation), schedule ``agent.refresh_tools.v1`` to build
+                    # new tool_payload entries from the ops and splice them
+                    # into the workflow's live ``tools`` / ``tool_index``.
+                    # The next ``execute_llm_step`` invocation rebuilds the
+                    # bound LLM surface from this updated list, so the new
+                    # tool is callable in the very next iteration without a
+                    # Run-stop-Run cycle.
+                    auto_rebind_enabled = bool(payload.get("auto_rebind_tools", True))
+                    if auto_rebind_enabled and isinstance(tool_result, dict):
+                        ops_from_tool = tool_result.get("operations") or []
+                        if ops_from_tool:
+                            refresh_result = await workflow.execute_activity(
+                                "agent.refresh_tools.v1",
+                                args=[{"operations": ops_from_tool}],
+                                activity_id=f"refresh-tools-{tool_info['tool_node_id']}-{iteration + 1}",
+                                start_to_close_timeout=timedelta(seconds=30),
+                                retry_policy=AGENT_ACTIVITY_RETRY,
+                            )
+                            added_tools = refresh_result.get("tools") or []
+                            for new_tool in added_tools:
+                                tools.append(new_tool)
+                                tool_index[new_tool["name"]] = new_tool
+                            if added_tools:
+                                workflow.logger.info(
+                                    "AgentWorkflow rebound %d tool(s) after canvas mutation (total bound=%d)",
+                                    len(added_tools),
+                                    len(tools),
+                                )
                 except Exception as e:  # noqa: BLE001 — Temporal handles retries
                     # After all retries exhausted, surface the error to
                     # the LLM (per user decision: LLM sees error and

@@ -183,8 +183,15 @@ class WorkflowService:
         workflow_id: str = None,
         workflow_slug: str = None,
         outputs: Dict[str, Any] = None,
+        extras: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Execute a single workflow node."""
+        """Execute a single workflow node.
+
+        ``extras`` is merged into the ``NodeContext.raw`` dict so callers
+        (notably the F4.A per-type activity wrapper) can plumb context
+        fields like ``auto_rebind_tools`` through without adding a
+        dedicated parameter per flag.
+        """
         # Resolve slug from DB if caller passed only workflow_id.
         if workflow_slug is None:
             workflow_slug = await self._resolve_workflow_slug(workflow_id)
@@ -200,6 +207,8 @@ class WorkflowService:
             "get_output_fn": self.get_node_output,
             "outputs": outputs or {},  # Upstream node outputs for data flow (e.g., taskTrigger -> chatAgent)
         }
+        if extras:
+            context.update(extras)
         return await self._node_executor.execute(
             node_id=node_id,
             node_type=node_type,

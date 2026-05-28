@@ -221,7 +221,35 @@ class TestAddTool:
         assert result.operations[1]["target"] == "agent-1"
         assert result.operations[1]["target_handle"] == "input-tools"
         mock_bcast.assert_awaited_once()
+        # Default ctx has no ``auto_rebind_tools`` in raw → defaults True
+        # → the LLM is told the new tool is callable in the same turn.
+        assert "Available immediately" in result.summary
+
+    async def test_summary_branches_on_auto_rebind_flag(self):
+        """When the user disables the "Auto-Rebind Tools After Canvas
+        Changes" toggle, the operation summary must read
+        "Available on your next turn" so the LLM doesn't try to call
+        the new tool before a Run-stop-Run cycle."""
+        node = ab.AgentBuilderNode()
+        edges = [_edge("ab-1", "agent-1", "input-tools")]
+        ctx = NodeContext(
+            node_id="ab-1",
+            node_type="agentBuilder",
+            workflow_id="wf-test",
+            nodes=[],
+            edges=edges,
+            raw={"workflow_id": "wf-test", "auto_rebind_tools": False},
+        )
+        params = ab.AgentBuilderParams(operation="add_tool", node_type="httpRequest")
+
+        with (
+            patch.object(ab, "registered_node_classes", return_value=_registry(httpRequest="tool")),
+            patch.object(ab, "_broadcast", new_callable=AsyncMock),
+        ):
+            result = await node.add_tool(ctx, params)
+
         assert "Available on your next turn" in result.summary
+        assert "Available immediately" not in result.summary
 
 
 # ============================================================================

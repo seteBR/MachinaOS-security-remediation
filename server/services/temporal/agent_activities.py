@@ -642,6 +642,20 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
                 prompt = str(out[field])
                 break
 
+    # Read the user toggle for mid-loop tool rebinding once at prep
+    # time. ``AgentWorkflow.run`` reads it from the returned payload and
+    # forwards into per-tool activity payloads so agentBuilder + the
+    # workflow's own rebind branch see the same value.
+    auto_rebind_tools = True
+    try:
+        user_settings = await database.get_user_settings()
+        if user_settings is not None:
+            auto_rebind_tools = bool(
+                user_settings.get("auto_rebind_tools_after_canvas_change", True)
+            )
+    except Exception as exc:  # noqa: BLE001 — defensive read
+        activity.logger.debug(f"auto_rebind settings read failed: {exc}")
+
     return {
         "node_id": node_id,
         "node_type": node_type,
@@ -661,11 +675,93 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
         "max_iterations": int(parameters.get("max_iterations") or 50),
         "thinking_config": thinking_config_dict,
         "compaction_threshold": compaction_threshold,
+        "auto_rebind_tools": auto_rebind_tools,
     }
 
 
+@activity.defn(name="agent.refresh_tools.v1")
+async def refresh_agent_tools(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Build fresh ``tool_payload`` entries from a workflow_ops batch.
+
+    Called by ``AgentWorkflow.run`` after a tool returns
+    ``operations`` (canvas mutation, today only from ``agentBuilder``).
+    The activity translates each ``add_node`` op with
+    ``component_kind="tool"`` into the same ``tool_payload`` shape
+    :func:`prepare_agent_payload` emits — so the workflow body can
+    splice the new entries into its existing ``tools`` / ``tool_index``
+    structures with zero schema drift.
+
+    Reuses (no duplication):
+
+      * :meth:`AIService._build_tool_from_node` — the canonical
+        StructuredTool builder.
+      * :func:`services.node_registry.get_node_class` — for
+        ``component_kind`` + ``version`` + ``task_queue`` metadata.
+      * The exact loop body from :func:`prepare_agent_payload`
+        lines 584-614.
+
+    Payload shape::
+
+        {"operations": [<workflow_op>, ...]}
+
+    Returns::
+
+        {"tools": [<tool_payload entry>, ...]}
+    """
+    from services.node_registry import get_node_class
+
+    ai_service = container.ai_service()
+    operations: List[Dict[str, Any]] = payload.get("operations") or []
+    new_tools_payload: List[Dict[str, Any]] = []
+
+    for op in operations:
+        if op.get("type") != "add_node":
+            continue
+        node_type = op.get("node_type") or ""
+        if not node_type:
+            continue
+        cls = get_node_class(node_type)
+        if cls is None or getattr(cls, "component_kind", "") != "tool":
+            continue
+        tool_info: Dict[str, Any] = {
+            "node_id": op.get("client_ref") or f"new_{node_type}",
+            "node_type": node_type,
+            "parameters": op.get("parameters") or {},
+            "label": op.get("label") or node_type,
+        }
+        try:
+            tool, _config = await ai_service._build_tool_from_node(tool_info)
+        except Exception as e:  # noqa: BLE001 — skip one, keep building the batch
+            activity.logger.warning(
+                f"refresh_tools: failed to build tool {node_type!r}: {e}"
+            )
+            continue
+        if tool is None:
+            continue
+        version = getattr(cls, "version", 1)
+        task_queue = getattr(cls, "task_queue", "machina-default")
+        new_tools_payload.append(
+            {
+                "name": tool.name,
+                "node_type": node_type,
+                "version": version,
+                "task_queue": task_queue,
+                "tool_node_id": tool_info["node_id"],
+                "parameters": tool_info["parameters"],
+                "tool_info": tool_info,
+            }
+        )
+
+    activity.logger.info(
+        "refresh_tools: built %d tool(s) from %d operation(s)",
+        len(new_tools_payload),
+        len(operations),
+    )
+    return {"tools": new_tools_payload}
+
+
 def collect_agent_activities() -> List[Any]:
-    """Return the five F4.B agent activities for worker registration.
+    """Return the F4.B agent activities for worker registration.
 
     Mirrors :func:`services.temporal.plugin_activities.collect_plugin_activities`
     for the workflow-orchestrated agent loop. Workers register these so
@@ -680,4 +776,5 @@ def collect_agent_activities() -> List[Any]:
         prepare_agent_payload,
         broadcast_agent_progress,
         store_agent_output,
+        refresh_agent_tools,
     ]

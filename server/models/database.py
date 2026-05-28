@@ -257,6 +257,9 @@ class UserSettings(SQLModel, table=True):
     auto_add_skill_for_tools: bool = Field(
         default=True
     )  # When a tool node connects to an AI agent's input-tools, auto-enable the matching skill
+    auto_rebind_tools_after_canvas_change: bool = Field(
+        default=True
+    )  # After agentBuilder mutates the canvas mid-run, refresh the LLM's bound tools so the new wiring is callable in the same execution
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), server_default=func.now())
     )

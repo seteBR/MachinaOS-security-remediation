@@ -144,6 +144,15 @@ class BaseNode:
     component_kind: ClassVar[str] = "generic"
     usable_as_tool: ClassVar[bool] = False
 
+    # Whether this plugin requires the parent workflow's full canvas
+    # (``nodes`` + ``edges`` arrays) in its NodeContext. Default ``False``
+    # — most tools execute against their own params alone. Set ``True``
+    # on plugins that walk or mutate the canvas (the F4.B AgentWorkflow
+    # tool-dispatch path reads this attribute to decide whether to
+    # forward the parent workflow's canvas into the per-tool activity
+    # context). Currently only :class:`AgentBuilderNode` opts in.
+    needs_canvas: ClassVar[bool] = False
+
     # Wave 12 D5: LLM-visible name + description for plugins surfaced as
     # AI tools (ToolNode subclasses, ActionNodes marked usable_as_tool=True,
     # SpecializedAgentBase subclasses).
@@ -557,6 +566,22 @@ class BaseNode:
         method = spec.method.__get__(self, type(self))
         return await method(ctx, params_obj)
 
+    @classmethod
+    def interpret_result(cls, result: Dict[str, Any]) -> tuple[bool, Any, Optional[str]]:
+        """Unify success/error semantics across node base classes.
+
+        Returns ``(success, payload, error_message)``. The F4.A activity
+        wrapper calls this so broadcast plumbing stays plugin-agnostic.
+
+        Default contract: the standard ``{success, result, error?, …}``
+        envelope produced by :meth:`_wrap_success` / :meth:`_wrap_error`.
+        :class:`ToolNode` overrides — its :meth:`_wrap_success` returns
+        a flat dict (the LLM-feedable shape).
+        """
+        if result.get("success"):
+            return True, result.get("result", {}), None
+        return False, None, result.get("error")
+
     def _wrap_success(self, *, start_time: float, result: Any) -> Dict[str, Any]:
         """95%-universal return shape. Subclasses (ToolNode) override."""
         if isinstance(result, BaseModel):
@@ -679,6 +704,12 @@ class BaseNode:
                 # per-type activities skip the loopback because the worker
                 # shares the FastAPI process.
                 workflow_service = container.workflow_service()
+                # Forward any non-standard context keys (e.g.
+                # ``auto_rebind_tools`` for agentBuilder) through the
+                # ``extras`` channel so they land in NodeContext.raw.
+                extras: Dict[str, Any] = {}
+                if "auto_rebind_tools" in context:
+                    extras["auto_rebind_tools"] = context["auto_rebind_tools"]
                 result = await workflow_service.execute_node(
                     node_id=node_id,
                     node_type=cls.type,
@@ -688,31 +719,38 @@ class BaseNode:
                     session_id=context.get("session_id", "default"),
                     workflow_id=workflow_id,
                     outputs=context.get("inputs", {}),
+                    extras=extras or None,
                 )
 
                 result["node_id"] = node_id
                 result["node_type"] = cls.type
                 result["timestamp"] = datetime.now().isoformat()
 
-                if result.get("success"):
+                # Polymorphic dispatch — each node base class owns its
+                # result contract. ToolNode returns flat dicts; ActionNode
+                # / TriggerNode return the {success, result} envelope.
+                # cls.interpret_result() normalizes both into (success,
+                # payload, error_message).
+                success, payload, error = cls.interpret_result(result)
+                if success:
                     activity.logger.info(f"Node {node_id} succeeded")
                     await broadcaster.update_node_status(
                         node_id,
                         "success",
-                        result.get("result", {}),
+                        payload,
                         workflow_id=workflow_id,
                     )
                     await broadcaster.update_node_output(
                         node_id,
-                        result.get("result", {}),
+                        payload,
                         workflow_id=workflow_id,
                     )
                 else:
-                    activity.logger.warning(f"Node {node_id} failed: {result.get('error')}")
+                    activity.logger.warning(f"Node {node_id} failed: {error}")
                     await broadcaster.update_node_status(
                         node_id,
                         "error",
-                        {"error": result.get("error")},
+                        {"error": error},
                         workflow_id=workflow_id,
                     )
 

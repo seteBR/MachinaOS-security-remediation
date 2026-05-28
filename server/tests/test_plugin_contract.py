@@ -204,6 +204,130 @@ class TestToolSchemaFastPath:
             assert hasattr(resolved, "Params"), f"{cls.__qualname__} has no Params — fast-path would miss it"
 
 
+class TestInterpretResultContract:
+    """``BaseNode.interpret_result`` + ``ToolNode.interpret_result`` are
+    the polymorphic envelope-unwrap contract the F4.A Temporal activity
+    wrapper calls in :meth:`BaseNode.as_activity` (see
+    ``server/services/plugin/base.py``). Locks the
+    behaviour so the writeTodos / agentBuilder bug-fix doesn't regress.
+    """
+
+    def test_basenode_envelope_success(self):
+        from services.plugin.base import BaseNode
+
+        success, payload, error = BaseNode.interpret_result({"success": True, "result": {"value": 42}})
+        assert success is True
+        assert payload == {"value": 42}
+        assert error is None
+
+    def test_basenode_envelope_success_with_missing_result_key(self):
+        from services.plugin.base import BaseNode
+
+        # Defensive: an envelope with success=True but no result key
+        # surfaces an empty dict, not None — protects downstream code
+        # that does `.get(...)` on payload.
+        success, payload, error = BaseNode.interpret_result({"success": True})
+        assert success is True
+        assert payload == {}
+
+    def test_basenode_envelope_failure(self):
+        from services.plugin.base import BaseNode
+
+        success, payload, error = BaseNode.interpret_result({"success": False, "error": "boom"})
+        assert success is False
+        assert payload is None
+        assert error == "boom"
+
+    def test_toolnode_flat_dict_is_success(self):
+        """ToolNode plugins return their Output as a flat dict (no
+        ``success`` key); the wrapper must treat absence of the key as
+        success, not failure. This was the writeTodos bug — the F4.A
+        wrapper was checking ``result.get("success")`` directly and
+        misclassifying every ToolNode as failed."""
+        from services.plugin.tool import ToolNode
+
+        success, payload, error = ToolNode.interpret_result({"message": "ok", "todos": [1, 2, 3], "count": 3})
+        assert success is True
+        assert payload == {"message": "ok", "todos": [1, 2, 3], "count": 3}
+        assert error is None
+
+    def test_toolnode_error_envelope_routes_to_failure(self):
+        """When a ToolNode operation throws, BaseNode._wrap_error still
+        produces the standard ``{success: False, error: ...}`` envelope.
+        ToolNode.interpret_result must route that to the failure path
+        rather than treating it as a success payload."""
+        from services.plugin.tool import ToolNode
+
+        success, payload, error = ToolNode.interpret_result({"success": False, "error": "tool crashed"})
+        assert success is False
+        assert payload is None
+        assert error == "tool crashed"
+
+    def test_every_toolnode_subclass_inherits_override(self):
+        """Every ToolNode subclass must resolve ``interpret_result`` to
+        the ToolNode override (or further override it). If a subclass
+        accidentally reverts to BaseNode's contract, every flat-dict
+        result is misclassified as failure."""
+        from services.plugin.base import BaseNode
+        from services.plugin.tool import ToolNode
+
+        for cls in _all_plugin_classes():
+            if not issubclass(cls, ToolNode):
+                continue
+            # Resolved method must come from ToolNode or a ToolNode
+            # subclass — NEVER from BaseNode directly.
+            owner = cls.interpret_result.__func__.__qualname__.split(".")[0]
+            assert owner != BaseNode.__name__, (
+                f"{cls.__qualname__}.interpret_result resolves to "
+                f"BaseNode — flat-dict ToolNode results will be "
+                f"misclassified as failure. Override on ToolNode or the "
+                f"subclass must shadow the base method."
+            )
+
+
+class TestNeedsCanvasContract:
+    """``needs_canvas`` is the declarative flag plugins opt into when
+    their operations require the parent workflow's full canvas
+    (``nodes`` + ``edges``) inside ``NodeContext``. The F4.B
+    AgentWorkflow tool-dispatch path reads this attribute to decide
+    whether to forward the canvas; default ``False`` keeps the regular-
+    tool fast path canvas-free.
+    """
+
+    def test_basenode_default_is_false(self):
+        from services.plugin.base import BaseNode
+
+        assert BaseNode.needs_canvas is False, "BaseNode.needs_canvas must default to False — only canvas-mutating " "plugins (agentBuilder) opt in to True"
+
+    def test_agent_builder_opts_in(self):
+        """AgentBuilderNode walks edges to resolve its calling agent
+        and mutates the canvas. Without ``needs_canvas = True`` the
+        F4.B path drops the canvas and ``_resolve_caller`` falls back
+        to self-as-caller — newly-spawned tools wire to agentBuilder
+        instead of the parent AI Agent."""
+        from nodes.tool.agent_builder import AgentBuilderNode
+
+        assert AgentBuilderNode.needs_canvas is True
+
+    def test_regular_tools_do_not_need_canvas(self):
+        """Sanity check that the common case (calculatorTool,
+        currentTimeTool, writeTodos, …) does NOT leak the canvas into
+        their per-tool activity context."""
+        from services.plugin.tool import ToolNode
+
+        for cls in _all_plugin_classes():
+            if not issubclass(cls, ToolNode):
+                continue
+            if cls.type == "agentBuilder":
+                continue
+            assert cls.needs_canvas is False, (
+                f"{cls.__qualname__} declares needs_canvas=True but isn't agentBuilder. "
+                f"Add the plugin to the canvas-aware allowlist in the "
+                f"AgentWorkflow tool-dispatch comment if this is intentional, "
+                f"or remove the override if accidental."
+            )
+
+
 class TestTriggerRegistryAutoPopulate:
     """Wave 11.D.11: every event-mode TriggerNode plugin must register
     itself into event_waiter.TRIGGER_REGISTRY + FILTER_BUILDERS

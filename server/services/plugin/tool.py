@@ -7,7 +7,7 @@ JSON Schema the LLM sees — derived from :class:`Params` automatically.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Dict
+from typing import Any, ClassVar, Dict, Optional
 
 from services.plugin.base import BaseNode
 from services.plugin.scaling import TaskQueue
@@ -49,3 +49,13 @@ class ToolNode(BaseNode, abstract=True):
         if isinstance(result, dict):
             return result
         return {"result": result}
+
+    @classmethod
+    def interpret_result(cls, result: Dict[str, Any]) -> tuple[bool, Any, Optional[str]]:
+        """ToolNode contract: a flat dict (no ``success`` key) IS the
+        success payload. Operation exceptions still flow through
+        :meth:`_wrap_error` and produce the standard envelope — those
+        get the base-class semantics."""
+        if isinstance(result, dict) and "success" not in result:
+            return True, result, None
+        return super().interpret_result(result)

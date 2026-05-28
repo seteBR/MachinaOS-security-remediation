@@ -20,6 +20,7 @@ export const workflowSettingsSchema = z.object({
   compactionRatio: z.number().min(0.1).max(0.9).default(0.5),
   maxProcesses: z.number().int().min(1).max(50).default(10),
   autoAddSkillForTools: z.boolean().default(true),
+  autoRebindToolsAfterCanvasChange: z.boolean().default(true),
 });
 
 export type WorkflowSettings = z.infer<typeof workflowSettingsSchema>;
@@ -42,6 +43,7 @@ export function fromServerRow(row: Record<string, any> | null | undefined): Work
     compactionRatio: row.compaction_ratio,
     maxProcesses: row.max_processes,
     autoAddSkillForTools: row.auto_add_skill_for_tools,
+    autoRebindToolsAfterCanvasChange: row.auto_rebind_tools_after_canvas_change,
   });
 }
 
@@ -60,5 +62,6 @@ export function toServerRow(s: WorkflowSettings): Record<string, any> {
     compaction_ratio: s.compactionRatio,
     max_processes: s.maxProcesses,
     auto_add_skill_for_tools: s.autoAddSkillForTools,
+    auto_rebind_tools_after_canvas_change: s.autoRebindToolsAfterCanvasChange,
   };
 }

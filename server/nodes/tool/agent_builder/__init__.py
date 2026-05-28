@@ -112,6 +112,21 @@ def _is_team_lead(node_type: str) -> bool:
     return node_type in _TEAM_LEAD_TYPES
 
 
+def _summary_suffix(ctx: NodeContext) -> str:
+    """Trailing sentence on agentBuilder op summaries.
+
+    When the user's "Auto-Rebind Tools After Canvas Changes" toggle is
+    on (default), the agent loop rebinds its LLM tool surface after
+    every canvas-mutating tool — the new wiring IS callable in the
+    same turn. When off, the LLM must wait for the next Run.
+
+    The flag rides on ``ctx.raw["auto_rebind_tools"]`` (set by the
+    agent loop dispatcher reading the UserSettings field).
+    """
+    rebind_on = bool((ctx.raw or {}).get("auto_rebind_tools", True))
+    return "Available immediately — call it in your next response." if rebind_on else "Available on your next turn."
+
+
 def _toggle_skill(
     config: Optional[Dict[str, Dict[str, Any]]],
     skill_name: str,
@@ -297,6 +312,13 @@ class AgentBuilderNode(ToolNode):
         "agent calls operations through the standard tool path."
     )
     component_kind = "tool"
+    # Operations walk ctx.edges to resolve the calling agent (input-tools
+    # source) and mutate ctx.nodes — the F4.B AgentWorkflow tool-dispatch
+    # path reads this flag to forward the parent workflow's canvas into
+    # the per-tool activity context. Without it, _resolve_caller falls
+    # back to self-as-caller and new nodes wire to agentBuilder instead
+    # of the parent AI Agent.
+    needs_canvas = True
     tool_name = "agent_builder"
     tool_description = "Inspect and modify the workflow canvas at runtime. Operations: inspect_canvas (read current nodes/edges), spawn_tool (add a tool node + wire it), enable_skill (add a skill folder to a connected masterSkill), add_delegate_agent (add a specialized agent), create_workflow (spawn a brand-new workflow)."
     handles = (
@@ -426,7 +448,7 @@ class AgentBuilderNode(ToolNode):
         await _broadcast(ctx.workflow_id, caller_id, ops)
         return AgentBuilderOutput(
             operation="add_tool",
-            summary=f"Added '{node_type}' as a tool. Available on your next turn.",
+            summary=f"Added '{node_type}' as a tool. {_summary_suffix(ctx)}",
             operations=ops,
         )
 
@@ -480,7 +502,7 @@ class AgentBuilderNode(ToolNode):
             await _broadcast(ctx.workflow_id, caller_id, ops)
             return AgentBuilderOutput(
                 operation="add_skill",
-                summary=f"Enabled '{skill}' skill. Available on your next turn.",
+                summary=f"Enabled '{skill}' skill. {_summary_suffix(ctx)}",
                 operations=ops,
             )
 
@@ -504,7 +526,7 @@ class AgentBuilderNode(ToolNode):
         await _broadcast(ctx.workflow_id, caller_id, ops)
         return AgentBuilderOutput(
             operation="add_skill",
-            summary=(f"Created Master Skill node and enabled '{skill}'. " "Available on your next turn."),
+            summary=f"Created Master Skill node and enabled '{skill}'. {_summary_suffix(ctx)}",
             operations=ops,
         )
 
@@ -571,7 +593,7 @@ class AgentBuilderNode(ToolNode):
         await _broadcast(ctx.workflow_id, caller_id, ops)
         return AgentBuilderOutput(
             operation="add_subagent",
-            summary=(f"Added '{agent_type}' as a teammate. Available on your " "next turn (configure provider/model first)."),
+            summary=(f"Added '{agent_type}' as a teammate. {_summary_suffix(ctx)} " "(configure provider/model first)."),
             operations=ops,
         )
 
