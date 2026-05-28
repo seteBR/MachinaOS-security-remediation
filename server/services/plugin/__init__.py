@@ -36,6 +36,7 @@ from services.plugin.credential import (
     Credential,
     OAuth2Credential,
     ApiKeyCredential,
+    ProbeResult,
     CREDENTIAL_REGISTRY,
 )
 from services.plugin.connection import Connection
@@ -64,6 +65,7 @@ __all__ = [
     "Credential",
     "OAuth2Credential",
     "ApiKeyCredential",
+    "ProbeResult",
     "CREDENTIAL_REGISTRY",
     "Connection",
     "NodeContext",

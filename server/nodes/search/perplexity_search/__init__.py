@@ -18,6 +18,7 @@ from services.plugin import (
     ApiKeyCredential,
     NodeContext,
     Operation,
+    ProbeResult,
     TaskQueue,
 )
 
@@ -29,15 +30,15 @@ class PerplexityCredential(ApiKeyCredential):
     key_name = "Authorization"
     key_location = "bearer"
     docs_url = "https://docs.perplexity.ai/guides/getting-started"
-    # Cheapest valid request: minimal completion, max_tokens=1.
-    # Sonar is the always-available default model -- no entitlement gate.
-    probe_url = "https://api.perplexity.ai/chat/completions"
-    probe_method = "POST"
-    probe_json = {
-        "model": "sonar",
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
-    }
+
+    @classmethod
+    async def _probe(cls, api_key: str) -> ProbeResult:
+        # Perplexity exposes no cheap auth-gated endpoint: /v1/models
+        # returns 200 for any key (including garbage), and the chat /
+        # search / embeddings endpoints all charge tokens per call.
+        # Store the key as-is; runtime calls will surface 401 if the
+        # key is wrong.
+        return ProbeResult(valid=True)
 
 
 class PerplexityResult(BaseModel):
