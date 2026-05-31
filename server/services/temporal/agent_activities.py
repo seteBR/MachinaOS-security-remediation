@@ -708,6 +708,7 @@ async def refresh_agent_tools(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         {"tools": [<tool_payload entry>, ...]}
     """
+    from core.container import container
     from services.node_registry import get_node_class
 
     ai_service = container.ai_service()
@@ -721,10 +722,20 @@ async def refresh_agent_tools(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not node_type:
             continue
         cls = get_node_class(node_type)
-        if cls is None or getattr(cls, "component_kind", "") != "tool":
+        if cls is None:
+            continue
+        kind = getattr(cls, "component_kind", "")
+        # Match the catalogue filter: pure ToolNode (kind=='tool') OR
+        # dual-purpose ActionNode with usable_as_tool=True (the bulk of
+        # spawnable plugins — twitterSearch / googleGmail / pythonExecutor
+        # / fileRead / etc.). Exclude chat-model plugins even when
+        # usable_as_tool=True.
+        is_tool = kind == "tool"
+        is_dual_purpose = bool(getattr(cls, "usable_as_tool", False)) and kind != "model"
+        if not (is_tool or is_dual_purpose):
             continue
         tool_info: Dict[str, Any] = {
-            "node_id": op.get("client_ref") or f"new_{node_type}",
+            "node_id": op.get("minted_id") or op.get("client_ref") or f"new_{node_type}",
             "node_type": node_type,
             "parameters": op.get("parameters") or {},
             "label": op.get("label") or node_type,

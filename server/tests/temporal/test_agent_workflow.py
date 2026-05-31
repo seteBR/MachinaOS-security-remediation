@@ -243,6 +243,19 @@ class TestAutoRebindTools:
         assert "agent.refresh_tools.v1" in names
         assert refresh_agent_tools in collect_agent_activities()
 
+    async def test_refresh_tools_runs_without_nameerror(self):
+        """Smoke test: the activity body must import ``container`` and
+        ``get_node_class`` so it doesn't NameError on first invocation.
+        Mirrors the rest of the agent_activities.py pattern (lazy import
+        inside each activity body)."""
+        from services.temporal.agent_activities import refresh_agent_tools
+
+        # Pass empty operations so the activity short-circuits before
+        # any plugin lookup — we just want to confirm the imports + the
+        # ``container.ai_service()`` call don't raise NameError.
+        result = await refresh_agent_tools({"operations": []})
+        assert result == {"tools": []}
+
     def test_workflow_calls_refresh_after_ops(self):
         """AgentWorkflow.run must schedule ``agent.refresh_tools.v1``
         when a tool result carries an ``operations`` field."""

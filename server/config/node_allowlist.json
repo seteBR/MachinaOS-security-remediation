@@ -32,7 +32,8 @@
   ],
   "disabled_nodes": [
     "android_agent",
-    "androidTool"
+    "androidTool",
+    "taskManager"
   ],
   "disabled_credential_categories": [
     "android",

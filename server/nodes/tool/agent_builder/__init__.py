@@ -64,19 +64,146 @@ _DENIED_TOOL_TYPES = frozenset({_AGENT_BUILDER_TYPE, _MASTER_SKILL_TYPE})
 _KEY_PARAM_FIELDS = ("provider", "model", "operation", "url", "query")
 _SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 
+# Temporary feature flag — set to True to re-enable the create_workflow
+# operation. Flipping this constant restores the operation's prior
+# behaviour (validation + slug allocation + database.save_workflow).
+# The implementation below stays intact so re-enabling is one line.
+_CREATE_WORKFLOW_ENABLED = False
+
 
 # ----------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------
 
 
+async def _persist_canvas_mutation(workflow_id: Optional[str], ops: List[Dict[str, Any]]) -> None:
+    """Apply the three op types agentBuilder emits to the persisted
+    ``workflow.data`` via the existing ``database.get_workflow`` +
+    ``database.save_workflow`` round-trip.
+
+    Without this, every chat-message trigger reloads the workflow JSON
+    from the DB and sees the pre-mutation snapshot — the agent then
+    re-spawns the same tools the LLM already added in a prior run.
+    Persisting after each mutation makes the DB the source of truth
+    for cross-run canvas state.
+
+    Adopts the BE-side ``minted_id`` (already stamped on ``add_node``
+    ops for FE alignment) so the persisted row matches the React Flow
+    state exactly — no id divergence on reload.
+    """
+    if not ops or not workflow_id:
+        return
+    try:
+        from services.plugin.deps import get_database
+
+        database = get_database()
+        workflow = await database.get_workflow(workflow_id)
+        if workflow is None:
+            logger.debug("[agentBuilder] persist skipped: workflow %s not found", workflow_id)
+            return
+
+        data = dict(workflow.data or {})
+        nodes = list(data.get("nodes") or [])
+        edges = list(data.get("edges") or [])
+        ref_to_id: Dict[str, str] = {}
+
+        def _resolve(ref: Any) -> Optional[str]:
+            if isinstance(ref, str):
+                return ref
+            if isinstance(ref, dict) and "client_ref" in ref:
+                return ref_to_id.get(ref["client_ref"])
+            return None
+
+        for op in ops:
+            op_type = op.get("type")
+            if op_type == "add_node":
+                node_type = op.get("node_type") or ""
+                if not node_type:
+                    continue
+                # ``minted_id`` is set by add_tool / add_skill / add_subagent
+                # so the FE applier adopts the same id. Reuse it for the
+                # persisted row to keep BE/FE views aligned.
+                new_id = op.get("minted_id") or op.get("client_ref") or ""
+                if not new_id:
+                    continue
+                client_ref = op.get("client_ref") or ""
+                if client_ref:
+                    ref_to_id[client_ref] = new_id
+                params = op.get("parameters") or {}
+                nodes.append(
+                    {
+                        "id": new_id,
+                        "type": node_type,
+                        "position": op.get("position") if isinstance(op.get("position"), dict) and "x" in op["position"] else {"x": 0, "y": 0},
+                        "data": {
+                            "label": op.get("label") or params.get("label") or node_type,
+                            "parameters": dict(params),
+                        },
+                    }
+                )
+            elif op_type == "add_edge":
+                source = _resolve(op.get("source"))
+                target = _resolve(op.get("target"))
+                if not source or not target:
+                    continue
+                edges.append(
+                    {
+                        "id": f"e-{source}-{target}",
+                        "source": source,
+                        "target": target,
+                        "sourceHandle": op.get("source_handle"),
+                        "targetHandle": op.get("target_handle"),
+                    }
+                )
+            elif op_type == "set_node_parameters":
+                node_id = op.get("node_id")
+                merge = op.get("parameters") or {}
+                for n in nodes:
+                    if n.get("id") != node_id:
+                        continue
+                    node_data = dict(n.get("data") or {})
+                    existing = dict(node_data.get("parameters") or {})
+                    existing.update(merge)
+                    node_data["parameters"] = existing
+                    n["data"] = node_data
+                    break
+
+        data["nodes"] = nodes
+        data["edges"] = edges
+        await database.save_workflow(
+            workflow_id=workflow_id,
+            name=workflow.name,
+            slug=workflow.slug,
+            data=data,
+            description=workflow.description,
+        )
+        logger.info(
+            "[agentBuilder] persisted %s ops to workflow %s (nodes=%d edges=%d)",
+            [op.get("type") for op in ops],
+            workflow_id,
+            len(nodes),
+            len(edges),
+        )
+    except Exception as exc:
+        logger.warning(
+            "[agentBuilder] persist failed for workflow %s: %s", workflow_id, exc, exc_info=True
+        )
+
+
 async def _broadcast(workflow_id: Optional[str], caller_id: str, ops: List[Dict[str, Any]]) -> None:
-    """Push a workflow_ops_apply event so the live canvas updates.
+    """Persist the canvas mutation to the DB, then push a
+    ``workflow_ops_apply`` event so the live React Flow canvas updates.
+
+    Persist-then-broadcast: the next agentBuilder call (within this run
+    OR on the next chat-message trigger) reads from the DB and sees the
+    new state, so duplicate detection in ``_find_wired_types`` catches
+    repeat add_tool calls instead of silently spawning copies.
 
     Wave 12 B10: routes through plugin _events.py wrapper.
     """
     if not ops:
         return
+    await _persist_canvas_mutation(workflow_id, ops)
     try:
         from ._events import broadcast_workflow_ops
 
@@ -95,21 +222,101 @@ async def _broadcast(workflow_id: Optional[str], caller_id: str, ops: List[Dict[
         logger.warning(f"[agentBuilder] broadcast failed: {exc}", exc_info=True)
 
 
+def _allowlist_config() -> Dict[str, Any]:
+    """Load the operator allowlist config once per call — same source of
+    truth the UI palette uses (server/config/node_allowlist.json). The
+    NodeAllowlistService singleton handles parse failures with a safe
+    show_all fallback, so this never raises on missing / malformed JSON.
+    """
+    try:
+        from services.node_allowlist import get_node_allowlist_service
+
+        return get_node_allowlist_service().get_config()
+    except Exception as exc:  # noqa: BLE001 — defensive: never fail catalogue
+        logger.debug("[agentBuilder] node_allowlist read failed: %s", exc)
+        return {"disabled_nodes": [], "disabled_groups": [], "disabled_skill_folders": []}
+
+
+def _is_blocked_by_allowlist(cls: Any, ntype: str, config: Dict[str, Any]) -> bool:
+    """``True`` when ``ntype`` or any group in ``cls.group`` is in the
+    operator blocklist. Honors both ``disabled_nodes`` (per-type) and
+    ``disabled_groups`` (every plugin in the named group)."""
+    if ntype in (config.get("disabled_nodes") or ()):
+        return True
+    disabled_groups = set(config.get("disabled_groups") or ())
+    if disabled_groups:
+        plugin_groups = set(getattr(cls, "group", ()) or ())
+        if plugin_groups & disabled_groups:
+            return True
+    return False
+
+
 def _allowed_tool_types() -> set[str]:
-    """Tool nodes the LLM may spawn -- excludes the builder + masterSkill."""
-    return {
-        ntype
-        for ntype, cls in registered_node_classes().items()
-        if getattr(cls, "component_kind", "") == "tool" and ntype not in _DENIED_TOOL_TYPES
-    }
+    """Tool node types the LLM may spawn via ``add_tool``.
+
+    Includes:
+    - Pure ToolNode plugins (``component_kind == 'tool'``).
+    - Dual-purpose ActionNode plugins with ``usable_as_tool=True``
+      (e.g. ``twitterSearch``, ``googleGmail``, ``pythonExecutor``,
+      ``fileRead``). These are the bulk of the actually-useful tools;
+      excluding them was the source of "only a few nodes visible" reports.
+    - Excludes chat-model plugins (``component_kind == 'model'``) even
+      when they carry ``usable_as_tool=True`` — models are configured
+      via input-model handles, not spawned as agent tools.
+
+    Excludes ``_DENIED_TOOL_TYPES`` (recursion guard: no agentBuilder /
+    masterSkill spawnable) AND anything the operator has marked
+    ``disabled_nodes`` / ``disabled_groups`` in node_allowlist.json.
+    """
+    config = _allowlist_config()
+    out: set[str] = set()
+    for ntype, cls in registered_node_classes().items():
+        if ntype in _DENIED_TOOL_TYPES:
+            continue
+        kind = getattr(cls, "component_kind", "")
+        is_tool = kind == "tool"
+        is_dual_purpose = bool(getattr(cls, "usable_as_tool", False)) and kind != "model"
+        if not (is_tool or is_dual_purpose):
+            continue
+        if _is_blocked_by_allowlist(cls, ntype, config):
+            continue
+        out.add(ntype)
+    return out
 
 
 def _allowed_subagent_types() -> set[str]:
-    return {ntype for ntype, cls in registered_node_classes().items() if getattr(cls, "component_kind", "") == "agent"}
+    """Agent types the LLM may spawn as teammates. Honors
+    ``disabled_nodes`` + ``disabled_groups`` from node_allowlist.json
+    so the same config governs both UI palette and LLM spawnable set.
+    """
+    config = _allowlist_config()
+    return {
+        ntype
+        for ntype, cls in registered_node_classes().items()
+        if getattr(cls, "component_kind", "") == "agent"
+        and not _is_blocked_by_allowlist(cls, ntype, config)
+    }
 
 
 def _is_team_lead(node_type: str) -> bool:
     return node_type in _TEAM_LEAD_TYPES
+
+
+def _mint_node_id(prefix: str) -> str:
+    """Mint a fresh node id sharing the convention used by
+    :func:`services.workflow_import.remap_node_ids` and the frontend's
+    ``client/src/lib/workflowOps.ts::newId``.
+
+    The minted id is stamped onto ``add_node`` ops as ``minted_id`` so
+    the FE applier adopts it instead of generating its own — keeping
+    the BE-side ``tool_node_id`` (used for ``update_node_status``
+    broadcasts in the rebind path) aligned with the React Flow node id
+    the canvas glows on.
+    """
+    import secrets
+    import time
+
+    return f"{prefix}-{int(time.time() * 1000)}-{secrets.token_hex(3)}"
 
 
 def _summary_suffix(ctx: NodeContext) -> str:
@@ -150,6 +357,131 @@ def _skill_folder_exists(skill_folder: str) -> bool:
         if path.is_dir() and (path / "SKILL.md").exists():
             return True
     return False
+
+
+# ----------------------------------------------------------------------------
+# Duplicate-detection + catalogue helpers
+# ----------------------------------------------------------------------------
+
+
+def _find_wired_types(
+    ctx: NodeContext,
+    target_node_id: str,
+    target_handle: str,
+) -> Dict[str, str]:
+    """Walk ``ctx.edges`` for edges arriving at ``target_node_id`` on
+    ``target_handle`` and return ``{source_node_type: source_node_id}``
+    for every match.
+
+    Used by ``add_tool`` / ``add_subagent`` to detect already-wired
+    nodes before spawning duplicates. Sync + ctx-only (no DB) — same
+    lightweight pattern as :func:`_resolve_caller`.
+    """
+    nodes_by_id = {n.get("id"): n for n in (ctx.nodes or []) if n.get("id")}
+    wired: Dict[str, str] = {}
+    for edge in ctx.edges or []:
+        if edge.get("target") != target_node_id:
+            continue
+        if edge.get("targetHandle") != target_handle:
+            continue
+        source_id = edge.get("source")
+        if not source_id:
+            continue
+        source_node = nodes_by_id.get(source_id)
+        if source_node is None:
+            continue
+        source_type = source_node.get("type")
+        if source_type:
+            wired[source_type] = source_id
+    return wired
+
+
+def _catalogue_tools() -> List[Dict[str, Any]]:
+    """Enrich :func:`_allowed_tool_types` with display_name + description
+    so ``inspect_canvas`` can hand the LLM the FULL spawnable set with
+    enough context to pick the right one (instead of guessing or
+    waiting for an error-message hint capped at 10 examples)."""
+    registry = registered_node_classes()
+    catalogue: List[Dict[str, Any]] = []
+    for ntype in sorted(_allowed_tool_types()):
+        cls = registry.get(ntype)
+        if cls is None:
+            continue
+        catalogue.append(
+            {
+                "type": ntype,
+                "display_name": getattr(cls, "display_name", "") or ntype,
+                "description": getattr(cls, "tool_description", "") or getattr(cls, "description", "") or "",
+            }
+        )
+    return catalogue
+
+
+def _catalogue_agents() -> List[Dict[str, Any]]:
+    """Same shape as :func:`_catalogue_tools` for the agent registry —
+    fed into ``inspect_canvas`` so ``add_subagent`` knows the full set
+    of delegate-able agent types."""
+    registry = registered_node_classes()
+    catalogue: List[Dict[str, Any]] = []
+    for ntype in sorted(_allowed_subagent_types()):
+        cls = registry.get(ntype)
+        if cls is None:
+            continue
+        catalogue.append(
+            {
+                "type": ntype,
+                "display_name": getattr(cls, "display_name", "") or ntype,
+                "description": getattr(cls, "description", "") or "",
+            }
+        )
+    return catalogue
+
+
+def _disabled_skill_folders() -> set[str]:
+    """Skill-folder blocklist from node_allowlist.json. Top-level
+    folder names whose every skill is hidden from the catalogue."""
+    return set(_allowlist_config().get("disabled_skill_folders") or [])
+
+
+def _catalogue_skills() -> List[Dict[str, Any]]:
+    """Enumerate every skill the agentBuilder can enable via
+    ``add_skill``. Reuses the existing :class:`SkillLoader` singleton
+    (populated at startup) so we don't re-walk SKILL.md frontmatter
+    on every ``inspect_canvas`` call. Honors ``disabled_skill_folders``
+    from node_allowlist.json so the LLM-facing catalogue matches the
+    UI palette's filter.
+    """
+    try:
+        from services.skill_loader import get_skill_loader
+
+        loader = get_skill_loader()
+        registry = loader._registry  # SkillMetadata is the public type; the dict is a frozen-at-startup snapshot
+    except Exception as exc:  # noqa: BLE001 — defensive: catalogue is best-effort
+        logger.debug("[agentBuilder] skill catalogue load failed: %s", exc)
+        return []
+    blocked_folders = _disabled_skill_folders()
+    catalogue: List[Dict[str, Any]] = []
+    for name, meta in sorted(registry.items()):
+        # SkillMetadata.path is the leaf SKILL.md directory; the
+        # blocklist matches against any ancestor folder under
+        # server/skills/ (e.g. "android_agent" blocks every skill
+        # under server/skills/android_agent/).
+        if meta.path is not None and blocked_folders:
+            try:
+                ancestors = {p.name for p in meta.path.parents}
+                if ancestors & blocked_folders:
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+        folder = meta.path.name if meta.path is not None else name
+        catalogue.append(
+            {
+                "folder": folder,
+                "name": meta.name,
+                "description": meta.description or "",
+            }
+        )
+    return catalogue
 
 
 def _key_params(node: Dict[str, Any]) -> Dict[str, Any]:
@@ -289,6 +621,14 @@ class AgentBuilderOutput(BaseModel):
     nodes: Optional[List[Dict[str, Any]]] = None
     edges: Optional[List[Dict[str, Any]]] = None
     you: Optional[Dict[str, Any]] = None
+    # Registry catalogues — populated by ``inspect_canvas`` so the LLM
+    # sees the FULL spawnable set instead of guessing or waiting for an
+    # error-message hint capped at 10 examples. Each entry carries
+    # display_name + description so the model can pick the right one
+    # in a single response.
+    available_tools: Optional[List[Dict[str, Any]]] = None
+    available_agents: Optional[List[Dict[str, Any]]] = None
+    available_skills: Optional[List[Dict[str, Any]]] = None
     # create_workflow extras
     workflow_id: Optional[str] = None
 
@@ -320,7 +660,19 @@ class AgentBuilderNode(ToolNode):
     # of the parent AI Agent.
     needs_canvas = True
     tool_name = "agent_builder"
-    tool_description = "Inspect and modify the workflow canvas at runtime. Operations: inspect_canvas (read current nodes/edges), spawn_tool (add a tool node + wire it), enable_skill (add a skill folder to a connected masterSkill), add_delegate_agent (add a specialized agent), create_workflow (spawn a brand-new workflow)."
+    tool_description = (
+        "Inspect and modify the workflow canvas at runtime. ALWAYS call "
+        "inspect_canvas FIRST — its response includes the full catalogue "
+        "of every tool, agent, and skill you can spawn (with display_name "
+        "and description), plus the current canvas state. Operations: "
+        "inspect_canvas (read current nodes/edges + available_tools / "
+        "available_agents / available_skills catalogues), add_tool (spawn "
+        "a tool node + wire it; idempotent if already wired), add_skill "
+        "(enable a skill folder on a connected masterSkill; idempotent if "
+        "already enabled), add_subagent (add a delegate agent; idempotent "
+        "if already wired). NOTE: create_workflow is temporarily disabled "
+        "— mutate the current workflow instead."
+    )
     handles = (
         {"name": "input-main", "kind": "input", "position": "left", "label": "Input", "role": "main"},
         {"name": "output-tool", "kind": "output", "position": "top", "label": "Tool", "role": "tools"},
@@ -386,6 +738,9 @@ class AgentBuilderNode(ToolNode):
         tools = [c for c in incoming if c["target_handle"] == _TOOL_HANDLE]
         skills = [c for c in incoming if c["target_handle"] == _SKILL_HANDLE]
         teammates = [c for c in incoming if c["target_handle"] == _TEAMMATES_HANDLE]
+        available_tools = _catalogue_tools()
+        available_agents = _catalogue_agents()
+        available_skills = _catalogue_skills()
         parts = [f"{len(nodes)} nodes"]
         if tools:
             types = ", ".join(sorted({c["source_type"] or "?" for c in tools}))
@@ -394,6 +749,10 @@ class AgentBuilderNode(ToolNode):
             parts.append(f"{len(skills)} skill source(s) wired")
         if teammates:
             parts.append(f"{len(teammates)} teammate(s)")
+        parts.append(
+            f"{len(available_tools)} tool / {len(available_agents)} agent / "
+            f"{len(available_skills)} skill types available to spawn"
+        )
 
         return AgentBuilderOutput(
             operation="inspect_canvas",
@@ -401,6 +760,9 @@ class AgentBuilderNode(ToolNode):
             nodes=node_summaries,
             edges=edge_summaries,
             you={"node_id": caller_id, "incoming": incoming, "outgoing": outgoing},
+            available_tools=available_tools,
+            available_agents=available_agents,
+            available_skills=available_skills,
         )
 
     # ---- add_tool ---------------------------------------------------------
@@ -421,23 +783,44 @@ class AgentBuilderNode(ToolNode):
             )
         allowed = _allowed_tool_types()
         if node_type not in allowed:
-            sample = ", ".join(sorted(allowed)[:10])
+            all_types = ", ".join(sorted(allowed))
             return AgentBuilderOutput(
                 operation="add_tool",
-                summary=(f"add_tool: '{node_type}' is not an allowed tool type. " f"Examples of allowed types: {sample}..."),
+                summary=(
+                    f"add_tool: '{node_type}' is not an allowed tool type. "
+                    f"Allowed types: {all_types}. "
+                    "Call inspect_canvas for the full catalogue with descriptions."
+                ),
                 operations=[],
             )
 
         caller_id = _resolve_caller(ctx)
+        # Idempotent duplicate check — if this tool type is already wired
+        # to the caller's input-tools handle, reuse the existing instance
+        # rather than spawning another. Surfaces the existing node id in
+        # the summary so the LLM knows it CAN call the tool.
+        existing_tools = _find_wired_types(ctx, caller_id, _TOOL_HANDLE)
+        if node_type in existing_tools:
+            return AgentBuilderOutput(
+                operation="add_tool",
+                summary=(
+                    f"Tool '{node_type}' is already wired to you "
+                    f"(node id={existing_tools[node_type]}). Reusing existing instance."
+                ),
+                operations=[],
+            )
         client_ref = f"new_{node_type}"
+        minted_id = _mint_node_id(node_type)
+        add_node_op = workflow_ops.add_node(
+            client_ref,
+            node_type,
+            {},
+            label=node_type,
+            position=workflow_ops.anchored(caller_id, offset_x=200, offset_y=80),
+        )
+        add_node_op["minted_id"] = minted_id  # FE applier adopts; BE rebind reads.
         ops = [
-            workflow_ops.add_node(
-                client_ref,
-                node_type,
-                {},
-                label=node_type,
-                position=workflow_ops.anchored(caller_id, offset_x=200, offset_y=80),
-            ),
+            add_node_op,
             workflow_ops.add_edge(
                 {"client_ref": client_ref},
                 caller_id,
@@ -492,6 +875,19 @@ class AgentBuilderNode(ToolNode):
 
         if master_skill:
             existing = ((master_skill.get("data") or {}).get("parameters") or {}).get("skills_config") or {}
+            # Idempotent: skill already enabled in this masterSkill's
+            # config — no-op + tell the LLM the skill is already active
+            # so it doesn't loop trying to enable.
+            if existing.get(skill, {}).get("enabled"):
+                return AgentBuilderOutput(
+                    operation="add_skill",
+                    summary=(
+                        f"Skill '{skill}' is already enabled on your "
+                        f"Master Skill (node id={master_skill['id']}). "
+                        "No change needed."
+                    ),
+                    operations=[],
+                )
             new_config = _toggle_skill(existing, skill, True)
             ops = [
                 workflow_ops.set_node_parameters(
@@ -508,14 +904,17 @@ class AgentBuilderNode(ToolNode):
 
         new_config = _toggle_skill(None, skill, True)
         client_ref = "new_master_skill"
+        minted_id = _mint_node_id(_MASTER_SKILL_TYPE)
+        master_skill_op = workflow_ops.add_node(
+            client_ref,
+            _MASTER_SKILL_TYPE,
+            {"skills_config": new_config},
+            label=_MASTER_SKILL_LABEL,
+            position=workflow_ops.anchored(caller_id, offset_x=-60, offset_y=220),
+        )
+        master_skill_op["minted_id"] = minted_id
         ops = [
-            workflow_ops.add_node(
-                client_ref,
-                _MASTER_SKILL_TYPE,
-                {"skills_config": new_config},
-                label=_MASTER_SKILL_LABEL,
-                position=workflow_ops.anchored(caller_id, offset_x=-60, offset_y=220),
-            ),
+            master_skill_op,
             workflow_ops.add_edge(
                 {"client_ref": client_ref},
                 caller_id,
@@ -561,10 +960,14 @@ class AgentBuilderNode(ToolNode):
             )
         allowed = _allowed_subagent_types()
         if agent_type not in allowed:
-            sample = ", ".join(sorted(allowed)[:10])
+            all_types = ", ".join(sorted(allowed))
             return AgentBuilderOutput(
                 operation="add_subagent",
-                summary=(f"add_subagent: '{agent_type}' is not an allowed agent " f"type. Examples: {sample}..."),
+                summary=(
+                    f"add_subagent: '{agent_type}' is not an allowed agent type. "
+                    f"Allowed types: {all_types}. "
+                    "Call inspect_canvas for the full catalogue with descriptions."
+                ),
                 operations=[],
             )
         if _is_team_lead(agent_type):
@@ -574,15 +977,30 @@ class AgentBuilderNode(ToolNode):
                 operations=[],
             )
 
+        # Idempotent duplicate check — see add_tool above for rationale.
+        existing_teammates = _find_wired_types(ctx, caller_id, _TEAMMATES_HANDLE)
+        if agent_type in existing_teammates:
+            return AgentBuilderOutput(
+                operation="add_subagent",
+                summary=(
+                    f"Teammate '{agent_type}' is already wired to you "
+                    f"(node id={existing_teammates[agent_type]}). Reusing existing instance."
+                ),
+                operations=[],
+            )
+
         client_ref = f"new_{agent_type}"
+        minted_id = _mint_node_id(agent_type)
+        add_node_op = workflow_ops.add_node(
+            client_ref,
+            agent_type,
+            {},
+            label=agent_type,
+            position=workflow_ops.anchored(caller_id, offset_x=300, offset_y=200),
+        )
+        add_node_op["minted_id"] = minted_id
         ops = [
-            workflow_ops.add_node(
-                client_ref,
-                agent_type,
-                {},
-                label=agent_type,
-                position=workflow_ops.anchored(caller_id, offset_x=300, offset_y=200),
-            ),
+            add_node_op,
             workflow_ops.add_edge(
                 {"client_ref": client_ref},
                 caller_id,
@@ -611,6 +1029,19 @@ class AgentBuilderNode(ToolNode):
             workflow_name=params.workflow_name,
             workflow_description=params.workflow_description,
         )
+        # Temporary disable — flip ``_CREATE_WORKFLOW_ENABLED`` at the
+        # module top to restore. The body below is intact so the
+        # feature can be re-enabled without rewriting validation +
+        # persistence logic.
+        if not _CREATE_WORKFLOW_ENABLED:
+            return AgentBuilderOutput(
+                operation="create_workflow",
+                summary=(
+                    "create_workflow is temporarily disabled. Mutate the "
+                    "current workflow instead — add_tool / add_skill / "
+                    "add_subagent are still available."
+                ),
+            )
         name = (params.workflow_name or "").strip()
         if not name:
             return AgentBuilderOutput(

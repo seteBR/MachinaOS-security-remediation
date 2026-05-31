@@ -40,6 +40,15 @@ export interface AddNodeOp {
   parameters: Record<string, any>;
   label?: string;
   position?: PositionSpec;
+  /**
+   * Optional BE-minted node id. When the backend hot-spawns a node
+   * mid-execution (agentBuilder + the agent-loop rebind path) it needs
+   * to dispatch status broadcasts against the same id the canvas
+   * renders under. The applier adopts this id verbatim when present,
+   * falling back to `newId()` otherwise so frontend-initiated spawns
+   * keep their existing semantics.
+   */
+  minted_id?: string;
 }
 
 export interface AddEdgeOp {
@@ -176,7 +185,10 @@ export async function applyOperations(
     try {
       switch (op.type) {
         case 'add_node': {
-          const id = newId(op.node_type);
+          // Prefer the BE-minted id when present (agentBuilder hot-spawn
+          // path) so status broadcasts dispatched against the same id
+          // land on this React Flow node and the canvas glows.
+          const id = op.minted_id || newId(op.node_type);
           result.refMap[op.client_ref] = id;
           const position = resolvePosition(op.position, ctx, liveNodes);
           const label = op.label ?? op.parameters?.label ?? op.node_type;

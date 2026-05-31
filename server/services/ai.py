@@ -1858,10 +1858,19 @@ class AIService:
                     if not node_type:
                         continue
                     cls = get_node_class(node_type)
-                    if cls is None or getattr(cls, "component_kind", "") != "tool":
+                    if cls is None:
+                        continue
+                    # Match the catalogue filter — pure ToolNode OR
+                    # dual-purpose ActionNode (usable_as_tool=True),
+                    # excluding chat models. Without this the rebind
+                    # silently drops twitterSearch / googleGmail /
+                    # pythonExecutor etc. and the LLM tries to call
+                    # tools it never got bound to.
+                    _kind = getattr(cls, "component_kind", "")
+                    if not (_kind == "tool" or (bool(getattr(cls, "usable_as_tool", False)) and _kind != "model")):
                         continue
                     tool_info = {
-                        "node_id": op.get("client_ref") or f"new_{node_type}",
+                        "node_id": op.get("minted_id") or op.get("client_ref") or f"new_{node_type}",
                         "node_type": node_type,
                         "parameters": op.get("parameters") or {},
                         "label": op.get("label") or node_type,
@@ -2366,10 +2375,18 @@ class AIService:
                         if not node_type:
                             continue
                         cls = get_node_class(node_type)
-                        if cls is None or getattr(cls, "component_kind", "") != "tool":
+                        if cls is None:
+                            continue
+                        # Match the catalogue filter — pure ToolNode OR
+                        # dual-purpose ActionNode (usable_as_tool=True),
+                        # excluding chat models. Without this the rebind
+                        # silently drops twitterSearch / googleGmail /
+                        # pythonExecutor etc.
+                        _kind = getattr(cls, "component_kind", "")
+                        if not (_kind == "tool" or (bool(getattr(cls, "usable_as_tool", False)) and _kind != "model")):
                             continue
                         tool_info = {
-                            "node_id": op.get("client_ref") or f"new_{node_type}",
+                            "node_id": op.get("minted_id") or op.get("client_ref") or f"new_{node_type}",
                             "node_type": node_type,
                             "parameters": op.get("parameters") or {},
                             "label": op.get("label") or node_type,

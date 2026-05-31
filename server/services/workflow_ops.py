@@ -86,6 +86,10 @@ class AddNodeOp(TypedDict, total=False):
     parameters: Dict[str, Any]
     label: str
     position: PositionSpec
+    # BE-minted node id adopted by the FE applier verbatim. Set by
+    # agentBuilder so the rebind path's status broadcasts route to the
+    # same React Flow node id the canvas renders the new node under.
+    minted_id: str
 
 
 class AddEdgeOp(TypedDict, total=False):

@@ -227,6 +227,99 @@ class TestAgentLoopRebind:
 # ----------------------------------------------------------------------------
 
 
+class TestRebindAcceptsDualPurposePlugins:
+    """The rebind path (both F4.A in-process closures and the F4.B
+    ``agent.refresh_tools.v1`` activity) must build StructuredTools
+    for **dual-purpose** ActionNode plugins (``usable_as_tool=True``),
+    not only pure ToolNodes (``component_kind == 'tool'``).
+
+    Without this, every ``twitterSearch`` / ``googleGmail`` /
+    ``pythonExecutor`` add_tool call returns success on the LLM-visible
+    surface but the tool never makes it into ``chat_model.bind_tools``
+    — so the next iteration's LLM calls an unknown tool and the run
+    burns iterations on retries.
+    """
+
+    def test_ai_rebind_accepts_dual_purpose(self):
+        import inspect
+
+        from services.ai import AIService
+
+        src = inspect.getsource(AIService.execute_agent)
+        # Must use the broader filter — pure tool OR dual-purpose
+        # ActionNode (usable_as_tool=True), excluding chat models.
+        assert "usable_as_tool" in src, (
+            "execute_agent's rebind closure must look at usable_as_tool, "
+            "not just component_kind=='tool'."
+        )
+        # Explicit ``!= 'model'`` guard so the broadening doesn't sweep
+        # in chat-model plugins like openaiChatModel that carry
+        # ``usable_as_tool=True`` but aren't agent tools.
+        assert '"model"' in src or "'model'" in src, (
+            "Rebind broadening must explicitly exclude component_kind='model'."
+        )
+
+    def test_ai_rebind_excludes_chat_models(self):
+        """execute_chat_agent's rebind closure shares the same broadened
+        filter — locks both call sites."""
+        import inspect
+
+        from services.ai import AIService
+
+        src = inspect.getsource(AIService.execute_chat_agent)
+        assert "usable_as_tool" in src
+
+    def test_temporal_refresh_accepts_dual_purpose(self):
+        import inspect
+
+        from services.temporal.agent_activities import refresh_agent_tools
+
+        src = inspect.getsource(refresh_agent_tools)
+        assert "usable_as_tool" in src, (
+            "agent.refresh_tools.v1 must build tools for dual-purpose "
+            "plugins (twitterSearch, googleGmail, pythonExecutor, …) — "
+            "the bulk of useful LLM-callable tools live there, not in "
+            "pure ToolNode plugins."
+        )
+
+
+class TestRebindIdAlignment:
+    """The rebind path must use the BE-minted ``minted_id`` (set by
+    agentBuilder so the FE applier adopts it verbatim) as the new
+    tool's ``node_id``. Without this the dispatcher's status
+    broadcasts target a synthesized id that doesn't match any React
+    Flow node → canvas doesn't glow on the rebound tool's first run.
+    """
+
+    def test_ai_rebind_prefers_minted_id(self):
+        import inspect
+
+        from services.ai import AIService
+
+        src = inspect.getsource(AIService.execute_agent)
+        assert 'op.get("minted_id")' in src, (
+            "execute_agent's rebind closure must prefer op['minted_id'] over "
+            "op['client_ref'] when synthesizing the tool's node_id, otherwise "
+            "the canvas can't glow on the rebound tool."
+        )
+        src = inspect.getsource(AIService.execute_chat_agent)
+        assert 'op.get("minted_id")' in src, (
+            "execute_chat_agent's rebind closure must prefer op['minted_id']."
+        )
+
+    def test_temporal_refresh_tools_prefers_minted_id(self):
+        import inspect
+
+        from services.temporal.agent_activities import refresh_agent_tools
+
+        src = inspect.getsource(refresh_agent_tools)
+        assert 'op.get("minted_id")' in src, (
+            "agent.refresh_tools.v1 activity must prefer op['minted_id'] when "
+            "synthesizing the tool's node_id so F4.B status broadcasts align "
+            "with the FE-adopted React Flow id."
+        )
+
+
 class TestAgentLoopRebindWiring:
     def test_execute_agent_passes_rebind_callback(self):
         from services.ai import AIService
