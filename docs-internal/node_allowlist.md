@@ -64,6 +64,19 @@ Re-enable: drop the entries. The hook + filters are forward-compatible with empt
 |---|---|---|
 | `android` group + `android_agent` / `androidTool` + `android` credential category + `android_agent` skill folder | Hardware-tied (ADB / Android relay) — high friction to set up, low value for most users | Palette + credentials + skill folders |
 | `email` group + `email` credential category | Himalaya CLI dependency — complex install path, IMAP/SMTP config burden | Palette + credentials |
+| `taskManager` (single node) | Functionality folded into `writeTodos`; redundant duplicate | Palette + LLM-spawnable set via agentBuilder |
+
+## agentBuilder integration
+
+`agentBuilder` honors the same allowlist when surfacing its spawnable catalogue (`inspect_canvas.available_tools` / `available_agents` / `available_skills`) and rejecting `add_tool` / `add_subagent` / `add_skill` calls:
+
+| Allowlist field | agentBuilder filter |
+|---|---|
+| `disabled_nodes` | Excluded from `_allowed_tool_types()` + `_allowed_subagent_types()` — the LLM can't spawn or list the type. |
+| `disabled_groups` | Excluded from both sets via plugin `group` tuple intersection (any matching entry hides every plugin in the group). |
+| `disabled_skill_folders` | Excluded from `_catalogue_skills()` — the LLM doesn't see folders the operator marked. Match is on the SkillMetadata path ancestor (e.g. `disabled_skill_folders: ["android_agent"]` blocks every skill under `server/skills/android_agent/`). |
+
+Read via `services.node_allowlist.get_node_allowlist_service().get_config()` — same singleton the UI hook hits. Adding a node to `disabled_nodes` once propagates to BOTH the UI palette AND the LLM's spawnable surface.
 
 ## Filter call sites
 

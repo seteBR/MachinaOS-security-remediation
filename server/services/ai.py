@@ -1827,14 +1827,18 @@ class AIService:
             # default is True; lookup failures fall back to True so the
             # feature doesn't silently disable itself on a transient DB hiccup.
             auto_rebind_enabled = True
+            user_recursion_limit: Optional[int] = None
             try:
                 user_settings = await self.database.get_user_settings()
                 if user_settings is not None:
                     auto_rebind_enabled = bool(
                         user_settings.get("auto_rebind_tools_after_canvas_change", True)
                     )
+                    _raw_limit = user_settings.get("agent_recursion_limit")
+                    if isinstance(_raw_limit, int) and _raw_limit > 0:
+                        user_recursion_limit = _raw_limit
             except Exception as exc:  # noqa: BLE001 — defensive read
-                logger.debug("[Agent] auto_rebind settings read failed: %s", exc)
+                logger.debug("[Agent] user_settings read failed: %s", exc)
 
             async def _rebind_from_operations(operations: List[Dict[str, Any]]) -> List[Any]:
                 """Translate workflow_ops add_node ops (component_kind='tool')
@@ -1916,16 +1920,20 @@ class AIService:
                 },
             )
 
-            # Run the agent loop. ``recursion_limit`` (read from
-            # llm_defaults.json:agent.recursion_limit) is the hard cap on
-            # how many LLM turns the loop will run. The real termination
-            # signal is the LLM returning a final response without tool
-            # calls; this cap is the safety backstop. On hit, the loop
-            # appends a synthetic terminal AIMessage so downstream
-            # extraction returns a usable partial response.
+            # Run the agent loop. ``recursion_limit`` precedence:
+            #   1. ``UserSettings.agent_recursion_limit`` (per-user)
+            #   2. ``Settings.agent_recursion_limit`` env var (global default)
+            #   3. ``llm_defaults.json:agent.recursion_limit`` (legacy fallback)
+            # The real termination signal is the LLM returning a final
+            # response without tool_calls; this cap is the safety backstop.
+            # On hit, the loop appends a synthetic terminal AIMessage so
+            # downstream extraction returns a usable partial response.
             from services.model_registry import get_model_registry
 
-            recursion_limit = int(get_model_registry().get_agent_defaults()["recursion_limit"])
+            if user_recursion_limit is not None:
+                recursion_limit = user_recursion_limit
+            else:
+                recursion_limit = int(get_model_registry().get_agent_defaults()["recursion_limit"])
 
             async def _emit_progress(iter_count: int) -> None:
                 if broadcaster:
@@ -2349,16 +2357,21 @@ class AIService:
                         logger.error(f"[ChatAgent] Tool execution failed: {tool_name}", error=str(e))
                         return {"error": str(e)}
 
-                # Auto-rebind toggle: same machinery as ``execute_agent``.
+                # Auto-rebind toggle + recursion_limit override: same
+                # machinery as ``execute_agent``.
                 auto_rebind_enabled = True
+                user_recursion_limit: Optional[int] = None
                 try:
                     user_settings = await self.database.get_user_settings()
                     if user_settings is not None:
                         auto_rebind_enabled = bool(
                             user_settings.get("auto_rebind_tools_after_canvas_change", True)
                         )
+                        _raw_limit = user_settings.get("agent_recursion_limit")
+                        if isinstance(_raw_limit, int) and _raw_limit > 0:
+                            user_recursion_limit = _raw_limit
                 except Exception as exc:  # noqa: BLE001 — defensive read
-                    logger.debug("[ChatAgent] auto_rebind settings read failed: %s", exc)
+                    logger.debug("[ChatAgent] user_settings read failed: %s", exc)
 
                 async def _rebind_from_operations(operations: List[Dict[str, Any]]) -> List[Any]:
                     """Mirror of execute_agent._rebind_from_operations — see that
@@ -2409,10 +2422,13 @@ class AIService:
 
                 # Run the agent loop. See ``execute_agent`` for the
                 # rationale on ``recursion_limit`` + the truncation
-                # behaviour on hit.
+                # behaviour on hit. Precedence: UserSettings > env.
                 from services.model_registry import get_model_registry
 
-                recursion_limit = int(get_model_registry().get_agent_defaults()["recursion_limit"])
+                if user_recursion_limit is not None:
+                    recursion_limit = user_recursion_limit
+                else:
+                    recursion_limit = int(get_model_registry().get_agent_defaults()["recursion_limit"])
 
                 async def _emit_progress(iter_count: int) -> None:
                     if broadcaster:

@@ -343,16 +343,21 @@ ws.send(JSON.stringify({
 ### Environment Variables
 
 ```bash
-# In server/.env
+# In server/.env (mirrors .env.template)
 COMPACTION_ENABLED=true       # Enable/disable compaction globally (default: true)
-COMPACTION_THRESHOLD=100000   # Global fallback threshold (default: 100000, min: 10000)
-                              # Used when model context window is unknown
+COMPACTION_RATIO=0.8          # Fraction of context window that triggers compaction
+                              # (default: 0.8 — was 0.5 pre-2026.06). Range 0.05-0.99.
+                              # Read by core.config.Settings.compaction_ratio.
 ```
 
-**Threshold priority chain:**
-1. Per-session `custom_threshold` (set via `configure()` or WebSocket)
-2. Model-aware threshold: 50% of model's context window (e.g., 500K for 1M model)
-3. Global `COMPACTION_THRESHOLD` from `.env` (fallback when model info unavailable)
+**Threshold priority chain** (highest → lowest):
+
+1. **Per-session** `SessionTokenState.custom_threshold` (set via `configure()` or WebSocket).
+2. **Per-user** `UserSettings.compaction_ratio` × model's context_length — DB-backed override exposed in the Settings tab.
+3. **Env** `Settings.compaction_ratio` × model's context_length — `COMPACTION_RATIO` × `model_registry.get_context_length(provider, model)`.
+4. **JSON fallback** `llm_defaults.json:agent.compaction.ratio` × context_length — when Settings can't load (one-off CLI scripts).
+
+Effective threshold computed by `model_registry.get_agent_defaults()["compaction"]["ratio"]` (which now reads from `Settings` first) — e.g. claude-sonnet-4-6 with 1M context × 0.8 = 800K trigger.
 
 ### Per-Session Override
 

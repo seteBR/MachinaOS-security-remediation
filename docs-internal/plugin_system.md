@@ -128,10 +128,22 @@ class SpecializedAgentBase(ActionNode, abstract=True):
 | `credentials` | Tuple of `Credential` subclasses the node uses. |
 | `Params` | Pydantic `BaseModel` — user-facing parameters. Used for both UI rendering and AI tool schemas. |
 | `Output` | Pydantic `BaseModel` — runtime output shape. |
-| `usable_as_tool` | `ActionNode` flag — mints a ToolNode adapter for AI invocation. |
+| `usable_as_tool` | `ActionNode` flag — mints a ToolNode adapter for AI invocation. Combined with `component_kind != "model"`, makes the plugin visible to `agentBuilder.add_tool` (catalogue + rebind paths). |
+| `needs_canvas` | `ClassVar[bool]` — when `True`, the F4.B `AgentWorkflow` tool-dispatch forwards the parent workflow's `nodes`/`edges` into the per-tool activity payload. Today only `AgentBuilderNode` opts in (walks edges to resolve its calling agent). |
 | `task_queue` | Temporal worker pool. See `TaskQueue` constants. |
 | `retry_policy` | `RetryPolicy` dataclass (mirrors `temporalio.common.RetryPolicy`). |
 | `start_to_close_timeout` / `heartbeat_timeout` | Per-node Temporal knobs. |
+
+### Polymorphic result envelope (`interpret_result`)
+
+`BaseNode.interpret_result(result) -> (success: bool, payload: Any, error: Optional[str])` is the classmethod the F4.A activity wrapper at [`BaseNode.as_activity`](../server/services/plugin/base.py) calls to normalise broadcast inputs across node kinds:
+
+| Node kind | Contract | Default semantics |
+|---|---|---|
+| `ActionNode` / `TriggerNode` | `{success: bool, result: Any, error?: str, ...}` envelope (produced by `_wrap_success` / `_wrap_error`). | Inherits `BaseNode.interpret_result` — reads `success` + `result` + `error` keys. |
+| `ToolNode` | Flat dict IS the success payload (the LLM-feedable shape). Error paths still produce the standard envelope via `_wrap_error`. | Overridden on `ToolNode`: if no `success` key, treat the dict as success payload; otherwise delegate to base. |
+
+This is the contract that makes `writeTodos` / `calculatorTool` etc. broadcast successfully through F4.A — without the polymorphic override, the wrapper's `if result.get("success")` check would treat every ToolNode result as failure and never call `update_node_output`.
 
 ### Auto-derived uiHints
 

@@ -364,22 +364,88 @@ def _skill_folder_exists(skill_folder: str) -> bool:
 # ----------------------------------------------------------------------------
 
 
-def _find_wired_types(
+async def _load_live_canvas(
     ctx: NodeContext,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Reload the canvas snapshot from the persisted ``workflow.data``
+    so successive agentBuilder operations in the SAME run see each
+    other's mutations.
+
+    The per-tool activity's ``ctx.nodes`` / ``ctx.edges`` is frozen at
+    MachinaWorkflow start — without this reload, every add_tool /
+    add_skill / add_subagent call inside a single AgentWorkflow run
+    would see the same stale snapshot, ``_find_wired_types`` would
+    never detect the just-spawned tool, and duplicates would pile up.
+
+    Falls back to ``ctx.nodes`` / ``ctx.edges`` when ``ctx.workflow_id``
+    is missing (standalone Run) or the DB lookup fails. Read-only —
+    callers still pass the returned tuple into ``_find_wired_types``
+    explicitly so the caller controls precedence.
+    """
+    if ctx.workflow_id:
+        try:
+            from services.plugin.deps import get_database
+
+            database = get_database()
+            workflow = await database.get_workflow(ctx.workflow_id)
+            if workflow is not None and workflow.data:
+                nodes = list(workflow.data.get("nodes") or [])
+                edges = list(workflow.data.get("edges") or [])
+                return nodes, edges
+        except Exception as exc:  # noqa: BLE001 — defensive: fall back to ctx
+            logger.debug(
+                "[agentBuilder] live canvas reload failed for %s: %s",
+                ctx.workflow_id,
+                exc,
+            )
+    return list(ctx.nodes or []), list(ctx.edges or [])
+
+
+def _resolve_caller_from(
+    self_id: str,
+    edges: List[Dict[str, Any]],
+) -> str:
+    """``_resolve_caller`` variant that takes an explicit edges list so
+    callers can resolve against the freshly-reloaded canvas instead of
+    ``ctx.edges`` (frozen at workflow start)."""
+    for edge in edges or []:
+        if edge.get("source") == self_id and edge.get("targetHandle") == _TOOL_HANDLE:
+            target = edge.get("target")
+            if target:
+                logger.info(
+                    "[agentBuilder] caller resolved (live canvas): self=%s -> agent=%s",
+                    self_id,
+                    target,
+                )
+                return target
+    logger.info(
+        "[agentBuilder] no input-tools edge found from %s; falling back to self as caller (canvas: %d nodes? edges=%d)",
+        self_id,
+        0,
+        len(edges or []),
+    )
+    return self_id
+
+
+def _find_wired_types(
+    nodes: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
     target_node_id: str,
     target_handle: str,
 ) -> Dict[str, str]:
-    """Walk ``ctx.edges`` for edges arriving at ``target_node_id`` on
+    """Walk ``edges`` for entries arriving at ``target_node_id`` on
     ``target_handle`` and return ``{source_node_type: source_node_id}``
     for every match.
 
-    Used by ``add_tool`` / ``add_subagent`` to detect already-wired
-    nodes before spawning duplicates. Sync + ctx-only (no DB) — same
-    lightweight pattern as :func:`_resolve_caller`.
+    Accepts explicit ``nodes`` / ``edges`` lists so callers can hand in
+    a freshly-reloaded canvas (via :func:`_load_live_canvas`) instead
+    of the per-tool activity's stale ``ctx`` snapshot. Without this the
+    same agentBuilder run can't detect tools it added moments ago in
+    the same iteration.
     """
-    nodes_by_id = {n.get("id"): n for n in (ctx.nodes or []) if n.get("id")}
+    nodes_by_id = {n.get("id"): n for n in (nodes or []) if n.get("id")}
     wired: Dict[str, str] = {}
-    for edge in ctx.edges or []:
+    for edge in edges or []:
         if edge.get("target") != target_node_id:
             continue
         if edge.get("targetHandle") != target_handle:
@@ -693,9 +759,11 @@ class AgentBuilderNode(ToolNode):
         params: AgentBuilderParams,
     ) -> AgentBuilderOutput:
         _log_op_entry("inspect_canvas", ctx)
-        nodes = list(ctx.nodes or [])
-        edges = list(ctx.edges or [])
-        caller_id = _resolve_caller(ctx)
+        # Reload from DB so the snapshot reflects any in-run mutations
+        # (per-tool ctx is frozen at MachinaWorkflow start, so without
+        # this the LLM never sees nodes it added moments ago).
+        nodes, edges = await _load_live_canvas(ctx)
+        caller_id = _resolve_caller_from(ctx.node_id, edges)
         type_by_id = {n.get("id"): n.get("type") for n in nodes}
 
         node_summaries = [
@@ -794,12 +862,16 @@ class AgentBuilderNode(ToolNode):
                 operations=[],
             )
 
-        caller_id = _resolve_caller(ctx)
+        # Reload the canvas from DB so duplicate detection sees any
+        # tool the LLM just spawned earlier in THIS run. The ctx
+        # snapshot is frozen at MachinaWorkflow start.
+        live_nodes, live_edges = await _load_live_canvas(ctx)
+        caller_id = _resolve_caller_from(ctx.node_id, live_edges)
         # Idempotent duplicate check — if this tool type is already wired
         # to the caller's input-tools handle, reuse the existing instance
         # rather than spawning another. Surfaces the existing node id in
         # the summary so the LLM knows it CAN call the tool.
-        existing_tools = _find_wired_types(ctx, caller_id, _TOOL_HANDLE)
+        existing_tools = _find_wired_types(live_nodes, live_edges, caller_id, _TOOL_HANDLE)
         if node_type in existing_tools:
             return AgentBuilderOutput(
                 operation="add_tool",
@@ -858,9 +930,10 @@ class AgentBuilderNode(ToolNode):
                 operations=[],
             )
 
-        nodes = list(ctx.nodes or [])
-        edges = list(ctx.edges or [])
-        caller_id = _resolve_caller(ctx)
+        # Reload from DB so we see any masterSkill spawned earlier in
+        # the same run (or skill already toggled on in this run).
+        nodes, edges = await _load_live_canvas(ctx)
+        caller_id = _resolve_caller_from(ctx.node_id, edges)
 
         skill_edge = next(
             (e for e in edges if e.get("target") == caller_id and e.get("targetHandle") == _SKILL_HANDLE),
@@ -946,8 +1019,10 @@ class AgentBuilderNode(ToolNode):
                 operations=[],
             )
 
-        nodes = list(ctx.nodes or [])
-        caller_id = _resolve_caller(ctx)
+        # Reload from DB so duplicate detection sees teammates spawned
+        # earlier in the same run.
+        nodes, edges = await _load_live_canvas(ctx)
+        caller_id = _resolve_caller_from(ctx.node_id, edges)
         caller = next((n for n in nodes if n.get("id") == caller_id), None)
         caller_type = (caller or {}).get("type") or ""
 
@@ -978,7 +1053,7 @@ class AgentBuilderNode(ToolNode):
             )
 
         # Idempotent duplicate check — see add_tool above for rationale.
-        existing_teammates = _find_wired_types(ctx, caller_id, _TEAMMATES_HANDLE)
+        existing_teammates = _find_wired_types(nodes, edges, caller_id, _TEAMMATES_HANDLE)
         if agent_type in existing_teammates:
             return AgentBuilderOutput(
                 operation="add_subagent",

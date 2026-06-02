@@ -332,23 +332,41 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </span>
               </div>
               <Slider
-                min={10}
-                max={90}
+                min={5}
+                max={95}
                 step={5}
                 value={[Math.round(settings.compactionRatio * 100)]}
-                onValueChange={(value) => handleChange('compactionRatio', (value[0] ?? 50) / 100)}
+                onValueChange={(value) => handleChange('compactionRatio', (value[0] ?? 80) / 100)}
                 disabled={isSaving}
                 className="my-3"
               />
               <div className="flex justify-between text-[10px] text-fg-muted">
-                <span>10%</span>
+                <span>5%</span>
                 <span>50%</span>
-                <span>90%</span>
+                <span>95%</span>
               </div>
               <div className="mt-1 text-xs leading-snug text-fg-muted">
                 Lower = compact sooner (saves tokens, loses detail). Higher = compact later (preserves context, uses more tokens).
               </div>
             </div>
+
+            <div className="my-1 border-b border-border-default" />
+
+            <Row
+              label="AI Agent Max Steps"
+              description="Hard cap on the agent loop's LLM-iteration count per run. The token-based compaction threshold is usually the real termination signal; this is the safety backstop."
+            >
+              <Input
+                type="number"
+                min={1}
+                max={5000}
+                step={10}
+                value={settings.agentRecursionLimit}
+                onChange={(e) => handleChange('agentRecursionLimit', Number(e.target.value) || 200)}
+                disabled={isSaving}
+                className="w-24"
+              />
+            </Row>
           </Section>
 
           {/* Process Manager */}

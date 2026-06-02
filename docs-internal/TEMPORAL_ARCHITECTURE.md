@@ -312,11 +312,22 @@ AgentWorkflow.run(context):
            envelope so the LLM sees only the handler's return value
            (matches the in-process tool-call serialisation in
            services/ai.py:_run_agent_loop).
-    4. execute_activity("agent.persist_turn.v1")
+    4. for each tool result with an ``operations`` field
+       (canvas-mutating tools — today only ``agentBuilder``):
+         if payload["auto_rebind_tools"] is True:
+           execute_activity("agent.refresh_tools.v1", {operations: …})
+             translates add_node ops with component_kind=="tool" OR
+             usable_as_tool=True (minus chat-model plugins) into the
+             same tool_payload shape prepare_agent_payload emits.
+             Reuses ai_service._build_tool_from_node + get_node_class.
+           tools.extend(refresh_result["tools"])
+           tool_index.update(...)
+           # next execute_llm_step.v1 sees the new tools.
+    5. execute_activity("agent.persist_turn.v1")
          append_to_memory_markdown(content, "human", prompt) +
          (content, "ai", response); trim window; broadcast
          node_parameters_updated CloudEvents (source_hint="agent").
-    5. if token_total >= compaction_threshold:
+    6. if token_total >= compaction_threshold:
          execute_activity("agent.compact_memory.v1")
          null-guarded against worker-bootstrap race; replaces messages
          with summary only when result.success is True.
@@ -331,6 +342,20 @@ AgentWorkflow.run(context):
 `emit_phase(phase, status?)` is a thin helper that schedules `agent.broadcast_progress.v1`. The activity emits `WorkflowEvent.agent_progress` (CloudEvents v1.0, `type="com.machinaos.agent.progress"`) for FE consumers; when `status` is supplied it also drives a raw-dict `update_node_status` for the canvas-glow color (executing / success / error). Same dual-channel pattern F4.A's `_node_activity` uses. When this workflow is itself a delegated child (`context["parent_node_id"]` set), every `emit_phase` call ALSO schedules a second broadcast against the parent's `node_id` with `phase="delegating"` — the parent's canvas badge then advances in real time while the child loops, instead of freezing at "executing" glow until the child completes.
 
 Each LLM step is one activity, each tool call is one per-type activity (the same activities F4.A registered). **Delegation tool calls** (`delegate_to_<x>`) where the child type is in `AGENT_WORKFLOW_TYPES` are the exception: they spawn a child `AgentWorkflow` via `workflow.execute_child_workflow` instead of a per-type activity, with `parent_node_id` injected into `child_context` to enable the parent-mirror broadcast above. Deterministic child workflow id is `f"{parent_workflow_id}-delegate-{child_node_id}-{iteration}"` so Temporal retries don't spawn duplicates. Non-agent tools and excluded types (`rlm_agent`, `claude_code_agent`) still go through `execute_activity` as before. Failures of tool activities surface as error messages back to the LLM (matching the in-process agent loop behaviour); the agent loop continues.
+
+**Canvas-aware tools** opt into receiving the parent workflow's `nodes`/`edges` by declaring `needs_canvas: ClassVar[bool] = True` on their `BaseNode` subclass. The F4.B tool dispatch reads this via `services.node_registry.get_node_class(node_type).needs_canvas` and forwards `context.get("nodes")` / `context.get("edges")` into `tool_payload`; default plugins keep the empty-canvas optimisation. Today only `agentBuilder` opts in (it walks edges to resolve its calling agent and mutates the canvas). Operations inside agentBuilder reload via `database.get_workflow(workflow_id)` so in-run duplicate detection sees mutations from earlier calls in the same workflow run — see [agent_builder section in CLAUDE.md](../CLAUDE.md).
+
+**Seven agent activities** are registered by `collect_agent_activities()` for `AgentWorkflow` to schedule by name:
+
+| Activity | Purpose |
+|---|---|
+| `agent.prepare_payload.v1` | Resolves the DB-backed payload (provider / model / api_key / system_message / user_prompt / tools / memory_node_id / memory_content / memory_window_size / max_iterations / thinking_config / compaction_threshold / auto_rebind_tools). Reads `UserSettings.agent_recursion_limit` + `UserSettings.auto_rebind_tools_after_canvas_change`. |
+| `agent.execute_llm_step.v1` | One LLM turn — rebuilds StructuredTools from the workflow's current `tools` list and returns the assistant message + tool_calls. |
+| `agent.refresh_tools.v1` | Translates `workflow_ops` add_node ops (component_kind="tool" OR usable_as_tool=True) into fresh `tool_payload` entries via `_build_tool_from_node`. Workflow extends `tools` + `tool_index` from the result. |
+| `agent.persist_turn.v1` | Appends the latest human/assistant exchange to memory markdown, trims the window, broadcasts `node.parameters.updated`. |
+| `agent.compact_memory.v1` | Token-budget compaction when cumulative tokens hit the threshold. Best-effort: continues with un-compacted history on failure. |
+| `agent.store_output.v1` | Writes `output_main` / `output_top` / `output_0` so downstream nodes resolve `{{aiAgent.response}}` via `ParameterResolver`. |
+| `agent.broadcast_progress.v1` | Emits `WorkflowEvent.agent_progress` (CloudEvents v1.0) + optional raw-dict `update_node_status` for canvas-glow color. Single helper drives every phase emit. |
 
 **Broadcasts inside the loop** wrap `WorkflowEvent` (CloudEvents v1.0) per RFC §6.4: `agent_progress` events (`com.machinaos.agent.progress`) and `node_parameters_updated` events (`com.machinaos.node.parameters.updated`) flow through the `StatusBroadcaster.broadcast_agent_progress` and `StatusBroadcaster.broadcast_node_parameters_updated` wrappers respectively. The latter is reused by the legacy `routers/websocket.py:handle_save_node_parameters` (user-source) and `services/cli_agent/service.py:_persist_memory` (cli-source) — all three emission sites share the same envelope, distinguished by `source_hint` (`"user"` / `"cli"` / `"agent"`).
 

@@ -92,7 +92,7 @@ The agent loop is a plain `for iteration in range(max_iterations):` async functi
 3. `response = await chat_model.ainvoke(filtered)` — single LLM call. The full assistant message is appended to `messages` verbatim so provider-specific metadata survives (Gemini `thought_signature`, Anthropic cache markers, OpenAI `reasoning_content`).
 4. `extract_thinking_from_response(response)` — accumulates thinking across iterations with the `--- Iteration N ---` separator (multi-step reasoning).
 5. If `response.tool_calls` is empty → return `{messages, iteration, thinking_content, truncated: False}`.
-6. Otherwise dispatch each `tool_call` via the supplied `tool_executor`, wrap each result as a `ToolMessage`, append, and loop.
+6. Otherwise dispatch each `tool_call` via the supplied `tool_executor`, wrap each result as a `ToolMessage`, append. After all calls in this iteration return, inspect each result for a `operations` field (workflow_ops batch from canvas-mutating tools); call `rebind_from_operations(ops)` if wired, extend the local `current_tools` list, and `chat_model.bind_tools(current_tools)` again so the LLM sees the new tools in the NEXT iteration. Loop.
 
 On hitting `max_iterations`, append a terminal `AIMessage` with a truncation note and return `truncated: True`.
 
@@ -107,11 +107,12 @@ async def _run_agent_loop(
     tool_executor: Optional[Callable] = None,
     max_iterations: int = 500,
     progress_callback: Optional[Callable[[int], Any]] = None,
+    rebind_from_operations: Optional[Callable[[List[Dict[str, Any]]], Awaitable[List[Any]]]] = None,
 ) -> Dict[str, Any]:
     """Returns {messages, iteration, thinking_content, truncated}."""
 ```
 
-Tools bind once at the top via `chat_model.bind_tools(tools)`; the same provider-unified LangChain method every chat model honours.
+Tools bind at loop start via `chat_model.bind_tools(tools)` and **rebind** mid-loop whenever a tool returns workflow_ops (today only `agentBuilder`). The rebound model is the SAME LangChain `chat_model.bind_tools` method every provider honours — no per-provider plumbing.
 
 ### Termination
 
@@ -121,7 +122,27 @@ Tools bind once at the top via `chat_model.bind_tools(tools)`; the same provider
 | `tool_executor` is `None` but LLM emits tool calls | WARN + return (treat as final). |
 | `iteration` reaches `max_iterations` | Append synthetic terminal `AIMessage` + return with `truncated: True`. |
 
-`max_iterations` defaults to 500 (sourced from `llm_defaults.json:agent.recursion_limit`). It's a backstop, not the load-bearing signal — compaction (token-based, post-turn) is the actual termination control.
+### `max_iterations` precedence
+
+Resolved per-execution by `execute_agent` / `execute_chat_agent` (and `prepare_agent_payload` for F4.B), highest to lowest:
+
+1. **Per-agent-node** `parameters.max_iterations` — set by the user on the agent node itself.
+2. **Per-user** `UserSettings.agent_recursion_limit` — Settings tab override (DB-backed).
+3. **Env** `Settings.agent_recursion_limit` from `AGENT_RECURSION_LIMIT` (default 200).
+4. **JSON** `llm_defaults.json:agent.recursion_limit` — last-resort fallback when Settings can't load.
+
+This is a backstop, not the load-bearing signal — compaction (token-based, post-turn) is the actual termination control. See [memory_compaction.md](memory_compaction.md).
+
+### Hot rebind after canvas mutation
+
+When `agentBuilder` (the only canvas-mutating tool today) spawns a new node mid-run via `add_tool` / `add_skill` / `add_subagent`, the operation returns a `workflow_ops` batch in its result's `operations` field. The loop detects the field, calls `rebind_from_operations(ops)`, and extends the bound tool surface so the LLM can invoke the new tool in the very next iteration — no Run-stop-Run cycle.
+
+Closure responsibilities:
+
+- **`_rebind_from_operations(ops) -> List[StructuredTool]`** (in `execute_agent` / `execute_chat_agent`): filter ops for `add_node` with the plugin class's `component_kind == "tool"` OR `usable_as_tool=True` (excluding `component_kind == "model"`), synthesize a `tool_info` dict, call `self._build_tool_from_node(tool_info)`, return the new StructuredTools. Tool configs get folded into the captured `tool_configs` dict so the `tool_executor` can dispatch the new call.
+- The closure is gated on the user toggle: `UserSettings.auto_rebind_tools_after_canvas_change` (default `True`). When off, the LLM is told "Available on your next turn" in the operation summary and the closure isn't wired.
+
+For the F4.B Temporal path, the in-process closure is replaced by the `agent.refresh_tools.v1` activity; see [TEMPORAL_ARCHITECTURE.md](TEMPORAL_ARCHITECTURE.md).
 
 ### Where it's called
 
@@ -348,16 +369,16 @@ registry['rlm_agent'] = partial(handle_rlm_agent, ai_service=self.ai_service, da
 registry['claude_code_agent'] = partial(handle_claude_code_agent, ...)
 ```
 
-### Temporal dispatch routing (post-F4)
+### Temporal dispatch routing
 
 Two settings flags route agent execution through different Temporal paths (see [TEMPORAL_ARCHITECTURE.md](TEMPORAL_ARCHITECTURE.md) for the full matrix):
 
-| Flag | Off (default) | On |
+| Flag | Off | On (default) |
 |---|---|---|
 | `TEMPORAL_PER_TYPE_DISPATCH` | Every node routes through the legacy `execute_node_activity` single dispatcher (WS round-trip to the FastAPI handler). | Each node routes through its per-type activity `node.{type}.v{version}` registered via `BaseNode.as_activity()`. Per-plugin retry / timeout / heartbeat configs apply. |
-| `TEMPORAL_AGENT_WORKFLOW_ENABLED` | All 11 specialized + 2 team leads + 2 base agents (`aiAgent` / `chatAgent`) run inside `execute_node_activity` (`_run_agent_loop` in-activity). | The 14 migrating agent types become Temporal **child workflows** (`AgentWorkflow`). LLM steps + tool calls become activities; `agent.prepare_payload.v1` resolves the DB-backed payload as the workflow's first step. `rlm_agent` / `claude_code_agent` stay on the F4.A per-type activity path (externalised session state). |
+| `TEMPORAL_AGENT_WORKFLOW_ENABLED` | All specialized + team leads + base agents (`aiAgent` / `chatAgent`) run inside `execute_node_activity` (`_run_agent_loop` in-activity). | The migrating agent types become Temporal **child workflows** (`AgentWorkflow`). LLM steps + tool calls become activities; `agent.prepare_payload.v1` resolves the DB-backed payload as the workflow's first step; `agent.refresh_tools.v1` rebinds the tool surface after canvas mutations. `rlm_agent` / `claude_code_agent` stay on the F4.A per-type activity path (externalised session state). |
 
-Today both flags default to `false`; the wiring is shipped (F4.A at `8261b05`, F4.B infrastructure at `a4d009e`, per-agent dispatch at `0459131`) but production rollout awaits canary verification on a Temporal dev cluster.
+Both flags default to `true` in `.env.template`.
 
 **Team leads** (`orchestrator_agent`, `ai_employee`) use the same `handle_chat_agent` routing but add an `input-teammates` handle. Connected agents become `delegate_to_<type>` tools automatically via `_collect_teammate_connections()`. See [agent_teams.md](agent_teams.md).
 

@@ -562,14 +562,32 @@ class ModelRegistryService:
             self._llm_defaults = {"providers": {}}
 
     def get_agent_defaults(self) -> Dict[str, Any]:
-        """Return the ``agent`` block from ``llm_defaults.json``.
+        """Return the ``agent`` block defaults (recursion_limit,
+        compaction.ratio, default_temperature).
 
-        Holds runtime defaults shared across the agent executor and
-        compaction layer (e.g. ``recursion_limit``, ``compaction.ratio``).
-        Callers should ``.get(...)`` with their own fallback so the system
-        still boots if the JSON is missing or partial.
+        Source-of-truth order:
+          1. Environment via ``core.config.Settings``
+             (``AGENT_RECURSION_LIMIT`` / ``COMPACTION_RATIO``) — wins.
+          2. ``server/config/llm_defaults.json:agent`` block — fallback
+             when Settings can't be instantiated (e.g. one-off CLI
+             scripts that bypass it).
+
+        Per-user ``UserSettings.agent_recursion_limit`` /
+        ``compaction_ratio`` overrides are applied by the caller at
+        request time — this helper returns the GLOBAL defaults only.
         """
-        return self._llm_defaults.get("agent", {})
+        block = dict(self._llm_defaults.get("agent", {}))
+        try:
+            from core.config import Settings
+
+            settings = Settings()
+            block["recursion_limit"] = int(settings.agent_recursion_limit)
+            compaction = dict(block.get("compaction") or {})
+            compaction["ratio"] = float(settings.compaction_ratio)
+            block["compaction"] = compaction
+        except Exception:  # noqa: BLE001 — defensive: keep JSON fallback usable
+            pass
+        return block
 
     def _get_default_max_output_tokens(self, provider: str, model: str) -> int:
         """Fallback: get max output tokens from llm_defaults.json."""

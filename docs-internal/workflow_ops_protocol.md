@@ -30,7 +30,7 @@ ids that later ops reference via `client_ref` placeholders.
 
 | Type | Required | Optional | Purpose |
 |---|---|---|---|
-| `add_node` | `client_ref`, `node_type`, `parameters` | `label`, `position` | Create a new node + persist its initial params. `client_ref` is a batch-local id later ops can target. |
+| `add_node` | `client_ref`, `node_type`, `parameters` | `label`, `position`, `minted_id` | Create a new node + persist its initial params. `client_ref` is a batch-local id later ops can target. When `minted_id` is set (BE hot-spawn path — `agentBuilder` mints upfront so status broadcasts route to the same React Flow id), the FE applier adopts the supplied id verbatim instead of calling `newId()`. |
 | `add_edge` | `source`, `target` | `source_handle`, `target_handle` | Wire two nodes. `source` / `target` are either existing node ids (string) or `{client_ref}` references. |
 | `set_node_parameters` | `node_id`, `parameters` | -- | Shallow-merge `parameters` into the node's existing params via `saveNodeParameters`. |
 | `delete_node` | `node_id` | -- | Remove node; edges to/from it cascade-delete. |
@@ -122,7 +122,7 @@ failures (toast, log, retry, etc.).
 | Service | Trigger | Module |
 |---|---|---|
 | Auto-add Skill on tool connect | WS request `evaluate_auto_skill` (frontend on edge connect/disconnect) | `server/services/auto_skill.py` |
-| Agent Builder runtime tools | WS broadcast `workflow_ops_apply` (backend, mid-execution) | `server/nodes/tool/agent_builder.py` |
+| Agent Builder runtime tools | WS broadcast `workflow_ops_apply` (backend, mid-execution) + DB persist via `database.save_workflow` so subsequent runs and in-run reload see the mutation | `server/nodes/tool/agent_builder/__init__.py` |
 
 ## Two delivery modes
 

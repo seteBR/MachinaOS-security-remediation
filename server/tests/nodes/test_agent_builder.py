@@ -845,6 +845,74 @@ class TestDbPersistence:
         assert add_node_op["minted_id"] in persisted_ids
 
 
+class TestInRunCanvasReload:
+    """Within a single AgentWorkflow run, ``ctx.nodes`` / ``ctx.edges``
+    is frozen at MachinaWorkflow start — so the SECOND agentBuilder
+    call inside the run wouldn't see the FIRST call's mutation just
+    by reading ``ctx``. Each operation now reloads ``workflow.data``
+    from the DB via ``_load_live_canvas`` so duplicate detection
+    catches in-run repeats, not just cross-run repeats."""
+
+    async def test_add_tool_uses_db_reload_for_duplicate_check(self):
+        """ctx has empty edges (simulating frozen-at-run-start
+        snapshot) but the DB has the httpRequest already wired
+        (simulating an earlier-in-run add_tool that persisted). The
+        reload must see the DB state and return idempotent success
+        instead of spawning a duplicate."""
+        node = ab.AgentBuilderNode()
+        # ctx looks like a fresh workflow — no tools wired anywhere.
+        # Only the agentBuilder->agent input-tools edge that
+        # _resolve_caller needs.
+        ctx = _make_ctx(
+            nodes=[
+                _agent_node("agent-1"),
+                {"id": "ab-1", "type": "agentBuilder", "data": {"label": "AB"}},
+            ],
+            edges=[_edge("ab-1", "agent-1", "input-tools")],
+            workflow_id="wf-test",
+        )
+        params = ab.AgentBuilderParams(operation="add_tool", node_type="httpRequest")
+
+        # DB reflects the prior in-run add_tool mutation: httpRequest
+        # node spawned + edge to agent-1.
+        live_workflow = SimpleNamespace(
+            name="Test",
+            slug="Test_1",
+            description="",
+            data={
+                "nodes": [
+                    {"id": "agent-1", "type": "aiAgent"},
+                    {"id": "ab-1", "type": "agentBuilder"},
+                    {"id": "http-existing", "type": "httpRequest"},
+                ],
+                "edges": [
+                    {"source": "ab-1", "target": "agent-1", "targetHandle": "input-tools"},
+                    {"source": "http-existing", "target": "agent-1", "targetHandle": "input-tools"},
+                ],
+            },
+        )
+        mock_db = MagicMock()
+        mock_db.get_workflow = AsyncMock(return_value=live_workflow)
+        mock_db.save_workflow = AsyncMock(return_value=True)
+        mock_container = MagicMock()
+        mock_container.database.return_value = mock_db
+
+        with (
+            patch.object(ab, "registered_node_classes", return_value=_registry(httpRequest="tool")),
+            patch("core.container.container", mock_container),
+        ):
+            result = await node.add_tool(ctx, params)
+
+        # Duplicate detected via DB reload — not via ctx.edges (which
+        # didn't have httpRequest).
+        assert result.operations == []
+        assert "already wired" in result.summary
+        assert "http-existing" in result.summary
+        # save_workflow must NOT be called on the idempotent path —
+        # no mutation to persist.
+        mock_db.save_workflow.assert_not_called()
+
+
 class TestDuplicateDetection:
     async def test_add_tool_is_idempotent_when_already_wired(self):
         """If the caller already has a node of the requested type wired

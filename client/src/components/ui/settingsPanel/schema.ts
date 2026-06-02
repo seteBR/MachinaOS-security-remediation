@@ -17,7 +17,8 @@ export const workflowSettingsSchema = z.object({
   componentPaletteDefaultOpen: z.boolean().default(true),
   consolePanelDefaultOpen: z.boolean().default(false),
   memoryWindowSize: z.number().int().min(1).max(100).default(100),
-  compactionRatio: z.number().min(0.1).max(0.9).default(0.5),
+  compactionRatio: z.number().min(0.05).max(0.99).default(0.8),
+  agentRecursionLimit: z.number().int().min(1).max(5000).default(200),
   maxProcesses: z.number().int().min(1).max(50).default(10),
   autoAddSkillForTools: z.boolean().default(true),
   autoRebindToolsAfterCanvasChange: z.boolean().default(true),
@@ -44,6 +45,7 @@ export function fromServerRow(row: Record<string, any> | null | undefined): Work
     maxProcesses: row.max_processes,
     autoAddSkillForTools: row.auto_add_skill_for_tools,
     autoRebindToolsAfterCanvasChange: row.auto_rebind_tools_after_canvas_change,
+    agentRecursionLimit: row.agent_recursion_limit,
   });
 }
 
@@ -63,5 +65,6 @@ export function toServerRow(s: WorkflowSettings): Record<string, any> {
     max_processes: s.maxProcesses,
     auto_add_skill_for_tools: s.autoAddSkillForTools,
     auto_rebind_tools_after_canvas_change: s.autoRebindToolsAfterCanvasChange,
+    agent_recursion_limit: s.agentRecursionLimit,
   };
 }

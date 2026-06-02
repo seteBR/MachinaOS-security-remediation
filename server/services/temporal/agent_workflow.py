@@ -73,8 +73,25 @@ TOOL_STEP_TIMEOUT = timedelta(minutes=10)
 TOOL_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 
 # Bounded loop count to defend against a runaway LLM. Plugin classes
-# can override via ``payload["max_iterations"]``; this is the hard cap.
-DEFAULT_MAX_ITERATIONS = 50
+# override via ``payload["max_iterations"]`` (set by
+# ``prepare_agent_payload`` from Settings.agent_recursion_limit). This
+# module-level fallback fires only if the payload omits the key, which
+# should never happen — kept as a defensive backstop.
+def _default_max_iterations() -> int:
+    """Read the env-backed default once, fall back to JSON via
+    ``model_registry.get_agent_defaults`` so this still works in
+    one-off CLI scripts that bypass Settings."""
+    try:
+        from core.config import Settings
+
+        return int(Settings().agent_recursion_limit)
+    except Exception:  # noqa: BLE001
+        try:
+            from services.model_registry import get_model_registry
+
+            return int(get_model_registry().get_agent_defaults().get("recursion_limit") or 200)
+        except Exception:  # noqa: BLE001
+            return 200
 
 # Retry policy for the agent's own activities (LLM step, persist,
 # compact). Tool activities use their plugin's policy. Wave 12 D1:
@@ -200,7 +217,7 @@ class AgentWorkflow:
         tools = payload.get("tools") or []
         tool_index: Dict[str, Dict[str, Any]] = {t["name"]: t for t in tools}
 
-        max_iterations = int(payload.get("max_iterations") or DEFAULT_MAX_ITERATIONS)
+        max_iterations = int(payload.get("max_iterations") or _default_max_iterations())
         token_total = 0
         compaction_threshold = payload.get("compaction_threshold")
         thinking_accumulated = ""

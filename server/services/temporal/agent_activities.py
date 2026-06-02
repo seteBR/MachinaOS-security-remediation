@@ -35,7 +35,7 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from temporalio import activity
 
@@ -642,19 +642,39 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
                 prompt = str(out[field])
                 break
 
-    # Read the user toggle for mid-loop tool rebinding once at prep
-    # time. ``AgentWorkflow.run`` reads it from the returned payload and
-    # forwards into per-tool activity payloads so agentBuilder + the
-    # workflow's own rebind branch see the same value.
+    # Read user-overridable globals once at prep time.
+    #   - auto_rebind_tools: forwarded into every per-tool activity so
+    #     agentBuilder's summary + the workflow rebind branch read the
+    #     same value.
+    #   - agent_recursion_limit: applied to the agent loop's hard step
+    #     cap. Per-user override beats env Settings.
     auto_rebind_tools = True
+    settings_recursion_limit: Optional[int] = None
     try:
         user_settings = await database.get_user_settings()
         if user_settings is not None:
             auto_rebind_tools = bool(
                 user_settings.get("auto_rebind_tools_after_canvas_change", True)
             )
+            raw_limit = user_settings.get("agent_recursion_limit")
+            if isinstance(raw_limit, int) and raw_limit > 0:
+                settings_recursion_limit = raw_limit
     except Exception as exc:  # noqa: BLE001 — defensive read
-        activity.logger.debug(f"auto_rebind settings read failed: {exc}")
+        activity.logger.debug(f"user_settings read failed: {exc}")
+
+    # Precedence: per-node parameter > per-user UserSettings > env Settings.
+    node_param_limit = parameters.get("max_iterations")
+    if isinstance(node_param_limit, int) and node_param_limit > 0:
+        effective_recursion_limit = node_param_limit
+    elif settings_recursion_limit is not None:
+        effective_recursion_limit = settings_recursion_limit
+    else:
+        from core.config import Settings as _Settings
+
+        try:
+            effective_recursion_limit = int(_Settings().agent_recursion_limit)
+        except Exception:  # noqa: BLE001 — last-resort fallback
+            effective_recursion_limit = 200
 
     return {
         "node_id": node_id,
@@ -672,7 +692,7 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
         "memory_node_id": memory_node_id,
         "memory_content": memory_content,
         "memory_window_size": memory_window_size,
-        "max_iterations": int(parameters.get("max_iterations") or 50),
+        "max_iterations": effective_recursion_limit,
         "thinking_config": thinking_config_dict,
         "compaction_threshold": compaction_threshold,
         "auto_rebind_tools": auto_rebind_tools,

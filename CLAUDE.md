@@ -20,7 +20,7 @@ This is a React Flow-based workflow automation platform implementing n8n-inspire
 | **[Agent Architecture](./docs-internal/agent_architecture.md)** | How AI Agent and Chat Agent discover skills/tools, inject them into LLM prompts, and execute via the plain-async `_run_agent_loop` |
 | **[Agent Delegation](./docs-internal/agent_delegation.md)** | How memory, parameters, and execution context flow when one AI agent delegates work to another agent connected as a tool |
 | **[Agent Teams](./docs-internal/agent_teams.md)** | Claude SDK Agent Teams pattern - AI Employee and Orchestrator nodes with input-teammates handle for multi-agent coordination |
-| **[Memory Compaction](./docs-internal/memory_compaction.md)** | Token tracking and model-aware memory compaction using native provider APIs (Anthropic, OpenAI) with threshold = 50% of context window |
+| **[Memory Compaction](./docs-internal/memory_compaction.md)** | Token tracking and model-aware memory compaction using native provider APIs (Anthropic, OpenAI). Threshold = `Settings.compaction_ratio` (env `COMPACTION_RATIO`, default 0.8) × model context_length; per-user UserSettings override exposed in Settings tab. |
 | **[Pricing Service](./docs-internal/pricing_service.md)** | Centralized cost tracking for LLM tokens and API services (Twitter, Google Maps) with HTTPX event hooks |
 | **[Proxy Service](./docs-internal/proxy_service.md)** | Residential proxy provider management with template-based URL formatting, health scoring, and transparent HTTP node injection |
 | **[Email Service](./docs-internal/email_service.md)** | IMAP/SMTP integration via Himalaya CLI with EmailService orchestrator, provider presets, custom credential fallback, and polling triggers |
@@ -2360,11 +2360,22 @@ Adding a new node type's output shape: define one Pydantic model, register it in
 ## AI Agent Node Architecture
 
 ### Agent Loop Termination
-The standard agent path (`_run_agent_loop` in `services/ai.py`) routes purely on `response.tool_calls` — no custom iteration counter beyond `max_iterations`. The cap is sourced from `agent.recursion_limit` in `llm_defaults.json` (currently 500 — generous backstop, not the load-bearing termination signal).
+The standard agent path (`_run_agent_loop` in `services/ai.py`) routes purely on `response.tool_calls` — no custom iteration counter beyond `max_iterations`. Resolution precedence (highest → lowest):
 
-The token-based compaction threshold (`agent.compaction.ratio` × context_length, ≈100K for claude-sonnet-4-6) is the real termination signal: `_track_token_usage` runs after each agent turn, and when cumulative tokens cross the threshold it invokes `CompactionService.compact_context` to summarise the transcript before the next turn.
+1. Per-agent-node `parameters.max_iterations` (set on the agent node itself).
+2. Per-user `UserSettings.agent_recursion_limit` (Settings tab, DB-backed).
+3. Env `Settings.agent_recursion_limit` from `AGENT_RECURSION_LIMIT` (default **200**).
+4. JSON fallback `llm_defaults.json:agent.recursion_limit` (legacy SSOT, kept as last-resort).
+
+The token-based compaction threshold (`compaction_ratio` × model context_length, default 80% × ~200K for claude-sonnet-4-6 ≈ 160K) is the real termination signal: `_track_token_usage` runs after each agent turn, and when cumulative tokens cross the threshold it invokes `CompactionService.compact_context` to summarise the transcript before the next turn. Ratio precedence mirrors the recursion limit chain — per-session `custom_threshold` > `UserSettings.compaction_ratio` > `Settings.compaction_ratio` (env `COMPACTION_RATIO`, default 0.8) > JSON fallback.
 
 If the iteration cap is ever hit anyway, `_run_agent_loop` appends a terminal `AIMessage` carrying a truncation note and returns `truncated=True` so `_extract_text_content` returns a usable partial response and the workflow continues — `_track_token_usage` and any post-loop persistence still run.
+
+### Hot rebind after canvas mutation
+
+`_run_agent_loop` accepts a `rebind_from_operations: Callable[[List[Dict]], Awaitable[List[StructuredTool]]]` callback. After each iteration's tool calls return, the loop inspects every result for an `operations` field (workflow_ops batch, today only `agentBuilder` emits this), invokes the callback, extends the local `current_tools` list, and re-calls `chat_model.bind_tools(current_tools)` so the LLM sees the new tools in the NEXT iteration — no Run-stop-Run cycle. The callback is wired by `execute_agent` / `execute_chat_agent` as a closure that calls `_build_tool_from_node` for each `add_node` op with `component_kind == "tool"` OR `usable_as_tool=True` (excluding chat models). Gated by `UserSettings.auto_rebind_tools_after_canvas_change` (default True); when off the closure is `None` and the LLM is told "Available on your next turn" in the operation summary.
+
+For the F4.B Temporal path, the same rebind happens via the `agent.refresh_tools.v1` activity called from `AgentWorkflow.run` between iterations. See [docs-internal/TEMPORAL_ARCHITECTURE.md](./docs-internal/TEMPORAL_ARCHITECTURE.md).
 
 ### Spec-driven component design (Wave 10.D)
 
@@ -3575,26 +3586,26 @@ CompactionService.record() → Save compaction event to DB
 
 ### Native Provider APIs
 
-**Threshold strategy:** per-session `custom_threshold` > model-aware threshold (50% of context window) > global default.
+**Threshold strategy:** per-session `custom_threshold` > per-user `UserSettings.compaction_ratio` × context_length > env `Settings.compaction_ratio` (`COMPACTION_RATIO`, default 0.8) × context_length > JSON `llm_defaults.json` ratio × context_length.
 
 **Anthropic SDK (tool_runner):**
 ```python
-# Model-aware: threshold computed from model's context window
+# Model-aware: threshold = compaction_ratio × model's context window
 compaction_control = svc.anthropic_config(model="claude-opus-4.6", provider="anthropic")
-# Returns: {"enabled": True, "context_token_threshold": 500000}  (50% of 1M)
+# Returns: {"enabled": True, "context_token_threshold": 800000}  (0.8 × 1M with default ratio)
 ```
 
 **Anthropic Messages API:**
 ```python
 api_config = svc.anthropic_api_config(model="claude-sonnet-4.5", provider="anthropic")
 # Returns: {"betas": ["compact-2026-01-12"], "context_management": {"edits": [...]}}
-# Threshold auto-computed from model's context window
+# Threshold auto-computed from model's context window × compaction_ratio.
 ```
 
 **OpenAI:**
 ```python
 openai_config = svc.openai_config(model="gpt-5.2", provider="openai")
-# Returns: {"context_management": {"compact_threshold": 200000}}  (50% of 400K)
+# Returns: {"context_management": {"compact_threshold": 320000}}  (0.8 × 400K with default ratio)
 ```
 
 ### Key Files
@@ -3666,11 +3677,11 @@ from services.compaction import get_compaction_service
 
 svc = get_compaction_service()
 
-# Get model-aware provider config (threshold = 50% of context window)
+# Get model-aware provider config (threshold = compaction_ratio × context window)
 anthropic_cfg = svc.anthropic_config(model="claude-opus-4.6", provider="anthropic")
-# threshold: 500000 (50% of 1M context)
+# threshold: 800000 (0.8 × 1M context with default ratio)
 openai_cfg = svc.openai_config(model="gpt-5.2", provider="openai")
-# threshold: 200000 (50% of 400K context)
+# threshold: 320000 (0.8 × 400K context with default ratio)
 
 # Or override with explicit threshold
 anthropic_cfg = svc.anthropic_config(threshold=100000)
@@ -3748,24 +3759,33 @@ pricing_info = pricing.get_pricing("anthropic", "claude-3-5-sonnet-20241022")
 
 ### Configuration
 
-The compaction threshold is fully JSON-driven via `server/config/llm_defaults.json`:
+The compaction threshold + agent recursion limit are env-driven via `.env` (read by `core.config.Settings`); `server/config/llm_defaults.json` is the legacy SSOT and acts as last-resort fallback when Settings can't load:
+
+```bash
+# .env (mirrors .env.template)
+COMPACTION_ENABLED=true        # Enable/disable compaction globally
+COMPACTION_RATIO=0.8           # Fraction of context window that triggers compaction (0.05-0.99)
+AGENT_RECURSION_LIMIT=200      # Agent loop hard step cap (>=1)
+```
 
 ```json
+// server/config/llm_defaults.json — last-resort fallback only
 "agent": {
-  "recursion_limit": 500,
+  "recursion_limit": 200,
   "default_temperature": 0.7,
-  "compaction": { "ratio": 0.5 }
+  "compaction": { "ratio": 0.8 }
 }
 ```
 
-Effective threshold = `providers.<provider>.context_length.<model>` × `agent.compaction.ratio` (e.g. claude-sonnet-4-6 → 200K × 0.5 = 100K input tokens). When model/provider are unknown, `model_registry.get_context_length` falls through to the provider's `_default` entry in the same JSON — never a Python constant.
+Effective threshold = `providers.<provider>.context_length.<model>` × `compaction_ratio` (e.g. claude-sonnet-4-6 → 200K × 0.8 = 160K input tokens). When model/provider are unknown, `model_registry.get_context_length` falls through to the provider's `_default` entry in the same JSON.
 
-Only the global on/off toggle stays in `.env`:
-```bash
-COMPACTION_ENABLED=true       # Enable/disable compaction globally
-```
+**Threshold priority** (highest → lowest):
+1. Per-session `SessionTokenState.custom_threshold` (WebSocket override).
+2. Per-user `UserSettings.compaction_ratio` × context_length (Settings tab override).
+3. Env `Settings.compaction_ratio` × context_length.
+4. JSON `llm_defaults.json:agent.compaction.ratio` × context_length.
 
-**Threshold priority:** per-session `custom_threshold` > model-aware (`context_length × ratio`).
+Same precedence chain applies to `recursion_limit`: per-node `parameters.max_iterations` > `UserSettings.agent_recursion_limit` > `Settings.agent_recursion_limit` > JSON.
 
 ### Client-Side Compaction
 
@@ -3849,7 +3869,7 @@ compaction_svc.set_ai_service(container.ai_service())
 - **5-Section Summary**: Follows Claude Code's structured summary format for continuity
 - **Automatic Triggering**: Compaction triggered in `_track_token_usage()` when threshold exceeded
 - **Per-Session State**: Each memory session has independent token tracking and thresholds
-- **Model-Aware Threshold**: 50% of model's context window (e.g., 500K for Claude Opus 4.6 with 1M context, 200K for GPT-5.2 with 400K context). Falls back to global `COMPACTION_THRESHOLD` when model info unavailable. Per-session `custom_threshold` always takes priority.
+- **Model-Aware Threshold**: `compaction_ratio` × model's context window. Default ratio 0.8 (env `COMPACTION_RATIO`, was 0.5 pre-2026.06). E.g. 800K for Claude Opus 4.6 with 1M context, 320K for GPT-5.2 with 400K context. Falls back to JSON `llm_defaults.json:agent.compaction.ratio` when Settings can't load. Per-session `custom_threshold` > per-user `UserSettings.compaction_ratio` > env Settings.
 - **Singleton Pattern**: Service accessible via `get_compaction_service()`
 
 ## API Cost Tracking

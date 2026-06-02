@@ -241,10 +241,15 @@ class Settings(BaseSettings):
     # silently allows. Override to "0.0.0.0" for container deployments.
     whatsapp_bind_host: str = Field(default="localhost", env="WHATSAPP_BIND_HOST")
 
-    # Compaction Configuration. The threshold is fully model-aware and
-    # sourced from server/config/llm_defaults.json (context_length ×
-    # agent.compaction.ratio). Only the global on/off toggle remains here.
+    # Compaction Configuration. Threshold = model context_length ×
+    # compaction_ratio. Per-user UserSettings row overrides at runtime.
     compaction_enabled: bool = Field(default=True, env="COMPACTION_ENABLED")
+    compaction_ratio: float = Field(default=0.8, env="COMPACTION_RATIO", ge=0.05, le=0.99)
+
+    # Agent loop hard step cap. Per-user UserSettings row overrides
+    # at runtime; per-agent-node ``parameters.max_iterations`` is the
+    # innermost override.
+    agent_recursion_limit: int = Field(default=200, env="AGENT_RECURSION_LIMIT", ge=1)
 
     # Gunicorn Configuration (for production deployment)
     gunicorn_timeout: int = Field(default=120, env="GUNICORN_TIMEOUT", ge=30)
