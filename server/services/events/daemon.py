@@ -70,9 +70,16 @@ class DaemonEventSource(EventSource):
         return None
 
     def workdir(self) -> Path:
+        """Subprocess cwd for the supervised daemon. Default returns the
+        shared :func:`core.paths.daemons_dir` root — most daemons
+        (``stripe listen``, future plugins) don't write anything to
+        their cwd, so giving each a per-namespace subdir just leaves
+        empty directories behind. Override in a subclass that genuinely
+        needs scratch space (and ``mkdir`` the per-namespace tree
+        yourself)."""
         from core.paths import daemons_dir
 
-        cwd = daemons_dir() / self.workflow_namespace
+        cwd = daemons_dir()
         cwd.mkdir(parents=True, exist_ok=True)
         return cwd
 

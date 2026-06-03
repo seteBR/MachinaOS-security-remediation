@@ -14,45 +14,53 @@ ngrok's ``~/.ngrok2/``, and claude code's own ``~/.claude/``.
 
 State layout under ``~/.machina/`` (flat, no redundant nesting):
 
-  - ``~/.machina/claude/``       OAuth state for spawned claude subprocesses
-  - ``~/.machina/workspaces/``   per-workflow scratch dirs
+  - ``~/.machina/claude/``       Claude Code's CLAUDE_CONFIG_DIR
+                                  state + ``claude/npm/`` binary install
+  - ``~/.machina/workspaces/``   per-workflow scratch dirs (one
+                                  subdir per ``Workflow.slug``)
+  - ``~/.machina/daemons/``      cwd root for supervised event-source
+                                  daemons (``stripe listen``, …);
+                                  shared across all daemons by
+                                  default to avoid empty per-namespace
+                                  subdirs
+  - ``~/.machina/packages/``     downloaded service binaries
+                                  (``stripe``, ``browser``)
   - ``~/.machina/whatsapp/``     persistent WhatsApp session DB
-  - ``~/.machina/temporal/``     temporal-server cwd + SQLite db when persist=true
   - ``~/.machina/credentials.db``  Fernet-encrypted secrets
   - ``~/.machina/workflow.db``     SQLite app DB
+  - ``~/.machina/temporal.db``     Temporal server SQLite (flat under
+                                  DATA_DIR like the other ``*.db``)
 
 Binaries that MachinaOs downloads on first use (Stripe CLI,
-``agent-browser``'s npm tree) live separately, under the
-OS-conventional cache dir (see :func:`packages_dir`). Resolved via
-:func:`platformdirs.user_cache_path` — the standard cross-platform
-resolver every XDG-aware tool already uses:
+``agent-browser``'s npm tree, ``@anthropic-ai/claude-code``) all
+live under ``<DATA_DIR>/`` — the same operator-visible tree as
+auth state, workspaces, and daemon cwds:
 
-  - Linux:   ``~/.cache/MachinaOs/<service>/``
-  - macOS:   ``~/Library/Caches/MachinaOs/<service>/``
-  - Windows: ``%LOCALAPPDATA%\\MachinaOs\\Cache\\<service>\\``
+  - Stripe CLI:     ``<DATA_DIR>/packages/stripe/bin/stripe[.exe]``
+  - agent-browser:  ``<DATA_DIR>/packages/browser/npm/``
+  - Claude Code:    ``<DATA_DIR>/claude/npm/`` (sibling of
+    ``CLAUDE_CONFIG_DIR`` at ``<DATA_DIR>/claude/`` — see
+    :func:`claude_npm_dir`)
 
-Claude Code is the deliberate exception: its npm tree lives at
-``<DATA_DIR>/claude/npm/`` (see :func:`claude_npm_dir`) alongside the
-``CLAUDE_CONFIG_DIR`` auth state at ``<DATA_DIR>/claude/``. Keeping
-the entire claude footprint (binary + tokens + IDE lockfiles + session
-JSONL) under one operator-visible subtree means a single
-``mv ~/.machina/claude /backup`` carries everything claude needs;
-every operation requires both anyway, so the binary-vs-state split
-that's useful for Stripe / browser hurts here. Supervised
-event-source daemons (``stripe listen``, future plugins) keep their
-cwd under :func:`daemons_dir` — a sibling of :func:`workspaces_dir`
-so per-workflow scratch (workspaces) is never mixed with framework
-state (daemons).
+Supervised event-source daemons (``stripe listen``, future plugins)
+keep their cwd under :func:`daemons_dir` (``<DATA_DIR>/daemons/
+<namespace>/``) — a sibling of :func:`workspaces_dir` so per-workflow
+scratch (workspaces) is never mixed with framework state (daemons).
 
-Out of scope here: the downloaded Temporal CLI binary (pooch cache
-under :func:`packages_dir`, see ``services/temporal/_install.py``),
-Himalaya (``cargo``/``brew`` system install), and npm packages
-declared in ``package.json`` whose binaries pnpm manages directly
-under ``node_modules/`` (e.g. ``whatsapp-rpc``'s ``edgymeow``).
+The split that pre-fix routed binaries through
+:func:`platformdirs.user_cache_path` (``~/.cache/MachinaOs/`` etc.)
+turned out to confuse operators ("not local") without buying anything
+in practice — both ``machina clean`` and a manual cache wipe are
+operator-driven anyway. Single subtree wins for inspection,
+backup, and reasoning about disk usage.
 
-The split keeps ``machina clean`` semantics clear: wiping
-:func:`packages_dir` forces a fresh redownload of MachinaOs-managed
-binaries without touching auth tokens, session DBs, or workspaces.
+The Temporal CLI binary lands at ``<DATA_DIR>/packages/temporal/``
+too (pooch-managed; see ``services/temporal/_install.py``).
+
+Out of scope: Himalaya (``cargo`` / ``brew`` system install) and
+npm packages declared in ``package.json`` whose binaries pnpm
+manages directly under ``node_modules/`` (e.g. ``whatsapp-rpc``'s
+``edgymeow``).
 
 Shipped example workflows live at ``<repo>/.machina/workflows/`` —
 git-tracked seed JSONs auto-imported on first launch by
@@ -88,8 +96,6 @@ contents manually:
 from __future__ import annotations
 
 from pathlib import Path
-
-import platformdirs
 
 from core.logging import get_logger
 
@@ -155,39 +161,37 @@ def machina_root() -> Path:
 
 
 def packages_dir() -> Path:
-    """OS-conventional cache root for binaries we download on first use.
+    """Root for binaries MachinaOs downloads on first use.
 
-    Delegates to :func:`platformdirs.user_cache_path` — the standard
-    cross-platform resolver (used internally by ``pooch.os_cache``,
-    which is how the Temporal binary downloader already finds its
-    cache). Resolves to:
+    Resolves to ``<DATA_DIR>/packages/`` — under the same operator-
+    visible tree as auth state, workspaces, and daemon cwds. One
+    ``mv ~/.machina`` carries every MachinaOs-managed file together,
+    and one glance at ``~/.machina/`` shows the operator everything
+    the app owns.
 
-      - Linux:   ``$XDG_CACHE_HOME/MachinaOs/`` or ``~/.cache/MachinaOs/``
-      - macOS:   ``~/Library/Caches/MachinaOs/``
-      - Windows: ``%LOCALAPPDATA%\\MachinaOs\\Cache``
-
-    Why OS cache (not :func:`machina_root`): downloaded binaries are
-    pure cache — wiping them forces a clean redownload, never
-    drops auth tokens or session state. The OS-conventional cache
-    location is the standard place tools like Stripe CLI, Temporal,
-    and Claude Code expect their binaries to land; matches every
-    XDG-aware system installer.
+    Pre-fix this used :func:`platformdirs.user_cache_path` so binaries
+    landed at ``~/.cache/MachinaOs/`` (Linux) / ``~/Library/Caches/
+    MachinaOs/`` (macOS) / ``%LOCALAPPDATA%\\MachinaOs\\Cache\\``
+    (Windows). Operators reported it as "not local" — the split
+    between binaries (OS cache) and state (DATA_DIR) was confusing
+    and the OS-cache rationale (machina clean keeps auth, cache
+    wipe drops binaries) didn't matter in practice since both wipe
+    operations are operator-driven anyway.
 
     See :func:`package_dir` for the per-service accessor.
     """
-    return platformdirs.user_cache_path("MachinaOs", appauthor=False)
+    return data_path("packages")
 
 
 def package_dir(name: str) -> Path:
     """Per-service install folder under :func:`packages_dir`.
 
     Canonical layout — each plugin's installer (``ensure_stripe_cli``,
-    ``ensure_temporal_binaries``, ``ensure_local_claude_install``, …)
+    ``ensure_temporal_binaries``, ``agent_browser_binary_path``, …)
     drops its tree here. Examples::
 
-        package_dir("stripe")   -> ~/.cache/MachinaOs/stripe/        (Linux)
-        package_dir("temporal") -> ~/Library/Caches/MachinaOs/temporal/  (macOS)
-        package_dir("claude")   -> %LOCALAPPDATA%\\MachinaOs\\Cache\\claude\\  (Windows)
+        package_dir("stripe")   -> ~/.machina/packages/stripe/
+        package_dir("browser")  -> ~/.machina/packages/browser/
 
     Caller is responsible for ``mkdir(parents=True, exist_ok=True)``
     so this helper stays side-effect-free and safe to call during

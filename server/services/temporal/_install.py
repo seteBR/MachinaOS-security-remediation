@@ -4,11 +4,20 @@ Downloads the official ``temporal`` CLI from the URL documented at
 https://docs.temporal.io/develop/python/set-up-your-local-python
 (``temporal.download/cli/archive/latest?platform=<os>&arch=<arch>``).
 
-Pooch handles XDG-aware cross-platform caching and archive extraction
-(zip on Windows, tar.gz elsewhere). The ``latest`` URL rotates as new
-CLI versions ship, so the download is unverified (TLS gives transport
-integrity); pooch caches by local filename, not URL contents, so
-re-runs after the first fetch are instant cache hits.
+The binary lands at ``<DATA_DIR>/packages/temporal/`` — the same root
+that holds the Stripe and agent-browser binaries (see
+:func:`core.paths.package_dir`). Pre-fix this used
+``pooch.os_cache("machinaos-temporal")`` which landed the binary
+under a separate ``%LOCALAPPDATA%\\machinaos-temporal\\Cache\\``
+(Windows) / ``~/.cache/machinaos-temporal/`` (Linux) tree outside
+the operator-visible ``~/.machina/`` root.
+
+Pooch still drives archive extraction (zip on Windows, tar.gz
+elsewhere); we just point its cache at our DATA_DIR-rooted package
+dir. The ``latest`` URL rotates as new CLI versions ship, so the
+download is unverified (TLS gives transport integrity); pooch caches
+by local filename, not URL contents, so re-runs after the first
+fetch are instant cache hits.
 
 The downloaded ``temporal`` CLI powers ``temporal server start-dev``
 (the SQLite/in-memory dev server) and ad-hoc workflow / operator
@@ -45,9 +54,21 @@ _CLI_PLATFORM_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("Windows", "ARM64"): ("windows", "arm64"),
 }
 
-# pooch cache namespace. Pooch's own cache layout includes the asset
-# URL so versions don't collide.
-_CACHE_NAMESPACE = "machinaos-temporal"
+def _cache_dir() -> Path:
+    """Per-service install dir under :func:`core.paths.package_dir`.
+
+    Lands at ``<DATA_DIR>/packages/temporal/`` — same root that
+    holds ``stripe`` and ``browser`` binaries. Pre-fix this used
+    ``pooch.os_cache("machinaos-temporal")`` which landed the binary
+    at ``%LOCALAPPDATA%\\machinaos-temporal\\Cache\\`` (Windows) /
+    ``~/.cache/machinaos-temporal/`` (Linux) — outside the
+    operator-visible ``~/.machina/`` tree.
+    """
+    from core.paths import package_dir
+
+    p = package_dir("temporal")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 _cached: dict[str, Path] | None = None
@@ -104,7 +125,7 @@ def _fetch_cli_sync() -> Path:
     extracted = pooch.retrieve(
         url=url,
         known_hash=None,
-        path=pooch.os_cache(_CACHE_NAMESPACE),
+        path=_cache_dir(),
         fname=fname,
         processor=processor,
         progressbar=True,

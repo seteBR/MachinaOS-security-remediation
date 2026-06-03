@@ -146,23 +146,37 @@ class ProcessService:
         argv[0] = resolved
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         from core.config import Settings
+        from core.paths import daemons_dir
 
         workspace_base = Path(Settings().workspace_base_resolved).resolve()
+        daemon_base = daemons_dir().resolve()
 
         if not working_directory:
             working_directory = str(workspace_base / "default")
             os.makedirs(working_directory, exist_ok=True)
         cwd = working_directory
 
-        # Guardrail: cwd must resolve inside workspace base
-        if not Path(cwd).resolve().is_relative_to(workspace_base):
+        # Guardrail: cwd must resolve inside one of the MachinaOs-controlled
+        # state roots — workspaces (per-workflow scratch for workflow nodes
+        # like processManager / code executors) OR daemons (framework event
+        # sources like `stripe listen`). Both are siblings under DATA_DIR.
+        cwd_resolved = Path(cwd).resolve()
+        is_under_workspace = cwd_resolved.is_relative_to(workspace_base)
+        is_under_daemons = cwd_resolved.is_relative_to(daemon_base)
+        if not (is_under_workspace or is_under_daemons):
             return {
                 "success": False,
-                "error": f"Working directory must be inside workspace ({workspace_base}).",
+                "error": (
+                    f"Working directory must be inside workspace ({workspace_base}) "
+                    f"or daemons ({daemon_base})."
+                ),
             }
 
-        # Create log directory inside the workflow workspace
-        # Layout: {workspace}/.processes/{name}/stdout.log, stderr.log
+        # Per-process log directory. For workflow-scoped processes this
+        # lands at ``{workspace}/.processes/{name}/`` (operator can find
+        # logs alongside the workflow's other files); for daemons it
+        # lands at ``{daemons_dir}/.processes/{name}/``. Either way it
+        # holds stdout.log + stderr.log.
         log_dir = Path(cwd) / ".processes" / name
         log_dir.mkdir(parents=True, exist_ok=True)
         # Clear old logs if restarting

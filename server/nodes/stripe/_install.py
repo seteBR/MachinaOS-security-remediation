@@ -1,19 +1,17 @@
 """Stripe CLI auto-installer.
 
 On first use, downloads the official Stripe CLI binary from GitHub
-releases (https://github.com/stripe/stripe-cli/releases) and caches
-it under :func:`core.paths.package_dir` (``<OS cache>/MachinaOs/stripe/
-bin/stripe[.exe]``). A system install on PATH (brew / scoop / apt /
-direct binary) is preferred — the download path only fires when no
-system binary is found.
+releases (https://github.com/stripe/stripe-cli/releases) and stores
+it at ``<DATA_DIR>/packages/stripe/bin/stripe[.exe]`` (resolved via
+:func:`core.paths.package_dir`). A system install on PATH (brew /
+scoop / apt / direct binary) is preferred — the download path only
+fires when no system binary is found.
 
-Note: the cache directory above is the *binary* install location and
-is separate from the ``stripe listen`` daemon's working directory,
-which lives at ``<DATA_DIR>/daemons/_stripe/`` (see
-:func:`core.paths.daemons_dir`). The two were not always separate —
-prior to the daemon-cwd cleanup, the daemon ran from
-``<DATA_DIR>/workspaces/_stripe/`` and polluted per-workflow scratch
-space with framework state.
+The ``stripe listen`` daemon's working directory is a separate
+location at ``<DATA_DIR>/daemons/_stripe/`` (see
+:func:`core.paths.daemons_dir`). The binary install and the daemon
+cwd are intentionally split — binaries are install state, daemon
+cwds hold runtime log/state files.
 
 Pin a version here when bumping; pre-built archives are signed by
 Stripe and served over GitHub's CDN.
