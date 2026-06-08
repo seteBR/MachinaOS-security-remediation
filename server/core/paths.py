@@ -12,55 +12,57 @@ same machine share state instead of each carrying its own copy. The
 ``~/.machina/`` convention matches Stripe's ``~/.config/stripe/``,
 ngrok's ``~/.ngrok2/``, and claude code's own ``~/.claude/``.
 
-State layout under ``~/.machina/`` (flat, no redundant nesting):
+Generic subtree layout under ``<DATA_DIR>/`` (= ``~/.machina/`` by
+default). The module exports only generic helpers — plugin-specific
+subpaths (``<DATA_DIR>/claude/``, ``<DATA_DIR>/packages/stripe/bin/``,
+etc.) are composed at the plugin's call site, NOT hardcoded here.
+That keeps this module from growing one helper per package:
 
-  - ``~/.machina/claude/``       Claude Code's CLAUDE_CONFIG_DIR
-                                  state + ``claude/npm/`` binary install
-  - ``~/.machina/workspaces/``   per-workflow scratch dirs (one
-                                  subdir per ``Workflow.slug``)
-  - ``~/.machina/daemons/``      cwd root for supervised event-source
-                                  daemons (``stripe listen``, …);
-                                  shared across all daemons by
-                                  default to avoid empty per-namespace
-                                  subdirs
-  - ``~/.machina/packages/``     downloaded service binaries
-                                  (``stripe``, ``browser``)
-  - ``~/.machina/whatsapp/``     persistent WhatsApp session DB
-  - ``~/.machina/credentials.db``  Fernet-encrypted secrets
-  - ``~/.machina/workflow.db``     SQLite app DB
-  - ``~/.machina/temporal.db``     Temporal server SQLite (flat under
-                                  DATA_DIR like the other ``*.db``)
+  - :func:`data_path`      ``<DATA_DIR>/<subpath>`` — universal state-path
+                            primitive every plugin composes against
+  - :func:`packages_dir`   ``<DATA_DIR>/packages/`` — downloaded-binary root
+  - :func:`package_dir`    ``<DATA_DIR>/packages/<name>/`` — per-service install
+                            slot (callers compose further, e.g.
+                            ``package_dir("claude") / "npm"``)
+  - :func:`daemons_dir`    ``<DATA_DIR>/daemons/`` — supervised daemon cwds
+  - :func:`workspaces_dir` ``<DATA_DIR>/workspaces/`` — per-workflow scratch
+  - :func:`workspace_dir`  ``<DATA_DIR>/workspaces/<workflow_id>/``
+  - :func:`example_workflows_dir` git-tracked seed JSONs at
+                            ``<repo>/.machina/workflows/`` (NOT under DATA_DIR)
 
-Binaries that MachinaOs downloads on first use (Stripe CLI,
-``agent-browser``'s npm tree, ``@anthropic-ai/claude-code``) all
-live under ``<DATA_DIR>/`` — the same operator-visible tree as
-auth state, workspaces, and daemon cwds:
+Reference layout once typical plugins compose against the helpers
+above (Wave 14):
 
-  - Stripe CLI:     ``<DATA_DIR>/packages/stripe/bin/stripe[.exe]``
-  - agent-browser:  ``<DATA_DIR>/packages/browser/npm/``
-  - Claude Code:    ``<DATA_DIR>/claude/npm/`` (sibling of
-    ``CLAUDE_CONFIG_DIR`` at ``<DATA_DIR>/claude/`` — see
-    :func:`claude_npm_dir`)
+  - ``<DATA_DIR>/claude/``           Claude Code auth state (CLAUDE_CONFIG_DIR)
+  - ``<DATA_DIR>/packages/``         Single shared MachinaOs install
+    root. Holds one ``package.json`` + ``package-lock.json`` +
+    ``node_modules/`` covering every MachinaOs-managed npm package
+    (``@anthropic-ai/claude-code``, ``edgymeow``, ``agent-browser``).
+    Each plugin's ``_install.py`` runs
+    ``npm install <pkg> --prefix <packages_dir>`` to extend the tree
+    idempotently — npm itself manages the dep graph.
+  - ``<DATA_DIR>/packages/stripe/``    Stripe CLI binary (non-npm)
+  - ``<DATA_DIR>/packages/temporal/``  Temporal CLI binary (non-npm,
+                                        pooch-managed)
+  - ``<DATA_DIR>/workspaces/<slug>/`` per-workflow scratch
+  - ``<DATA_DIR>/daemons/``           supervised daemon cwds (shared root)
+  - ``<DATA_DIR>/whatsapp/``          persistent WhatsApp session DB
+  - ``<DATA_DIR>/credentials.db``     Fernet-encrypted secrets
+  - ``<DATA_DIR>/workflow.db``        SQLite app DB
+  - ``<DATA_DIR>/temporal.db``        Temporal server SQLite
 
-Supervised event-source daemons (``stripe listen``, future plugins)
-keep their cwd under :func:`daemons_dir` (``<DATA_DIR>/daemons/
-<namespace>/``) — a sibling of :func:`workspaces_dir` so per-workflow
-scratch (workspaces) is never mixed with framework state (daemons).
-
-The split that pre-fix routed binaries through
+The pre-fix layout split binaries under
 :func:`platformdirs.user_cache_path` (``~/.cache/MachinaOs/`` etc.)
-turned out to confuse operators ("not local") without buying anything
-in practice — both ``machina clean`` and a manual cache wipe are
-operator-driven anyway. Single subtree wins for inspection,
-backup, and reasoning about disk usage.
+and Temporal under its own ``pooch.os_cache("machinaos-temporal")``
+namespace — operators reported both as "not local". Daemon cwds
+also used to live under ``workspaces/_<namespace>/`` and polluted
+per-workflow scratch with framework state. Consolidating everything
+under ``<DATA_DIR>/`` means a single ``mv ~/.machina /backup``
+carries the entire MachinaOs footprint.
 
-The Temporal CLI binary lands at ``<DATA_DIR>/packages/temporal/``
-too (pooch-managed; see ``services/temporal/_install.py``).
-
-Out of scope: Himalaya (``cargo`` / ``brew`` system install) and
-npm packages declared in ``package.json`` whose binaries pnpm
-manages directly under ``node_modules/`` (e.g. ``whatsapp-rpc``'s
-``edgymeow``).
+Out of scope: globally-installed binaries (Himalaya — system
+package manager) and npm `package.json` deps managed by pnpm (none
+remain after the WhatsApp migration).
 
 Shipped example workflows live at ``<repo>/.machina/workflows/`` —
 git-tracked seed JSONs auto-imported on first launch by
@@ -70,10 +72,11 @@ gitignored. ``example_workflows_dir()`` resolves to that fixed seed
 location regardless of ``DATA_DIR`` — operators do NOT relocate the
 shipped seeds.
 
-Importable as ``from core.paths import claude_config_dir, workspace_dir, …``
-so consumers never have to recompute the root themselves (the old
-``Path(__file__).resolve().parents[N] / "data" / ...`` idiom was
-duplicated across 4+ files and brittle to file moves).
+Importable as ``from core.paths import data_path, package_dir,
+workspace_dir, …`` so consumers never have to recompute the root
+themselves (the old ``Path(__file__).resolve().parents[N] / "data"
+/ ...`` idiom was duplicated across 4+ files and brittle to file
+moves).
 
 DATA_DIR resolution rules (see :func:`machina_root`):
 
@@ -200,33 +203,6 @@ def package_dir(name: str) -> Path:
     return packages_dir() / name
 
 
-def claude_config_dir() -> Path:
-    """``CLAUDE_CONFIG_DIR`` for spawned claude subprocesses.
-
-    Resolves to ``<DATA_DIR>/claude/``. Single source of truth for
-    the plugin's ``MACHINA_CLAUDE_DIR`` constant (re-exported from
-    ``nodes/agent/claude_code_agent/_oauth.py`` for back-compat).
-    Stores OAuth tokens + session state — distinct from
-    :func:`claude_npm_dir`, which holds the downloaded CLI binary.
-    """
-    return data_path("claude")
-
-
-def claude_npm_dir() -> Path:
-    """Where ``npm install @anthropic-ai/claude-code`` lands.
-
-    Resolves to ``<DATA_DIR>/claude/npm/`` — sibling of
-    :func:`claude_config_dir` (the OAuth state dir, exposed to the
-    CLI via ``CLAUDE_CONFIG_DIR``). Keeps the entire claude footprint
-    (binary + auth state + IDE lockfiles + session JSONL) under one
-    operator-visible tree, so a single ``mv ~/.machina/claude /backup``
-    carries everything claude needs. Deliberate exception to the
-    binary-vs-state split documented on :func:`packages_dir` — see
-    the module docstring.
-    """
-    return data_path("claude") / "npm"
-
-
 def daemons_dir() -> Path:
     """Root for supervised event-source daemons (``stripe listen``, etc.).
 
@@ -281,41 +257,14 @@ def example_workflows_dir() -> Path:
     return project_root() / ".machina" / "workflows"
 
 
-def whatsapp_dir() -> Path:
-    """Persistent WhatsApp session DB / state dir.
-
-    Routes through ``data_path(Settings().whatsapp_data_subdir)``
-    (env var ``WHATSAPP_DATA_SUBDIR``) so the WhatsApp tree moves
-    with ``DATA_DIR``.
-    """
-    from core.config import Settings
-
-    return data_path(Settings().whatsapp_data_subdir)
-
-
-def credentials_db_path() -> Path:
-    """Encrypted credentials store (Fernet + PBKDF2).
-
-    Routes through ``data_path(Settings().credentials_db_path)`` (env
-    var ``CREDENTIALS_DB_PATH``) so the DB moves with ``DATA_DIR``.
-    """
-    from core.config import Settings
-
-    return data_path(Settings().credentials_db_path)
-
-
 __all__ = [
     "project_root",
     "machina_root",
     "data_path",
     "packages_dir",
     "package_dir",
-    "claude_config_dir",
-    "claude_npm_dir",
     "daemons_dir",
     "workspaces_dir",
     "workspace_dir",
     "example_workflows_dir",
-    "whatsapp_dir",
-    "credentials_db_path",
 ]

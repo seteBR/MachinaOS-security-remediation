@@ -181,7 +181,15 @@ async def handle_stripe_login(data: Dict[str, Any], websocket: WebSocket) -> Dic
         info.get("verification_code"),
         _LOGIN_TIMEOUT_SECONDS,
     )
-    asyncio.create_task(_complete_login(binary, complete_url))
+    # Snapshot the existing config.toml mtime BEFORE step 2 spawns so
+    # ``_complete_login`` can tell whether THIS attempt wrote new
+    # credentials, vs. a stale file from a previous login. Without
+    # this, ``is_logged_in()`` returns True for any non-empty config —
+    # even if the current browser flow was never completed — and the
+    # handler falsely reports "auth successful".
+    cfg = stripe_config_path()
+    pre_mtime = cfg.stat().st_mtime if cfg.exists() else 0.0
+    asyncio.create_task(_complete_login(binary, complete_url, pre_mtime))
     return {
         "success": True,
         "url": url,
@@ -189,12 +197,30 @@ async def handle_stripe_login(data: Dict[str, Any], websocket: WebSocket) -> Dic
     }
 
 
-async def _complete_login(binary: str, next_step: str) -> None:
+async def _complete_login(binary: str, next_step: str, pre_mtime: float) -> None:
     """Step 2: block on ``stripe login --complete`` until the user
     authorises (or the 10-min timeout fires). On success, write the
     same kind of marker the Google / Twitter callbacks write so the
     catalogue's stored-check flips, then auto-start the listen
-    daemon and trigger the generic catalogue refresh on the frontend."""
+    daemon and trigger the generic catalogue refresh on the frontend.
+
+    ``pre_mtime`` is the mtime of ``config.toml`` (0.0 if absent)
+    captured at step 1 — the only reliable signal of whether THIS
+    flow wrote fresh credentials. Both signals taken in isolation
+    lie:
+
+    * ``result.success`` — ``stripe login --complete`` is known to
+      exit 1 with ``stderr='exceeded max attempts'`` even after a
+      successful write. Don't trust the exit code alone.
+    * ``is_logged_in()`` — only checks for the presence of
+      ``_api_key`` in the config file, which returns True for any
+      prior login (even on a fresh attempt the user never finished).
+      Don't trust on-disk presence alone.
+
+    Mtime comparison is the disambiguator: if the file's mtime is
+    strictly greater than ``pre_mtime``, the CLI wrote it during
+    THIS step 2, so the auth genuinely succeeded.
+    """
     logger.info("[Stripe] login step 2/2 polling for browser confirmation")
     try:
         result = await run_cli_command(
@@ -208,24 +234,41 @@ async def _complete_login(binary: str, next_step: str) -> None:
         logger.exception("[Stripe] login step 2 raised unexpectedly: %s", e)
         return
 
-    if not result.get("success"):
-        logger.warning(
-            "[Stripe] login step 2 CLI failure: %s | stderr=%r",
-            result.get("error"),
-            (result.get("stderr") or "")[:300],
-        )
+    cli_success = bool(result.get("success"))
+    cfg = stripe_config_path()
+    post_mtime = cfg.stat().st_mtime if cfg.exists() else 0.0
+    fresh_credentials_written = post_mtime > pre_mtime and is_logged_in()
 
-    if not is_logged_in():
+    if not fresh_credentials_written:
+        if not cli_success:
+            logger.warning(
+                "[Stripe] login step 2 CLI failure: %s | stderr=%r",
+                result.get("error"),
+                (result.get("stderr") or "")[:300],
+            )
         logger.warning(
-            "[Stripe] step 2 finished but ``is_logged_in()`` is False — config file %s missing/empty; "
-            "user likely closed the browser before authorising",
-            stripe_config_path(),
+            "[Stripe] step 2 finished but no fresh credentials written to %s "
+            "(pre_mtime=%.3f post_mtime=%.3f) — user likely closed the browser "
+            "before authorising",
+            cfg,
+            pre_mtime,
+            post_mtime,
         )
         return
 
+    # Fresh credentials present. ``cli_success`` may still be False
+    # because of Stripe's "exceeded max attempts" stderr quirk — the
+    # mtime advance is the ground truth.
+    if not cli_success:
+        logger.debug(
+            "[Stripe] step 2 CLI exited non-zero but credentials WERE written — "
+            "treating as success (known Stripe CLI stderr quirk). stderr=%r",
+            (result.get("stderr") or "")[:300],
+        )
+
     logger.info(
         "[Stripe] auth successful — credentials written to %s; persisting catalogue marker + starting listen daemon",
-        stripe_config_path(),
+        cfg,
     )
     await _mark_logged_in()
     logger.info("[Stripe] catalogue marker token persisted (auth_service.store_oauth_tokens)")

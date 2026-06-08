@@ -1,9 +1,12 @@
-"""``agent-browser`` local install — mirrors ``claude_binary_path``.
+"""``agent-browser`` local install — landed in the shared MachinaOs
+npm tree at :func:`core.paths.packages_dir` (``<DATA_DIR>/packages/``).
 
-Same pattern as ``nodes/agent/claude_code_agent/_oauth.py``: ``npm
-install <pkg> --prefix <package_dir("browser")/npm>`` on first call,
-return the resolved binary path. No coupling to the workspace
-``package.json``.
+All MachinaOs-managed npm packages (``agent-browser``,
+``@anthropic-ai/claude-code``, ``edgymeow``) live under a single
+``<packages_dir>/node_modules/`` so npm manages them with one
+``package.json`` + ``package-lock.json`` rather than us carving out
+per-service install trees. ``npm install <pkg> --prefix <packages_dir>``
+extends the shared tree idempotently.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import sys
 from typing import Optional
 
 from core.logging import get_logger
-from core.paths import package_dir
+from core.paths import packages_dir
 
 logger = get_logger(__name__)
 
@@ -23,9 +26,9 @@ _NPM_SPEC = "agent-browser@latest"
 
 def agent_browser_binary_path() -> Optional[str]:
     """Return path to the agent-browser CLI, installing on miss."""
-    npm_root = package_dir("browser") / "npm"
+    root = packages_dir()
     bin_name = "agent-browser.cmd" if sys.platform == "win32" else "agent-browser"
-    bin_path = npm_root / "node_modules" / ".bin" / bin_name
+    bin_path = root / "node_modules" / ".bin" / bin_name
 
     if bin_path.exists():
         return str(bin_path)
@@ -35,10 +38,10 @@ def agent_browser_binary_path() -> Optional[str]:
         logger.warning("[browser] npm not on PATH; cannot install %s", _NPM_SPEC)
         return None
 
-    logger.info("[browser] installing %s into %s", _NPM_SPEC, npm_root)
-    npm_root.mkdir(parents=True, exist_ok=True)
+    logger.info("[browser] installing %s into shared tree %s", _NPM_SPEC, root)
+    root.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
-        [npm_cmd, "install", _NPM_SPEC, "--prefix", str(npm_root), "--no-audit", "--no-fund"],
+        [npm_cmd, "install", _NPM_SPEC, "--prefix", str(root), "--no-audit", "--no-fund"],
         capture_output=True,
         text=True,
     )

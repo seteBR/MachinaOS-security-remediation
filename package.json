@@ -94,8 +94,7 @@
     "preuninstall": "node scripts/preinstall.js"
   },
   "dependencies": {
-    "cross-env": "^7.0.3",
-    "edgymeow": "0.0.20"
+    "cross-env": "^7.0.3"
   },
   "pnpm": {
     "peerDependencyRules": {

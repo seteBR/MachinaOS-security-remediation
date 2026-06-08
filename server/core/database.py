@@ -114,7 +114,7 @@ class Database:
                     logger.info("Added memory_window_size column to user_settings")
 
                 if "compaction_ratio" not in columns:
-                    await conn.execute(text("ALTER TABLE user_settings ADD COLUMN compaction_ratio REAL DEFAULT 0.5"))
+                    await conn.execute(text("ALTER TABLE user_settings ADD COLUMN compaction_ratio REAL DEFAULT 0.8"))
                     logger.info("Added compaction_ratio column to user_settings")
 
                 if "default_llm_provider" not in columns:
@@ -1586,66 +1586,34 @@ class Database:
             return None
 
     async def save_user_settings(self, settings_data: Dict[str, Any], user_id: str = "default") -> bool:
-        """Save or update user settings."""
+        """Save or update user settings.
+
+        Both branches now read field names off ``UserSettings.model_fields``
+        instead of duplicating each setting's name + default. Adding a new
+        field to :class:`UserSettings` no longer requires touching this
+        method, and the SQLModel field's ``Field(default=...)`` is the
+        single source of truth for the default value.
+        """
         try:
             async with self.get_session() as session:
-                # Try to get existing settings
                 stmt = select(UserSettings).where(UserSettings.user_id == user_id)
                 result = await session.execute(stmt)
                 existing = result.scalar_one_or_none()
 
+                # Filter incoming dict to known model fields. ``user_id`` and
+                # the bookkeeping columns (id / created_at / updated_at) are
+                # never overridden through this path.
+                _MANAGED = {"id", "user_id", "created_at", "updated_at"}
+                known_fields = set(UserSettings.model_fields.keys()) - _MANAGED
+                payload = {k: v for k, v in settings_data.items() if k in known_fields}
+
                 if existing:
-                    # Update existing settings
-                    if "auto_save" in settings_data:
-                        existing.auto_save = settings_data["auto_save"]
-                    if "auto_save_interval" in settings_data:
-                        existing.auto_save_interval = settings_data["auto_save_interval"]
-                    if "sidebar_default_open" in settings_data:
-                        existing.sidebar_default_open = settings_data["sidebar_default_open"]
-                    if "component_palette_default_open" in settings_data:
-                        existing.component_palette_default_open = settings_data["component_palette_default_open"]
-                    if "console_panel_default_open" in settings_data:
-                        existing.console_panel_default_open = settings_data["console_panel_default_open"]
-                    if "memory_window_size" in settings_data:
-                        existing.memory_window_size = settings_data["memory_window_size"]
-                    if "compaction_ratio" in settings_data:
-                        existing.compaction_ratio = settings_data["compaction_ratio"]
-                    if "examples_loaded" in settings_data:
-                        existing.examples_loaded = settings_data["examples_loaded"]
-                    if "onboarding_completed" in settings_data:
-                        existing.onboarding_completed = settings_data["onboarding_completed"]
-                    if "onboarding_step" in settings_data:
-                        existing.onboarding_step = settings_data["onboarding_step"]
-                    if "default_llm_provider" in settings_data:
-                        existing.default_llm_provider = settings_data["default_llm_provider"]
-                    if "default_llm_model" in settings_data:
-                        existing.default_llm_model = settings_data["default_llm_model"]
-                    if "auto_add_skill_for_tools" in settings_data:
-                        existing.auto_add_skill_for_tools = settings_data["auto_add_skill_for_tools"]
-                    if "auto_rebind_tools_after_canvas_change" in settings_data:
-                        existing.auto_rebind_tools_after_canvas_change = settings_data["auto_rebind_tools_after_canvas_change"]
-                    if "agent_recursion_limit" in settings_data:
-                        existing.agent_recursion_limit = settings_data["agent_recursion_limit"]
+                    for key, value in payload.items():
+                        setattr(existing, key, value)
                 else:
-                    # Create new settings
-                    existing = UserSettings(
-                        user_id=user_id,
-                        auto_save=settings_data.get("auto_save", True),
-                        auto_save_interval=settings_data.get("auto_save_interval", 30),
-                        sidebar_default_open=settings_data.get("sidebar_default_open", True),
-                        component_palette_default_open=settings_data.get("component_palette_default_open", True),
-                        console_panel_default_open=settings_data.get("console_panel_default_open", False),
-                        memory_window_size=settings_data.get("memory_window_size", 100),
-                        compaction_ratio=settings_data.get("compaction_ratio", 0.5),
-                        examples_loaded=settings_data.get("examples_loaded", False),
-                        onboarding_completed=settings_data.get("onboarding_completed", False),
-                        onboarding_step=settings_data.get("onboarding_step", 0),
-                        default_llm_provider=settings_data.get("default_llm_provider"),
-                        default_llm_model=settings_data.get("default_llm_model"),
-                        auto_add_skill_for_tools=settings_data.get("auto_add_skill_for_tools", True),
-                        auto_rebind_tools_after_canvas_change=settings_data.get("auto_rebind_tools_after_canvas_change", True),
-                        agent_recursion_limit=settings_data.get("agent_recursion_limit", 200),
-                    )
+                    # SQLModel field defaults (``Field(default=...)``) apply
+                    # for every key the caller did not explicitly pass.
+                    existing = UserSettings(user_id=user_id, **payload)
                     session.add(existing)
 
                 await session.commit()

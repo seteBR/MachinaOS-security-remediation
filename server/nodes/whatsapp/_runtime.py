@@ -2,8 +2,18 @@
 
 Spawns the binary with cwd inside the project (``<data_dir>/whatsapp``)
 so the SQLite session DB lives next to ``credentials.db`` and survives
-``pnpm install``, version bumps, and worktree switches. Lazy-init from
-``nodes.whatsapp._service.get_client()``; teardown from FastAPI lifespan.
+``machina clean``, version bumps, and worktree switches. Lazy-init
+from ``nodes.whatsapp._service.get_client()``; teardown from FastAPI
+lifespan.
+
+The binary itself is MachinaOs-managed under the shared MachinaOs
+npm tree at ``<DATA_DIR>/packages/`` (resolved by
+:func:`._install.edgymeow_binary_path` on first use). The install
+runs through ``asyncio.to_thread`` in ``_pre_spawn`` so the long
+``npm install`` (~30 s) doesn't block the asyncio event loop —
+otherwise the ``StatusBroadcaster._refresh_all_services`` startup
+fan-out monopolises the loop during boot and uvicorn can't bind
+port 3010.
 
 Subclasses :class:`BaseProcessSupervisor` for spawning, tree-kill, status
 snapshots, restart policy, and the singleton ``get_instance()`` accessor.
@@ -12,15 +22,17 @@ Plugin-specific surface here is just binary discovery + config patching.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
 
 import yaml
 
+from core.paths import packages_dir
 from services._supervisor import BaseProcessSupervisor
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from ._install import edgymeow_binary_path
 
 
 class WhatsAppRuntime(BaseProcessSupervisor):
@@ -65,7 +77,12 @@ class WhatsAppRuntime(BaseProcessSupervisor):
 
     @property
     def _package_dir(self) -> Path:
-        return (_PROJECT_ROOT / "node_modules" / "edgymeow").resolve()
+        # ``edgymeow`` is npm-installed into the shared MachinaOs npm
+        # tree at ``<DATA_DIR>/packages/node_modules/edgymeow/`` by
+        # :func:`._install.edgymeow_binary_path` (called from
+        # ``_pre_spawn``). Same tree holds ``claude-code``,
+        # ``agent-browser``, etc. — one package.json + lockfile.
+        return packages_dir() / "node_modules" / "edgymeow"
 
     # ---- BaseProcessSupervisor overrides ---------------------------------
 
@@ -74,7 +91,6 @@ class WhatsAppRuntime(BaseProcessSupervisor):
         if override:
             return Path(override).resolve()
         name = "edgymeow-server.exe" if sys.platform == "win32" else "edgymeow-server"
-        # pnpm symlinks node_modules/edgymeow -> .pnpm/edgymeow@<v>/.../edgymeow
         return self._package_dir / "bin" / name
 
     def argv(self) -> list[str]:
@@ -89,6 +105,19 @@ class WhatsAppRuntime(BaseProcessSupervisor):
     async def _pre_spawn(self) -> None:
         if not getattr(self.settings, "whatsapp_runtime_enabled", True):
             raise RuntimeError("WhatsApp runtime disabled via WHATSAPP_RUNTIME_ENABLED")
+        # Run the (potentially long) ``npm install edgymeow`` off the
+        # asyncio event loop. ``edgymeow_binary_path`` is sync and
+        # blocks on ``subprocess.run`` for the duration of the install;
+        # without this offload the startup ``_refresh_all_services``
+        # fan-out monopolises the loop for ~30 s and uvicorn can't
+        # bind port 3010 (port-probe times out in the supervisor).
+        # Idempotent — instant return when the binary already exists.
+        resolved = await asyncio.to_thread(edgymeow_binary_path)
+        if resolved is None:
+            raise RuntimeError(
+                "WhatsApp runtime install failed: npm not on PATH or `npm install edgymeow` "
+                "did not produce the expected binary. See log for details."
+            )
         self._write_config()
 
     def _extra_status(self) -> dict:

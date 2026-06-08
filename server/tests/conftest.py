@@ -102,7 +102,7 @@ _make_submodule("core", "cache", {"CacheService": MagicMock})
 # real ``Path.home()`` lookup during test collection. Tests that
 # actually exercise on-disk behaviour use ``tempfile.TemporaryDirectory``
 # locally; the stub just keeps import-time ``MACHINA_CLAUDE_DIR =
-# claude_config_dir()`` calls from blowing up.
+# data_path("claude")`` calls from blowing up.
 _TEST_MACHINA_ROOT = Path(__file__).parent / "_test_machina_root"
 _make_submodule(
     "core",
@@ -110,16 +110,13 @@ _make_submodule(
     {
         "project_root": lambda: _TEST_MACHINA_ROOT.parent,
         "machina_root": lambda: _TEST_MACHINA_ROOT,
+        "data_path": lambda sub="": _TEST_MACHINA_ROOT / sub if sub else _TEST_MACHINA_ROOT,
         "packages_dir": lambda: _TEST_MACHINA_ROOT / "packages",
         "package_dir": lambda name: _TEST_MACHINA_ROOT / "packages" / name,
-        "claude_config_dir": lambda: _TEST_MACHINA_ROOT / "claude",
-        "claude_npm_dir": lambda: _TEST_MACHINA_ROOT / "claude" / "npm",
         "daemons_dir": lambda: _TEST_MACHINA_ROOT / "daemons",
         "workspaces_dir": lambda: _TEST_MACHINA_ROOT / "workspaces",
         "workspace_dir": lambda wf: _TEST_MACHINA_ROOT / "workspaces" / wf,
         "example_workflows_dir": lambda: _TEST_MACHINA_ROOT / "workflows",
-        "whatsapp_dir": lambda: _TEST_MACHINA_ROOT / "whatsapp",
-        "credentials_db_path": lambda: _TEST_MACHINA_ROOT / "credentials.db",
     },
 )
 
