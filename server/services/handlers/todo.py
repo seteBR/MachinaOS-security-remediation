@@ -43,7 +43,10 @@ async def execute_write_todos(
         "success": True,
         "message": f"Updated todo list ({len(stored)} items)",
         "count": len(stored),
-        "todos": service.format_for_llm(session_key),
+        # Plain list — matches the plugin's WriteTodosOutput contract
+        # (``todos: Optional[list]``); the pre-fix ``format_for_llm()``
+        # leaked TodoService's raw JSON string here.
+        "todos": stored,
     }
 
 

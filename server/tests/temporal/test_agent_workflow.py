@@ -306,6 +306,139 @@ class TestAutoRebindTools:
         )
 
 
+class TestDelegationInvocationContract:
+    """Regression: the delegated task must survive the child's config
+    resolution. Pre-fix the parent remapped ``{task, context}`` into the
+    child's ``node_data`` (configuration channel) and
+    ``prepare_agent_payload`` merged ``{**node_data, **db_params}`` —
+    the child node's persisted ``prompt: ""`` (the Pydantic default the
+    frontend saves on drop) clobbered the delegated task, the child's
+    message list ended up system-only, and Gemini rejected it with
+    ``contents are required`` (3 wasted retries per call).
+
+    Post-fix the delegation travels as the child workflow input's
+    ``invocation`` field (Temporal input-vs-config separation; see
+    docs.temporal.io/develop/python/workflows single-object input
+    guidance) and ``prepare_agent_payload`` applies it AFTER the config
+    merge — mirroring the legacy working path
+    (``handlers.tools._execute_delegated_agent`` applies its remap after
+    loading DB params, so it always wins).
+
+    Source-introspection invariants — a live run needs a Temporal
+    WorkflowEnvironment, too heavy for unit tests (same rationale as
+    ``TestDelegationToolDispatch``).
+    """
+
+    def test_child_context_carries_invocation_field(self):
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+        assert '"invocation"' in src, (
+            "AgentWorkflow delegation spawn must pass the per-invocation "
+            "{task, context} as the child workflow input's 'invocation' "
+            "field. Smuggling it through node_data lets the child's "
+            "persisted empty prompt clobber the delegated task."
+        )
+
+    def test_empty_task_rejected_before_spawn(self):
+        """A delegate_to_* call with neither task nor context must be
+        rejected at the call boundary (tool-error message back to the
+        LLM) instead of spawning a child workflow that cannot run."""
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+        assert "non-empty 'task'" in src, (
+            "AgentWorkflow delegation branch must validate the invocation "
+            "(task/context both empty -> tool error, no child spawn)."
+        )
+
+    def test_prepare_payload_applies_invocation_after_config_merge(self):
+        """The invocation override must run AFTER the
+        ``{**node_data, **db_params}`` config merge — order is the whole
+        fix. If someone 'simplifies' it back into the merge, the DB's
+        empty prompt wins again."""
+        import inspect
+
+        from services.temporal.agent_activities import prepare_agent_payload
+
+        src = inspect.getsource(prepare_agent_payload)
+        assert 'context.get("invocation")' in src, (
+            "prepare_agent_payload must read the child workflow input's "
+            "'invocation' field."
+        )
+        assert src.index("**db_params") < src.index('context.get("invocation")'), (
+            "Invocation must be applied AFTER the node_data/db_params "
+            "config merge so stored parameters can never clobber the "
+            "delegated task."
+        )
+
+
+class TestEmptyPromptGuard:
+    """``execute_llm_step`` must fail fast — attempt 1, non-retryable —
+    when the filtered message list has no invokable content, instead of
+    letting Gemini raise an opaque retryable ``ValueError: contents are
+    required`` that burns the full retry budget on a deterministic
+    failure. Uses Temporal's documented mechanism for business-rule
+    failures: ``ApplicationError(..., non_retryable=True)``."""
+
+    def test_raises_non_retryable_on_system_only_list(self):
+        import pytest
+        from langchain_core.messages import SystemMessage
+        from temporalio.exceptions import ApplicationError
+
+        from services.temporal.agent_activities import _ensure_llm_contents
+
+        with pytest.raises(ApplicationError) as excinfo:
+            _ensure_llm_contents([SystemMessage(content="you are helpful")])
+        assert excinfo.value.non_retryable is True
+        assert excinfo.value.type == "EmptyAgentPrompt"
+
+    def test_raises_on_empty_list(self):
+        import pytest
+        from temporalio.exceptions import ApplicationError
+
+        from services.temporal.agent_activities import _ensure_llm_contents
+
+        with pytest.raises(ApplicationError):
+            _ensure_llm_contents([])
+
+    def test_passes_with_human_message(self):
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from services.temporal.agent_activities import _ensure_llm_contents
+
+        _ensure_llm_contents([SystemMessage(content="sys"), HumanMessage(content="hi")])
+
+    def test_passes_with_tool_message(self):
+        """Mid-loop turns may legitimately be tool-result-only."""
+        from langchain_core.messages import SystemMessage, ToolMessage
+
+        from services.temporal.agent_activities import _ensure_llm_contents
+
+        _ensure_llm_contents(
+            [SystemMessage(content="sys"), ToolMessage(content="42", tool_call_id="c1")]
+        )
+
+    def test_guard_runs_after_empty_message_filter(self):
+        """The guard must see the POST-filter list — a whitespace-only
+        HumanMessage passes the workflow's truthiness check but gets
+        stripped by ``filter_empty_messages``, so guarding pre-filter
+        would miss exactly the failing case."""
+        import inspect
+
+        from services.temporal.agent_activities import execute_llm_step
+
+        src = inspect.getsource(execute_llm_step)
+        assert "_ensure_llm_contents(rehydrated)" in src
+        assert src.index("filter_empty_messages(rehydrated)") < src.index(
+            "_ensure_llm_contents(rehydrated)"
+        )
+
+
 class TestNeedsCanvasDispatch:
     """Regression: regular (non-delegation) tools opt into canvas
     propagation via the ``BaseNode.needs_canvas`` ClassVar. The F4.B

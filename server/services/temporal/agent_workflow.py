@@ -131,6 +131,13 @@ class AgentWorkflow:
                 "nodes": list,        # full canvas (for edge walking)
                 "edges": list,
                 "inputs": dict,       # upstream node outputs
+                # Present only when spawned as a delegation child by a
+                # parent AgentWorkflow's delegate_to_* tool call. This is
+                # the per-invocation input contract (Temporal's
+                # input-vs-config separation): it always wins over stored
+                # node configuration in prepare_agent_payload.
+                "invocation": {"task": str, "context": str},  # optional
+                "parent_node_id": str,                        # optional
             }
 
         The workflow's FIRST step is to schedule
@@ -338,20 +345,28 @@ class AgentWorkflow:
                 # Delegation tools (``delegate_to_<child>``) need different
                 # arg handling than regular tools:
                 #
-                #   1. LLM passes ``{"task": "...", "context": "..."}`` — map
-                #      ``task → system_message`` and ``context → prompt`` so
-                #      the child agent's ``Params`` model parses correctly.
-                #      Without this remap Gemini fails with ``contents are
-                #      required`` because the child's prompt is empty.
+                #   1. LLM passes ``{"task": "...", "context": "..."}`` —
+                #      this is per-invocation INPUT, not node configuration.
+                #      For child AgentWorkflows it travels as the workflow
+                #      input's ``invocation`` field (Temporal input-contract
+                #      pattern); the prep activity applies it AFTER config
+                #      resolution so stored params (e.g. the node's empty
+                #      default ``prompt``) can never clobber the delegated
+                #      task — without that guarantee Gemini fails with
+                #      ``contents are required``. For bypass agents
+                #      dispatched as plain activities (rlm_agent /
+                #      claude_code_agent) the task is mapped into
+                #      ``node_data`` (``task → system_message``,
+                #      ``context-or-task → prompt``) because their activity
+                #      consumes ``node_data`` verbatim with no DB re-merge.
                 #   2. The child agent needs the full canvas (``nodes`` +
                 #      ``edges``) so its ``collect_agent_connections`` edge
                 #      walk can find its own skills / memory / tools.
                 #      Regular tools don't need this — they execute against
                 #      their own params alone.
                 #
-                # Same mapping the legacy fire-and-forget
-                # ``handlers.tools._execute_delegated_agent`` applies to its
-                # ``child_params`` before spawning the child task.
+                # Same task/context semantics as the legacy fire-and-forget
+                # ``handlers.tools._execute_delegated_agent``.
                 call_args = call.get("args") or {}
                 tool_name = call.get("name", "")
                 is_delegation = tool_name.startswith("delegate_to_")
@@ -359,13 +374,31 @@ class AgentWorkflow:
                 if is_delegation:
                     task_description = str(call_args.get("task", "") or "")
                     task_context = str(call_args.get("context", "") or "")
-                    delegation_params = {
-                        "system_message": task_description,
-                        "prompt": task_context or task_description,
-                    }
+                    if not task_description and not task_context:
+                        # Invalid invocation — reject at the call boundary
+                        # instead of spawning a child that cannot run.
+                        messages.append(
+                            {
+                                "type": "tool",
+                                "data": {
+                                    "content": (
+                                        '{"error": "delegate_to_* requires a '
+                                        "non-empty 'task' argument describing "
+                                        'what the agent should do."}'
+                                    ),
+                                    "tool_call_id": call.get("id", ""),
+                                    "name": tool_name,
+                                },
+                            }
+                        )
+                        continue
                     tool_node_data = {
                         **(tool_info.get("parameters") or {}),
-                        **delegation_params,
+                        # Consumed only by the activity-dispatch fallback
+                        # below (bypass agents); the child-AgentWorkflow
+                        # path reads the ``invocation`` field instead.
+                        "system_message": task_description,
+                        "prompt": task_context or task_description,
                     }
                     child_nodes = context.get("nodes") or []
                     child_edges = context.get("edges") or []
@@ -415,7 +448,14 @@ class AgentWorkflow:
 
                 try:
                     if is_delegation and tool_info["node_type"] in AGENT_WORKFLOW_TYPES:
-                        child_context = {**tool_payload, "parent_node_id": agent_node_id}
+                        child_context = {
+                            **tool_payload,
+                            "parent_node_id": agent_node_id,
+                            "invocation": {
+                                "task": task_description,
+                                "context": task_context,
+                            },
+                        }
                         tool_result = await workflow.execute_child_workflow(
                             "AgentWorkflow",
                             args=[child_context],

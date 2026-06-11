@@ -42,12 +42,21 @@ class ToolNode(BaseNode, abstract=True):
 
     def _wrap_success(self, *, start_time: float, result):
         """Tools return flat result (no success wrapper)."""
-        from pydantic import BaseModel
+        from pydantic import BaseModel, ValidationError
+        from pydantic_core import PydanticSerializationError
 
-        if isinstance(result, BaseModel):
-            return result.model_dump()
-        if isinstance(result, dict):
-            return result
+        if isinstance(result, (BaseModel, dict)):
+            try:
+                # Same Output-contract enforcement as the base class —
+                # validate + dump(mode="json") so the flat tool payload
+                # is always JSON-compatible (see BaseNode._serialize_result).
+                return self._serialize_result(result)
+            except (ValidationError, PydanticSerializationError) as e:
+                return self._wrap_error(
+                    start_time=start_time,
+                    error=f"Output contract violation: {e}",
+                    error_type="OutputValidationError",
+                )
         return {"result": result}
 
     @classmethod

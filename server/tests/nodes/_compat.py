@@ -147,7 +147,8 @@ async def handle_write_todos(
         "success": True,
         "message": f"Updated todo list ({len(stored)} items)",
         "count": len(stored),
-        "todos": service.format_for_llm(session_key),
+        # Plain list — matches the plugin's WriteTodosOutput contract.
+        "todos": stored,
     }
 
 

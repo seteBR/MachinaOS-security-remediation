@@ -582,12 +582,47 @@ class BaseNode:
             return True, result.get("result", {}), None
         return False, None, result.get("error")
 
+    def _serialize_result(self, result: Any) -> Any:
+        """Enforce the declared ``Output`` contract at the serialization
+        boundary — the same semantics FastAPI applies to ``response_model``
+        (validate, coerce, serialize). ``model_dump(mode="json")`` guarantees
+        the payload is JSON-compatible (datetimes → ISO strings, enums →
+        values) before it reaches node_outputs persistence and the WS
+        broadcast. Dict results from plugins without a declared ``Output``
+        pass through untouched.
+
+        Raises ``pydantic.ValidationError`` (or
+        ``pydantic_core.PydanticSerializationError``) when the operation
+        returned data violating its own declared contract — a plugin bug
+        that must fail loudly instead of silently corrupting downstream
+        stores (callers convert it to the standard error envelope).
+        """
+        if isinstance(result, BaseModel):
+            return result.model_dump(mode="json")
+        if isinstance(result, dict) and self.Output is not _EmptyOutput:
+            # ``exclude_unset`` preserves the producer's exact key set —
+            # declared-but-absent Optional fields must not materialise as
+            # ``None`` keys in the payload (validate + coerce + serialize,
+            # without reshaping what the operation chose to return).
+            return self.Output.model_validate(result).model_dump(mode="json", exclude_unset=True)
+        return result
+
     def _wrap_success(self, *, start_time: float, result: Any) -> Dict[str, Any]:
         """95%-universal return shape. Subclasses (ToolNode) override."""
-        if isinstance(result, BaseModel):
-            result_data: Any = result.model_dump()
-        else:
-            result_data = result
+        from pydantic_core import PydanticSerializationError
+
+        try:
+            result_data = self._serialize_result(result)
+        except (ValidationError, PydanticSerializationError) as e:
+            logger.exception(
+                "[%s] operation result violates declared Output contract",
+                self.type,
+            )
+            return self._wrap_error(
+                start_time=start_time,
+                error=f"Output contract violation: {e}",
+                error_type="OutputValidationError",
+            )
         return {
             "success": True,
             "result": result_data,

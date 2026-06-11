@@ -419,6 +419,43 @@ class TestWriteTodos:
         assert args[2]["todos"] == stored
         assert kwargs.get("workflow_id") == "wf-42"
 
+    async def test_plugin_returns_list_todos_and_coerces_stringified_args(self):
+        """Regression for the Output contract violation surfaced by
+        ``_wrap_success`` enforcement: the plugin returned ``todos`` as
+        TodoService's raw JSON STRING (``format_for_llm``) while
+        ``WriteTodosOutput`` declares ``Optional[list]``. Also locks the
+        Params boundary coercion — Gemini sometimes stringifies array
+        args in tool calls, so a JSON-encoded ``todos`` string must
+        parse instead of failing validation."""
+        import json
+
+        from nodes.tool.write_todos import WriteTodosNode
+        from services.plugin import NodeContext
+        from services.todo_service import get_todo_service
+
+        node = WriteTodosNode()
+        ctx = NodeContext.from_legacy(
+            node_id="todo-node-2",
+            node_type="writeTodos",
+            context={"workflow_id": "wf-str"},
+        )
+        # LLM-stringified array arg (the Gemini failure mode).
+        result = await node.execute(
+            "todo-node-2",
+            {"todos": '[{"content": "From stringified args", "status": "in_progress"}]'},
+            ctx,
+        )
+
+        # ToolNode flat contract: no success wrapper, real list in todos.
+        assert "success" not in result
+        assert isinstance(result["todos"], list)
+        assert result["todos"] == [{"content": "From stringified args", "status": "in_progress"}]
+        assert result["count"] == 1
+        json.dumps(result)  # whole payload JSON-safe for node_outputs
+
+        # Service state matches what the output reported.
+        assert get_todo_service().get("wf-str") == result["todos"]
+
     async def test_invalid_items_are_silently_dropped_or_coerced(self):
         from tests.nodes._compat import handle_write_todos
         from services.todo_service import get_todo_service

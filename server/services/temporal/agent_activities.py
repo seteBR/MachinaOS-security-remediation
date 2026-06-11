@@ -51,6 +51,32 @@ logger = logging.getLogger(__name__)
 # {"kind": "tool_calls", "calls": [{"id": str, "name": str, "args": dict}], "usage": dict}
 
 
+def _ensure_llm_contents(messages: List[Any]) -> None:
+    """Fail fast when the filtered message list has no invokable content.
+
+    Providers require at least one non-system message (Gemini splits
+    SystemMessages into ``system_instruction`` and then rejects the empty
+    ``contents`` list with an opaque retryable ``ValueError: contents are
+    required``). An empty prompt is an invalid-input condition, so raise
+    Temporal's ``ApplicationError`` with ``non_retryable=True`` — the
+    documented mechanism for business-rule failures (see
+    docs.temporal.io/encyclopedia/retry-policies) — instead of burning
+    the retry budget on a deterministic failure.
+    """
+    if any(getattr(m, "type", "") in ("human", "ai", "tool") for m in messages):
+        return
+    from temporalio.exceptions import ApplicationError
+
+    raise ApplicationError(
+        "Agent has no invokable content: message list contains no user, "
+        "assistant, or tool messages. Provide a non-empty 'task' in the "
+        "delegate_to_* call, set the agent's 'prompt' parameter, or "
+        "connect an input trigger.",
+        type="EmptyAgentPrompt",
+        non_retryable=True,
+    )
+
+
 @activity.defn(name="agent.execute_llm_step.v1")
 async def execute_llm_step(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Run one LLM turn with bound tools and return the structured response.
@@ -140,6 +166,7 @@ async def execute_llm_step(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Same filter ``_run_agent_loop`` runs in services/ai.py — empty-content
     # messages trigger 400s on Gemini / Anthropic.
     rehydrated = filter_empty_messages(rehydrated)
+    _ensure_llm_contents(rehydrated)
 
     activity.heartbeat("LLM step: invoking model")
     response = await chat_model.ainvoke(rehydrated)
@@ -434,6 +461,12 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
             "nodes": list,        # full canvas (for edge walking)
             "edges": list,
             "inputs": dict,       # upstream node outputs
+            # Optional — present only for delegation children spawned by
+            # a parent AgentWorkflow's delegate_to_* call. Per-invocation
+            # input: applied AFTER config resolution, never overridden by
+            # stored node parameters (the node's persisted ``prompt`` is
+            # typically the empty Pydantic default).
+            "invocation": {"task": str, "context": str},
         }
 
     Returns the dict that ``AgentWorkflow.run`` expects (see its
@@ -492,6 +525,21 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
 
     prompt = parameters.get("prompt", "")
     system_message = parameters.get("system_message") or "You are a helpful assistant"
+
+    # Per-invocation input (delegation contract) beats stored configuration.
+    # The parent's delegate_to_* call passes {"task", "context"} as the
+    # child workflow's ``invocation`` input field. Faithful mirror of the
+    # legacy working path (``handlers.tools._execute_delegated_agent``,
+    # which applies the remap AFTER loading DB params so it always wins):
+    # ``task`` is the mission directive → system_message; ``context`` is
+    # the input data → prompt, falling back to task (DelegateToAgentSchema
+    # in services/ai.py declares task required, context optional). Applied
+    # after the config merge so the node's persisted empty default
+    # ``prompt`` can never clobber the delegated task.
+    invocation = context.get("invocation") or {}
+    if invocation.get("task") or invocation.get("context"):
+        system_message = invocation.get("task") or "You are a helpful assistant"
+        prompt = invocation.get("context") or invocation.get("task") or ""
 
     api_key = flattened.get("api_key")
     provider = parameters.get("provider", "openai")

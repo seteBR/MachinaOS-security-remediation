@@ -55,7 +55,7 @@ class FileReadNode(ActionNode):
         backend = get_backend(params.model_dump(), ctx.raw)
         file_path = normalize_virtual_path(params.file_path)
         try:
-            content = await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 backend.read,
                 file_path,
                 offset=params.offset,
@@ -65,4 +65,16 @@ class FileReadNode(ActionNode):
             # File doesn't exist / is a directory / bad offset — the
             # LLM should retry with corrected input, not fail the run.
             raise NodeUserError(str(e)) from e
-        return {"content": content, "file_path": file_path}
+        # backend.read returns deepagents' ReadResult dataclass — unwrap
+        # it into the declared Output contract (same shape fileModify /
+        # fsSearch already return for their backend results). Returning
+        # the raw dataclass breaks JSON persistence of node_outputs.
+        if result.error:
+            raise NodeUserError(result.error)
+        file_data = result.file_data or {}
+        content = file_data.get("content", "")
+        return FileReadOutput(
+            content=content,
+            line_count=len(content.splitlines()),
+            file_path=file_path,
+        )

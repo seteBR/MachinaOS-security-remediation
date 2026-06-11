@@ -59,6 +59,13 @@ class _FakeWriteResult(SimpleNamespace):
         super().__init__(error=error, path=path, occurrences=occurrences)
 
 
+class _FakeReadResult(SimpleNamespace):
+    """Mimics deepagents ReadResult dataclass (error, file_data)."""
+
+    def __init__(self, error: str | None = None, file_data: dict | None = None):
+        super().__init__(error=error, file_data=file_data)
+
+
 class _FakeExecuteResult(SimpleNamespace):
     def __init__(self, output: str = "", exit_code: int = 0, truncated: bool = False):
         super().__init__(output=output, exit_code=exit_code, truncated=truncated)
@@ -278,8 +285,15 @@ class TestTypescriptExecutor:
 
 class TestFileRead:
     async def test_happy_path_returns_content(self, harness):
+        # deepagents 0.5.x ``backend.read`` returns a ``ReadResult``
+        # dataclass — the plugin must unwrap ``file_data["content"]``
+        # instead of leaking the raw object into the output dict
+        # (regression: "Object of type ReadResult is not JSON
+        # serializable" at node_outputs persistence).
         backend = MagicMock(name="LocalShellBackend")
-        backend.read = MagicMock(return_value="line1\nline2\n")
+        backend.read = MagicMock(
+            return_value=_FakeReadResult(file_data={"content": "line1\nline2", "encoding": "utf-8"})
+        )
 
         with _patch_fs_backend(backend):
             result = await harness.execute(
@@ -290,11 +304,31 @@ class TestFileRead:
         harness.assert_envelope(result, success=True)
         harness.assert_output_shape(result, ["content", "file_path"])
         payload = result["result"]
-        assert payload["content"] == "line1\nline2\n"
+        assert payload["content"] == "line1\nline2"
+        assert payload["line_count"] == 2
         # ``normalize_virtual_path`` prepends ``/`` to relative inputs so the
         # path reaches deepagents in its canonical virtual-mode form.
         assert payload["file_path"] == "/notes.txt"
         backend.read.assert_called_once_with("/notes.txt", offset=0, limit=100)
+        # The whole envelope must be JSON-serializable — this is exactly
+        # what ``database.save_node_output`` needs to persist it.
+        import json
+
+        json.dumps(result)
+
+    async def test_backend_error_result_is_user_error(self, harness):
+        """A ``ReadResult`` carrying ``error`` is a failed read — it must
+        surface as a NodeUserError envelope, not pass as success with a
+        raw dataclass payload."""
+        backend = MagicMock(name="LocalShellBackend")
+        backend.read = MagicMock(return_value=_FakeReadResult(error="File '/missing.txt' not found"))
+
+        with _patch_fs_backend(backend):
+            result = await harness.execute("fileRead", {"file_path": "missing.txt"})
+
+        harness.assert_envelope(result, success=False)
+        assert "not found" in result["error"].lower()
+        assert result.get("error_type") == "NodeUserError"
 
     async def test_missing_file_path_short_circuits(self, harness):
         # No backend patch: we should short-circuit before reaching it.

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from services.plugin import NodeContext, Operation, TaskQueue, ToolNode
 
@@ -19,6 +20,26 @@ class WriteTodosParams(BaseModel):
     todos: List[TodoItem] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="allow")
+
+    @field_validator("todos", mode="before")
+    @classmethod
+    def _coerce_todos(cls, value: Any) -> Any:
+        """Accept a JSON-encoded string in the ``todos`` slot — LLM
+        providers (notably Gemini) sometimes stringify array arguments
+        in tool calls. Same boundary-coercion pattern as
+        ``AndroidServiceParams._coerce_parameters``. Malformed JSON
+        passes through unchanged so Pydantic raises a proper
+        ValidationError the LLM can correct."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                try:
+                    parsed = json.loads(stripped)
+                except (ValueError, TypeError):
+                    return value
+                if isinstance(parsed, list):
+                    return parsed
+        return value
 
 
 class WriteTodosOutput(BaseModel):
@@ -84,8 +105,14 @@ class WriteTodosNode(ToolNode):
             len(stored),
             session_key,
         )
+        # ``stored`` is the validated list — the declared Output contract
+        # (``todos: Optional[list]``). The pre-fix ``format_for_llm()``
+        # call leaked TodoService's raw JSON STRING into this key, which
+        # the Output validation now rejects; the LLM-facing serialization
+        # happens downstream anyway (``_serialise_tool_result`` /
+        # LangChain dump the whole dict to JSON).
         return {
             "message": f"Updated todo list ({len(stored)} items)",
-            "todos": service.format_for_llm(session_key),
+            "todos": stored,
             "count": len(stored),
         }

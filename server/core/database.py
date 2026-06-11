@@ -1,7 +1,9 @@
 """Modern async database service with SQLModel and SQLAlchemy 2.0."""
 
+import json
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+from pydantic_core import to_jsonable_python
 from sqlmodel import SQLModel, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.exc import IntegrityError
@@ -58,13 +60,23 @@ class Database:
             logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
             logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 
-            # Create async engine
+            # Create async engine.
+            #
+            # ``json_serializer`` is SQLAlchemy's documented extension point
+            # for every JSON column on this engine (node_outputs.data,
+            # node_parameters, ...). ``pydantic_core.to_jsonable_python`` is
+            # Pydantic's official arbitrary-object → JSON coercion
+            # (dataclasses, BaseModel, datetime, enums, sets natively;
+            # ``fallback=str`` for true unknowns) — stdlib ``json.dumps``
+            # alone raised ``TypeError: Object of type X is not JSON
+            # serializable`` and silently dropped node-output persistence.
             self.engine = create_async_engine(
                 self.settings.database_url,
                 echo=self.settings.database_echo,
                 pool_size=self.settings.database_pool_size,
                 max_overflow=self.settings.database_max_overflow,
                 future=True,
+                json_serializer=lambda obj: json.dumps(to_jsonable_python(obj, fallback=str)),
             )
 
             # Create session factory

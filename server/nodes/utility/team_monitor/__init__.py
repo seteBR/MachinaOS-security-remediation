@@ -20,7 +20,9 @@ class TeamMonitorParams(BaseModel):
 class TeamMonitorOutput(BaseModel):
     team: Optional[dict] = None
     members: Optional[list] = None
-    tasks: Optional[list] = None
+    # Aggregate counts ({"total", "completed", "active", "pending",
+    # "failed"}) — the per-task list lives in the ``active_tasks`` extra.
+    tasks: Optional[dict] = None
 
     model_config = ConfigDict(extra="allow")
 
