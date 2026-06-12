@@ -354,27 +354,16 @@ def _get_default_model(provider: str, fallback: str) -> str:
 
 
 def _resolve_max_tokens(flattened: dict, model: str, provider: str) -> int:
-    """Resolve max_tokens: user param (clamped to model max) -> provider default -> 4096.
+    """Resolve max_tokens: user param (clamped to model max) -> model max.
 
-    When user sets max_tokens explicitly, clamp to model's actual maximum.
-    When user doesn't set it, use the provider's default from llm_defaults.json.
+    Delegates to ``services/llm/config.py::resolve_max_tokens`` so the
+    agent paths (execute_agent / execute_chat_agent / F4.B
+    prepare_agent_payload) and the native chat path agree: when the user
+    doesn't set max_tokens, the model's full supported output budget is
+    used (registry -> llm_defaults fallback), never an artificial
+    provider-wide floor.
     """
-    from services.model_registry import get_model_registry
-
-    registry = get_model_registry()
-    model_max = registry.get_max_output_tokens(model, provider)
-
-    user_val = flattened.get("max_tokens")
-    if user_val:
-        user_int = int(user_val)
-        if user_int > model_max:
-            logger.info(f"[AI] Clamping max_tokens from {user_int} to {model_max} for {provider}/{model}")
-            return model_max
-        return user_int
-
-    # No user value: use provider default from llm_defaults.json, not model's max capacity
-    provider_default = registry._get_default_max_output_tokens(provider, "_no_match_")
-    return min(provider_default, model_max)
+    return native_resolve_max_tokens(flattened, model, provider)
 
 
 def _resolve_temperature(flattened: dict, model: str, provider: str, thinking_enabled: bool) -> float:

@@ -363,6 +363,13 @@ async def run_standalone_worker(
         pool_size=pool_size,
     )
 
+    # Embedded workers get this from main.py's lifespan; standalone
+    # workers must load the model registry themselves or max_tokens /
+    # context_length lookups degrade to hard fallbacks (4096).
+    from services.model_registry import get_model_registry
+
+    get_model_registry().startup()
+
     # Use custom runtime with heartbeating disabled to avoid warning on older servers
     runtime = create_runtime()
 

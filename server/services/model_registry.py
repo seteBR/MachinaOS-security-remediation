@@ -438,6 +438,11 @@ class ModelRegistryService:
             return None
 
         or_provider, local_id = model_id.split("/", 1)
+        # OpenRouter "~provider" alias rows (e.g. ~google/gemini-flash-latest)
+        # carry the same metadata as canonical rows — strip the tilde so they
+        # key under the canonical provider and local lookups
+        # (get_model_info("gemini-flash-latest", "gemini")) match.
+        or_provider = or_provider.lstrip("~")
         provider = PROVIDER_MAP.get(or_provider, or_provider)
 
         # Extract top_provider data
@@ -521,9 +526,15 @@ class ModelRegistryService:
             raw_models = data.get("models", {})
             for key, model_data in raw_models.items():
                 try:
-                    self._models[key] = ModelInfo.from_dict(model_data)
+                    info = ModelInfo.from_dict(model_data)
                 except (TypeError, KeyError) as e:
                     logger.debug(f"Skipping invalid model cache entry {key}: {e}")
+                    continue
+                # Same "~provider" alias normalization as _parse_openrouter_model,
+                # for caches written before it landed.
+                stripped = info.provider.lstrip("~")
+                info.provider = PROVIDER_MAP.get(stripped, stripped)
+                self._models[f"{info.provider}/{info.local_id}"] = info
 
         except Exception as e:
             logger.warning(f"Failed to load model registry cache: {e}")
