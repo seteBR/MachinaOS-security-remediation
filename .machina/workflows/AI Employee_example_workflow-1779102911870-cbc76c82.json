@@ -2160,7 +2160,7 @@
     },
     "chatAgent-177920047617122-dbe3b7": {
       "provider": "gemini",
-      "model": "gemini-flash-latest",
+      "model": "gemini-3.5-flash",
       "prompt": "{{chattrigger.message}} {{telegramreceive.text}}",
       "system_message": "",
       "label": "Zeenie"
@@ -2233,35 +2233,35 @@
     "coding_agent-177920047617125-dbe3b7": {
       "prompt": "",
       "provider": "gemini",
-      "model": "gemini-flash-latest",
+      "model": "gemini-3.5-flash",
       "system_message": "You are a helpful assistant",
       "label": "Coding Agent"
     },
     "productivity_agent-177920047617126-dbe3b7": {
       "prompt": "",
       "provider": "gemini",
-      "model": "gemini-flash-latest",
+      "model": "gemini-3.5-flash",
       "system_message": "You are a helpful assistant",
       "label": "Productivity Agent"
     },
     "travel_agent-177920047617127-dbe3b7": {
       "prompt": "",
       "provider": "gemini",
-      "model": "gemini-flash-latest",
+      "model": "gemini-3.5-flash",
       "system_message": "You are a helpful assistant",
       "label": "Travel Agent"
     },
     "web_agent-177920047617128-dbe3b7": {
       "prompt": "",
       "provider": "gemini",
-      "model": "gemini-flash-latest",
+      "model": "gemini-3.5-flash",
       "system_message": "You are a helpful assistant",
       "label": "Web Agent"
     },
     "social_agent-177920047617129-dbe3b7": {
       "prompt": "",
       "provider": "gemini",
-      "model": "gemini-flash-latest",
+      "model": "gemini-3.5-flash",
       "system_message": "You are a helpful assistant",
       "label": "Social Agent"
     },

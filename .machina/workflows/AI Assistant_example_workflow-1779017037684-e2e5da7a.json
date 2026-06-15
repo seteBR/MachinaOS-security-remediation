@@ -603,7 +603,7 @@
     "aiAgent-177920047601512-ce3047": {
       "prompt": "{{chattrigger.message}} {{telegramreceive.text}}",
       "provider": "gemini",
-      "model": "gemini-flash-latest",
+      "model": "gemini-3.5-flash",
       "system_message": "You are a helpful assistant",
       "label": "AI Agent"
     },
