@@ -130,6 +130,52 @@ class Settings(BaseSettings):
         env="TEMPORAL_TERMINATE_RUNNING_ON_STARTUP",
     )
 
+    # Startup resilience (server-ready-before-workers). Unlike the core
+    # temporal fields above, these carry Python defaults (matching
+    # ``.env.template``) so an existing ``.env`` predating them keeps
+    # booting — same convention as ``dlq_enabled`` / ``event_framework_enabled``.
+    # Readiness gate: poll the WorkflowService gRPC health check until
+    # SERVING before the worker / visibility sweep act.
+    temporal_health_check_attempts: int = Field(
+        default=5,
+        env="TEMPORAL_HEALTH_CHECK_ATTEMPTS",
+        ge=1,
+    )
+    temporal_health_check_delay_seconds: float = Field(
+        default=0.5,
+        env="TEMPORAL_HEALTH_CHECK_DELAY_SECONDS",
+        ge=0,
+    )
+    temporal_health_check_timeout_seconds: float = Field(
+        default=2.0,
+        env="TEMPORAL_HEALTH_CHECK_TIMEOUT_SECONDS",
+        gt=0,
+    )
+    # Boot-time terminate-running sweep: retry the Visibility query that
+    # races shard acquisition ("shard status unknown") before giving up.
+    temporal_sweep_attempts: int = Field(
+        default=4,
+        env="TEMPORAL_SWEEP_ATTEMPTS",
+        ge=1,
+    )
+    temporal_sweep_backoff_seconds: float = Field(
+        default=0.5,
+        env="TEMPORAL_SWEEP_BACKOFF_SECONDS",
+        ge=0,
+    )
+    # Embedded worker self-restart backoff (doubles from base to max)
+    # when the Temporal worker shuts down on a transient poll failure.
+    temporal_worker_restart_backoff_seconds: float = Field(
+        default=1.0,
+        env="TEMPORAL_WORKER_RESTART_BACKOFF_SECONDS",
+        gt=0,
+    )
+    temporal_worker_restart_backoff_max_seconds: float = Field(
+        default=30.0,
+        env="TEMPORAL_WORKER_RESTART_BACKOFF_MAX_SECONDS",
+        gt=0,
+    )
+
     # API Keys (all optional, injected at runtime)
     google_maps_api_key: Optional[str] = Field(default=None, env="GOOGLE_MAPS_API_KEY")
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")

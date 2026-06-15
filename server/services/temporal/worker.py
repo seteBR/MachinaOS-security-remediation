@@ -202,14 +202,37 @@ class TemporalWorkerManager:
             )
 
     async def _run_worker(self) -> None:
-        """Run the worker (background task)."""
-        try:
-            await self._worker.run()
-        except asyncio.CancelledError:
-            logger.info("Temporal worker cancelled")
-        except Exception as e:
-            logger.error(f"Temporal worker error: {str(e)}")
-            raise
+        """Run the worker (background task), self-restarting on crash.
+
+        The Temporal worker shuts down on a poll failure rather than
+        auto-retrying (per the Python ``Worker`` docs), and this task is
+        detached — the startup retry loop in ``main.py`` has already
+        returned by the time it runs. So a transient crash (e.g. the
+        server briefly unavailable mid-poll) would otherwise leave the
+        worker permanently dead until a process restart. Re-run the SAME
+        worker instance with doubling backoff; cancellation (from
+        ``stop()``) always wins so shutdown is never delayed by a restart.
+        Backoff knobs are env-driven (canonical defaults in .env.template).
+        """
+        from core.config import Settings
+
+        _s = Settings()
+        backoff = _s.temporal_worker_restart_backoff_seconds
+        backoff_max = _s.temporal_worker_restart_backoff_max_seconds
+        while True:
+            try:
+                await self._worker.run()
+                return  # clean shutdown only
+            except asyncio.CancelledError:
+                logger.info("Temporal worker cancelled")
+                raise
+            except Exception as e:
+                logger.error(f"Temporal worker crashed; restarting in {backoff:.1f}s: {e}")
+                try:
+                    await asyncio.sleep(backoff)
+                except asyncio.CancelledError:
+                    raise  # cancellation during backoff still wins
+                backoff = min(backoff * 2, backoff_max)
 
     async def stop(self) -> None:
         """Stop the Temporal worker and cleanup resources."""

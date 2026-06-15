@@ -4,14 +4,35 @@ Manages the Temporal client connection lifecycle with retry support.
 """
 
 import asyncio
+from datetime import timedelta
 from typing import Optional
 from temporalio.api.workflowservice.v1 import DescribeNamespaceRequest
 from temporalio.client import Client
 from temporalio.runtime import LoggingConfig, Runtime, TelemetryConfig
 
+from core.config import Settings
 from core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _is_transient_visibility_error(exc: Exception) -> bool:
+    """True if ``exc`` is a transient server-warmup/visibility error a
+    retry is likely to clear (shard still acquiring, frontend briefly
+    unavailable). Keyed on the typed ``RPCError.status`` with a substring
+    backstop for non-RPCError wrappers."""
+    try:
+        from temporalio.service import RPCError, RPCStatusCode
+
+        if isinstance(exc, RPCError) and exc.status in (
+            RPCStatusCode.UNAVAILABLE,
+            RPCStatusCode.DEADLINE_EXCEEDED,
+        ):
+            return True
+    except Exception:  # noqa: BLE001 — import/shape guard; fall through to substring
+        pass
+    msg = str(exc).lower()
+    return "shard" in msg or "unavailable" in msg or "context canceled" in msg
 
 
 class TemporalClientWrapper:
@@ -22,6 +43,14 @@ class TemporalClientWrapper:
         self.namespace = namespace
         self._client: Optional[Client] = None
         self._runtime: Optional[Runtime] = None
+        # Startup-resilience knobs read once from Settings (env-driven,
+        # canonical defaults in .env.template). Readiness gate + sweep retry.
+        _s = Settings()
+        self._health_check_attempts = _s.temporal_health_check_attempts
+        self._health_check_delay_seconds = _s.temporal_health_check_delay_seconds
+        self._health_check_timeout_seconds = _s.temporal_health_check_timeout_seconds
+        self._sweep_attempts = _s.temporal_sweep_attempts
+        self._sweep_backoff_seconds = _s.temporal_sweep_backoff_seconds
 
     @property
     def client(self) -> Optional[Client]:
@@ -66,6 +95,28 @@ class TemporalClientWrapper:
                 # Verify namespace is ready (gRPC port may accept connections
                 # before the server finishes registering namespaces)
                 await client.service_client.workflow_service.describe_namespace(DescribeNamespaceRequest(namespace=self.namespace))
+                # Readiness gate: poll the WorkflowService gRPC health check
+                # until SERVING so "connected" means "frontend serving", not
+                # just "port bound". Documented readiness probe
+                # (https://docs.temporal.io/troubleshooting/deadline-exceeded-error).
+                # A miss raises and is caught by the ``except`` below, folding
+                # into both retry layers (this loop + main.py's 3s reconnect).
+                for hc_attempt in range(1, self._health_check_attempts + 1):
+                    try:
+                        serving = await client.service_client.check_health(
+                            timeout=timedelta(seconds=self._health_check_timeout_seconds),
+                        )
+                    except Exception:  # noqa: BLE001 — treat unreachable as not-serving
+                        serving = False
+                    if serving:
+                        break
+                    if hc_attempt < self._health_check_attempts:
+                        await asyncio.sleep(self._health_check_delay_seconds)
+                else:
+                    raise RuntimeError(
+                        "Temporal frontend not SERVING after "
+                        f"{self._health_check_attempts} health checks",
+                    )
                 self._client = client
                 logger.info(f"Connected to Temporal server at {self.server_address}")
                 # Wave 12 A4: idempotently register the event-framework
@@ -120,19 +171,39 @@ class TemporalClientWrapper:
             logger.warning("terminate_running_workflows called before connect; no-op")
             return 0
 
+        # The Visibility query below races shard acquisition right after
+        # boot (visibility-queue-processor reports "shard status unknown"
+        # until shard-1 is acquired). Retry the whole query+iteration a
+        # few times so the sweep isn't silently abandoned for that boot.
+        # ``terminate`` is idempotent, so restarting the scan clean (count
+        # reset) on retry is safe — re-terminating an already-terminated
+        # workflow raises a benign error caught by the inner ``except``.
         count = 0
-        async for wf in self._client.list_workflows(
-            "ExecutionStatus = 'Running'",
-        ):
+        for sweep_attempt in range(1, self._sweep_attempts + 1):
             try:
-                handle = self._client.get_workflow_handle(
-                    wf.id,
-                    run_id=wf.run_id,
-                )
-                await handle.terminate(reason=reason)
-                count += 1
-            except Exception as exc:  # noqa: BLE001 — best-effort sweep
-                logger.debug(f"Failed to terminate workflow id={wf.id} " f"run_id={wf.run_id}: {exc}")
+                count = 0
+                async for wf in self._client.list_workflows(
+                    "ExecutionStatus = 'Running'",
+                ):
+                    try:
+                        handle = self._client.get_workflow_handle(
+                            wf.id,
+                            run_id=wf.run_id,
+                        )
+                        await handle.terminate(reason=reason)
+                        count += 1
+                    except Exception as exc:  # noqa: BLE001 — best-effort sweep
+                        logger.debug(f"Failed to terminate workflow id={wf.id} " f"run_id={wf.run_id}: {exc}")
+                break  # iteration completed cleanly
+            except Exception as list_exc:  # noqa: BLE001 — Visibility query failed
+                if _is_transient_visibility_error(list_exc) and sweep_attempt < self._sweep_attempts:
+                    logger.warning(
+                        f"Visibility list_workflows transient "
+                        f"({sweep_attempt}/{self._sweep_attempts}); retrying: {list_exc}",
+                    )
+                    await asyncio.sleep(self._sweep_backoff_seconds * sweep_attempt)
+                    continue
+                raise
         if count:
             logger.info(f"Terminated {count} running workflow(s) at startup " "(history preserved; resumption disabled)")
         return count
