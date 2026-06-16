@@ -60,14 +60,14 @@ interface Props {
 }
 
 const ProviderDefaultsSection: React.FC<Props> = ({ providerId }) => {
-  const { getProviderDefaults, saveProviderDefaults, getStoredModels, getModelConstraints, isConnected } = useApiKeys();
+  const { getProviderDefaults, saveProviderDefaults, getValidatedAiProviders, getModelConstraints } = useApiKeys();
   // Subscribe to apiKeyStatuses[providerId]: WebSocketContext updates
   // this reactively after a successful validate (handler at line 2175-
   // 2180) AND on the backend's api_key_status broadcast (line 686-696
   // -- fired after the validator stores fresh models). Adding it as a
   // dep to the fetch effect below makes the model dropdown refresh
   // immediately after Fetch instead of requiring a page reload.
-  const { apiKeyStatuses } = useWebSocket();
+  const { apiKeyStatuses, isReady } = useWebSocket();
   const apiKeyStatus = apiKeyStatuses[providerId];
 
   const [models, setModels] = useState<string[]>([]);
@@ -82,43 +82,64 @@ const ProviderDefaultsSection: React.FC<Props> = ({ providerId }) => {
   const thinkingEnabled = form.watch('thinking_enabled');
   const { isDirty } = form.formState;
 
-  // Load defaults + models on mount AND on providerId change.
-  // Reset models / constraints synchronously when the provider switches
-  // so a stale list from the previous panel can't bleed through. Without
-  // this, opening "OpenAI" then "LM Studio" left the OpenAI model list
-  // visible in the LM Studio dropdown — the dropdown only saw an
-  // explicit `setModels(m)` when the new fetch returned a non-empty
-  // list, so an empty `lmstudio` response (no Fetch clicked yet) was a
-  // no-op and the previous panel's state survived.
+  // Load the SAVED provider defaults into the form. Keyed on
+  // (providerId, isReady) ONLY — deliberately NOT on apiKeyStatus.
+  //
+  // `form.reset` re-baselines the form and clears `isDirty`, so it must
+  // run only on a genuine provider switch or once the socket is ready —
+  // never on an `api_key_status` change. That broadcast fires after every
+  // validate / Fetch and on every (re)connect (`initial_status` replaces
+  // the whole status map), so if the reset were keyed on it, it would wipe
+  // the user's in-progress edits and grey out "Save Defaults" mid-edit.
+  // Gating on `isReady` (not `isConnected`) also means a modal opened
+  // during the init/reconnect window re-fetches once ready instead of
+  // latching the hard-coded getProviderDefaults fallback.
   useEffect(() => {
-    if (!isConnected) return;
-    setModels([]);
-    setConstraints(null);
+    if (!isReady) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const [d, m] = await Promise.all([
-          getProviderDefaults(providerId),
-          getStoredModels(providerId),
-        ]);
-        if (!cancelled) {
-          form.reset((d as Partial<ProviderDefaults>) ?? {});
-          // Unconditional set: clears the dropdown when the fetch comes
-          // back empty (e.g. local-LLM panel before "Fetch" was clicked,
-          // or a freshly-removed key).
-          setModels(m ?? []);
-        }
+        const d = await getProviderDefaults(providerId);
+        if (!cancelled) form.reset((d as Partial<ProviderDefaults>) ?? {});
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [providerId, isConnected, apiKeyStatus]);
+  }, [providerId, isReady]);
+
+  // Refresh the model dropdown. Keyed on (providerId, isReady,
+  // apiKeyStatus) so it re-runs after a "Fetch models" / validate
+  // populates new models — WITHOUT touching the form (that's what wiped
+  // edits before the split). Reset models / constraints synchronously
+  // when the provider switches so a stale list from the previous panel
+  // can't bleed through: opening "OpenAI" then "LM Studio" used to leave
+  // the OpenAI list visible because an empty `lmstudio` response (no Fetch
+  // clicked yet) was a no-op `setModels`, so the previous state survived.
+  useEffect(() => {
+    if (!isReady) return;
+    setModels([]);
+    setConstraints(null);
+    let cancelled = false;
+    // Source the dropdown from validated stored models, falling back to the
+    // provider's curated `popular_models` (from llm_defaults.json) when none
+    // are stored yet — the same precedence the global model selector uses
+    // (TopToolbar). Without the fallback the Default Model dropdown was empty
+    // (and thus unselectable) for any provider whose models hadn't been
+    // explicitly fetched, even with a validated key.
+    getValidatedAiProviders().then((state) => {
+      if (cancelled) return;
+      const entry = state.providers.find((p) => p.provider === providerId);
+      const list = entry ? (entry.models.length ? entry.models : entry.popular_models) : [];
+      setModels(list);
+    });
+    return () => { cancelled = true; };
+  }, [providerId, isReady, apiKeyStatus]);
 
   // Refetch constraints when selected model changes.
   useEffect(() => {
-    if (!isConnected || !selectedModel) return;
+    if (!isReady || !selectedModel) return;
     let cancelled = false;
     getModelConstraints(selectedModel, providerId).then((c) => {
       if (cancelled) return;
@@ -128,7 +149,7 @@ const ProviderDefaultsSection: React.FC<Props> = ({ providerId }) => {
       }
     });
     return () => { cancelled = true; };
-  }, [selectedModel, providerId, isConnected]);
+  }, [selectedModel, providerId, isReady]);
 
   const onSubmit = useCallback(
     async (values: FormValues) => {
