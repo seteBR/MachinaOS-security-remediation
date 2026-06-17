@@ -249,7 +249,7 @@ const SquareNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnectab
   const iconRef = (iconSpec?.icon as string | undefined) ?? (definition?.icon as string | undefined);
 
   // Get the node color from definition or use default
-  const nodeColor = definition?.defaults?.color || '#1A73E8';
+  const nodeColor = definition?.defaults?.color || 'var(--node-model)';
 
   return (
     // `sq-node` + `selected` co-classes are the design-handoff structural
@@ -297,7 +297,7 @@ const SquareNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnectab
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(128, 128, 128, 0.4)',
+            backgroundColor: 'color-mix(in srgb, var(--fg-faint) 40%, transparent)',
             borderRadius: 'inherit',
             zIndex: 35,
             display: 'flex',
@@ -442,7 +442,7 @@ const SquareNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnectab
               width: theme.nodeSize.outputBadge,
               height: theme.nodeSize.outputBadge,
               borderRadius: theme.borderRadius.sm,
-              backgroundColor: theme.dracula.green,
+              backgroundColor: 'var(--success)',
               border: `1px solid ${theme.isDarkMode ? theme.colors.background : '#ffffff'}`,
               display: 'flex',
               alignItems: 'center',

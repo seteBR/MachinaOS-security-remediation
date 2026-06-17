@@ -196,11 +196,11 @@ const MapSelector: React.FC<MapSelectorProps> = ({
           onClose();
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = theme.dracula.red;
+          e.currentTarget.style.backgroundColor = theme.colors.error;
           e.currentTarget.style.transform = 'scale(1.1)';
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = theme.dracula.pink;
+          e.currentTarget.style.backgroundColor = theme.colors.actionStop;
           e.currentTarget.style.transform = 'scale(1)';
         }}
         style={{
@@ -210,13 +210,13 @@ const MapSelector: React.FC<MapSelectorProps> = ({
           width: '44px',
           height: '44px',
           borderRadius: '50%',
-          backgroundColor: theme.dracula.pink,
+          backgroundColor: theme.colors.actionStop,
           color: 'white',
           border: 'none',
           fontSize: '20px',
           fontWeight: 'bold',
           cursor: 'pointer',
-          boxShadow: `0 6px 16px ${theme.dracula.pink}60`,
+          boxShadow: `0 6px 16px ${theme.colors.actionStop}60`,
           zIndex: 2002,
           display: 'flex',
           alignItems: 'center',

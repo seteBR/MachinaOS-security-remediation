@@ -17,9 +17,9 @@ const StartNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnectabl
   const defaultLabel = 'Start';
 
   // Definition-driven color (Wave 26.A): backend NodeSpec is SSOT for
-  // node color. Falls back to dracula cyan if the spec hasn't loaded.
+  // node color. Falls back to the workflow-role accent if the spec hasn't loaded.
   const definition = resolveNodeDescription(type || '');
-  const nodeColor = definition?.defaults?.color || theme.dracula.cyan;
+  const nodeColor = definition?.defaults?.color || 'var(--node-workflow)';
 
   const handleLabelChange = useCallback(
     (newLabel: string) => updateNodeData(id, { label: newLabel }),

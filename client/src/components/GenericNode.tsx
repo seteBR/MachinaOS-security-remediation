@@ -48,7 +48,7 @@ const GenericNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
     return (
       <div style={{
         padding: '8px 12px',
-        backgroundColor: '#ef4444',
+        backgroundColor: 'var(--destructive)',
         color: 'white',
         borderRadius: '8px',
         fontSize: '12px',
@@ -101,7 +101,7 @@ const GenericNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
   // Node accent color — feeds the `--node-color` CSS custom property
   // on the wrapper. Handle borders/backgrounds are now owned by
   // `.node-handle` in base.css + per-theme overrides (Wave 26.C).
-  const getNodeColor = () => definition.defaults.color || '#9E9E9E';
+  const getNodeColor = () => definition.defaults.color || 'var(--fg-muted)';
 
   return (
     // `node` + `selected` co-classes activate per-theme generic-node
@@ -133,7 +133,7 @@ const GenericNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(128, 128, 128, 0.4)',
+          backgroundColor: 'color-mix(in srgb, var(--fg-faint) 40%, transparent)',
           borderRadius: 'inherit',
           zIndex: 25,
           display: 'flex',

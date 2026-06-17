@@ -48,7 +48,7 @@ const TeamMonitorNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConn
 
   // Wave 6 Phase 3e: backend NodeSpec -> legacy fallback
   const definition = resolveNodeDescription(type || '');
-  const nodeColor = definition?.defaults?.color || '#8b5cf6';
+  const nodeColor = definition?.defaults?.color || 'var(--node-agent)';
 
   // Find connected AI Employee/Orchestrator node to get workflow context
   const connectedTeamLead = useMemo(() => {
@@ -114,10 +114,10 @@ const TeamMonitorNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConn
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed': return theme.dracula.green;
-      case 'in_progress': return theme.dracula.cyan;
-      case 'failed': return theme.dracula.red;
-      case 'pending': return theme.dracula.orange;
+      case 'completed': return 'var(--success)';
+      case 'in_progress': return 'var(--info)';
+      case 'failed': return 'var(--destructive)';
+      case 'pending': return 'var(--warning)';
       default: return theme.colors.textSecondary;
     }
   };
@@ -161,25 +161,25 @@ const TeamMonitorNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConn
         borderBottom: `1px solid ${theme.colors.border}`,
       }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 12, fontWeight: 'bold', color: theme.dracula.purple }}>
+          <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--node-agent)' }}>
             {teamStatus?.members?.length || 0}
           </div>
           <div style={{ fontSize: 8, color: theme.colors.textSecondary }}>Team</div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 12, fontWeight: 'bold', color: theme.dracula.cyan }}>
+          <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--info)' }}>
             {teamStatus?.tasks?.total || 0}
           </div>
           <div style={{ fontSize: 8, color: theme.colors.textSecondary }}>Tasks</div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 12, fontWeight: 'bold', color: theme.dracula.green }}>
+          <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--success)' }}>
             {teamStatus?.tasks?.completed || 0}
           </div>
           <div style={{ fontSize: 8, color: theme.colors.textSecondary }}>Done</div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 12, fontWeight: 'bold', color: theme.dracula.orange }}>
+          <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--warning)' }}>
             {teamStatus?.tasks?.active || 0}
           </div>
           <div style={{ fontSize: 8, color: theme.colors.textSecondary }}>Active</div>

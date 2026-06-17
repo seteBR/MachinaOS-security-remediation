@@ -7,24 +7,23 @@ import { useAppStore } from '../store/useAppStore';
 import AIAgentExecutionService from '../services/execution/aiAgentExecutionService';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { useNodeStatus } from '../contexts/WebSocketContext';
-import { dracula } from '../styles/theme';
 import { useNodeSpec } from '../lib/nodeSpec';
 import { NodeIcon } from '../assets/icons';
 import { Badge } from '@/components/ui/badge';
 
-// Agent-loop phase icons and labels. Colors reference the dracula token
-// constants so a future palette change in tokens.css propagates without
-// editing each phase entry.
+// Agent-loop phase icons and labels. Colors reference the semantic theme
+// tokens (var(--*)) so each phase label recolors per active theme — init=info,
+// memory=agent-purple, building=warning, thinking/tool=trigger-pink, done=success.
 const PHASE_CONFIG: Record<string, { icon: string; label: string; color: string }> = {
-  initializing: { icon: '⚡', label: 'Initializing', color: dracula.cyan },
-  loading_memory: { icon: '💾', label: 'Loading Memory', color: dracula.purple },
-  memory_loaded: { icon: '✓', label: 'Memory Ready', color: dracula.green },
-  building_tools: { icon: '🔧', label: 'Building Tools', color: dracula.orange },
-  building_graph: { icon: '🔗', label: 'Building Graph', color: dracula.orange },
-  invoking_llm: { icon: '🧠', label: 'Thinking...', color: dracula.pink },
-  executing_tool: { icon: '⚡', label: 'Using Tool', color: dracula.pink },
-  tool_completed: { icon: '✓', label: 'Tool Done', color: dracula.green },
-  saving_memory: { icon: '💾', label: 'Saving Memory', color: dracula.purple },
+  initializing: { icon: '⚡', label: 'Initializing', color: 'var(--info)' },
+  loading_memory: { icon: '💾', label: 'Loading Memory', color: 'var(--node-agent)' },
+  memory_loaded: { icon: '✓', label: 'Memory Ready', color: 'var(--success)' },
+  building_tools: { icon: '🔧', label: 'Building Tools', color: 'var(--warning)' },
+  building_graph: { icon: '🔗', label: 'Building Graph', color: 'var(--warning)' },
+  invoking_llm: { icon: '🧠', label: 'Thinking...', color: 'var(--node-trigger)' },
+  executing_tool: { icon: '⚡', label: 'Using Tool', color: 'var(--node-trigger)' },
+  tool_completed: { icon: '✓', label: 'Tool Done', color: 'var(--success)' },
+  saving_memory: { icon: '💾', label: 'Saving Memory', color: 'var(--node-agent)' },
 };
 
 // Spec-driven handle record. Mirrors server/models/node_metadata.NodeHandle.
@@ -56,7 +55,7 @@ const AIAgentNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
   // declares.
   const spec = useNodeSpec(type || 'aiAgent');
   const handles: SpecHandle[] = (spec?.handles as SpecHandle[] | undefined) ?? [];
-  const accentColor = spec?.color || dracula.purple;
+  const accentColor = spec?.color || 'var(--node-agent)';
   const width = (spec?.uiHints as any)?.width ?? 300;
   const height = (spec?.uiHints as any)?.height ?? 200;
   const title = data?.label || spec?.displayName || type || 'Agent';

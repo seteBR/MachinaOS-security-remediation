@@ -61,8 +61,8 @@ const ToolkitNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
     setSelectedNode({ id, type, data, position: { x: 0, y: 0 } });
   };
 
-  // Get the node color from definition or use Android green
-  const nodeColor = definition?.defaults?.color || '#3DDC84';
+  // Get the node color from definition or use the tool-role accent
+  const nodeColor = definition?.defaults?.color || 'var(--node-tool)';
 
   // Schema-driven icon dispatch with reactive subscription.
   // <NodeIcon> resolves the ref and tints lucide icons via currentColor.
@@ -207,7 +207,7 @@ const ToolkitNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
               width: theme.nodeSize.outputBadge,
               height: theme.nodeSize.outputBadge,
               borderRadius: theme.borderRadius.sm,
-              backgroundColor: theme.dracula.green,
+              backgroundColor: 'var(--success)',
               border: `1px solid ${theme.isDarkMode ? theme.colors.background : '#ffffff'}`,
               display: 'flex',
               alignItems: 'center',

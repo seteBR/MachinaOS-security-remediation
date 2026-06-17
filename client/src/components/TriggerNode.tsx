@@ -114,7 +114,7 @@ const TriggerNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
   const iconRef = (iconSpec?.icon as string | undefined) ?? (definition?.icon as string | undefined);
 
   // Get the node color from definition or use default trigger color
-  const nodeColor = definition?.defaults?.color || '#f59e0b';
+  const nodeColor = definition?.defaults?.color || 'var(--node-trigger)';
 
   return (
     // `sq-node` + `node-trigger` + `selected` co-classes activate per-theme
@@ -163,7 +163,7 @@ const TriggerNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(128, 128, 128, 0.4)',
+            backgroundColor: 'color-mix(in srgb, var(--fg-faint) 40%, transparent)',
             borderRadius: 'inherit',
             zIndex: 35,
             display: 'flex',
@@ -233,7 +233,7 @@ const TriggerNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
             width: theme.nodeSize.outputBadge,
             height: theme.nodeSize.outputBadge,
             borderRadius: theme.borderRadius.sm,
-            backgroundColor: theme.dracula.yellow,
+            backgroundColor: 'var(--warning)',
             border: `1px solid ${theme.isDarkMode ? theme.colors.background : '#ffffff'}`,
             display: 'flex',
             alignItems: 'center',
@@ -278,7 +278,7 @@ const TriggerNode: React.FC<NodeProps<NodeData>> = ({ id, type, data, isConnecta
               width: theme.nodeSize.outputBadge,
               height: theme.nodeSize.outputBadge,
               borderRadius: theme.borderRadius.sm,
-              backgroundColor: theme.dracula.green,
+              backgroundColor: 'var(--success)',
               border: `1px solid ${theme.isDarkMode ? theme.colors.background : '#ffffff'}`,
               display: 'flex',
               alignItems: 'center',
