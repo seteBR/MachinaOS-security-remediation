@@ -38,7 +38,7 @@ The `dev` task starts the Python backend, Vite client, WhatsApp service, and Tem
 
 </details>
 
-## See It In Action ↓
+## AI Building Itself , See It In Action ↓.
 https://github.com/user-attachments/assets/035a2293-0837-4969-8b9d-8d680e023b89
 
 
