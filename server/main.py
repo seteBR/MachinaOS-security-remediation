@@ -713,6 +713,10 @@ if _SERVE_STATIC and (_CLIENT_DIST / "index.html").is_file():
     if _assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
+    @app.get("/", include_in_schema=False)
+    async def _serve_spa_root():
+        return FileResponse(str(_CLIENT_DIST / "index.html"))
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _serve_spa(full_path: str):
         """Serve a built static asset when it exists, else the SPA shell."""
