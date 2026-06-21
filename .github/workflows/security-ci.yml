@@ -45,4 +45,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check whitespace
-        run: git diff --check
+        run: git diff-tree --check --no-commit-id --root -r HEAD
