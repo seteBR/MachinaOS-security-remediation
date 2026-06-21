@@ -34,6 +34,7 @@ jobs:
       - name: pytest
         working-directory: server
         run: |
+          cp ../.env.template ../.env
           uv sync
           uv run pytest tests/ -v
 
