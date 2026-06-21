@@ -29,6 +29,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml .npmrc ./
+COPY scripts ./scripts
 COPY client/package.json ./client/package.json
 COPY server/package.json server/pyproject.toml ./server/
 COPY server/nodejs/package.json ./server/nodejs/package.json
