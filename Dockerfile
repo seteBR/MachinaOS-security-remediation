@@ -41,7 +41,7 @@ COPY . .
 RUN pnpm --filter react-flow-client run build \
     && pnpm --filter machinaos-nodejs-executor run build \
     && uv sync --project server --no-dev \
-    && /app/server/.venv/bin/python -O -m compileall -q -x '(^|/)\\.venv(/|$)' server
+    && /app/server/.venv/bin/python -O -m compileall -q -x '(^|/)\.venv(/|$)' server
 
 COPY docker/entrypoint.sh /usr/local/bin/machinaos-entrypoint
 RUN chmod +x /usr/local/bin/machinaos-entrypoint
