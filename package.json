@@ -68,7 +68,7 @@
     "start:temporal": "cross-env TEMPORAL_ENABLED=true python -m cli start",
     "client:start": "cd client && npm run start",
     "python:start": "cd server && uv run uvicorn main:app --host 127.0.0.1 --port 3010 --log-level warning",
-    "python:daemon": "cd server && uv run uvicorn main:app --host 0.0.0.0 --port 3010 --log-level warning",
+    "python:daemon": "cd server && uv run uvicorn main:app --host 127.0.0.1 --port 3010 --log-level warning",
     "temporal:start": "temporal api",
     "temporal:stop": "temporal stop",
     "temporal:status": "temporal status",
@@ -112,7 +112,10 @@
     },
     "overrides": {
       "esbuild@<0.28.1": "^0.28.1",
+      "@babel/core@<=7.29.0": "^7.29.6",
+      "dompurify@<3.4.11": "^3.4.11",
       "hono@<4.12.21": "^4.12.21",
+      "js-yaml@<=4.1.1": "^4.2.0",
       "js-cookie@<3.0.7": "^3.0.7",
       "qs@<6.15.2": "^6.15.2",
       "ws@<8.20.1": "^8.20.1"

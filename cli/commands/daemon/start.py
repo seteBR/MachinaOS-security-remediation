@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from cli._common import preflight
+from cli._common import bind_host_from_env, preflight, validate_bind_security
 from cli.colors import console
 from cli.platform_ import server_dir
 from cli.run import uv_run
@@ -23,6 +23,8 @@ def start_command() -> None:
 
     cfg, root = preflight()
     backend_port = cfg.backend_port
+    backend_host = bind_host_from_env()
+    validate_bind_security(backend_host, surface="daemon backend")
 
     pid_dir().mkdir(parents=True, exist_ok=True)
     log_path = log_file()
@@ -33,7 +35,7 @@ def start_command() -> None:
             "uvicorn",
             "main:app",
             "--host",
-            "0.0.0.0",
+            backend_host,
             "--port",
             str(backend_port),
             "--log-level",

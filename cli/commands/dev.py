@@ -19,7 +19,7 @@ from pathlib import Path
 
 import typer
 
-from cli._common import build_backend_spec, free_all_ports, preflight
+from cli._common import build_backend_spec, free_all_ports, preflight, validate_bind_security
 from cli.colors import console
 from cli.config import load_dev_overrides
 from cli.platform_ import (
@@ -67,6 +67,7 @@ def _build_specs(root: Path, cfg, *, daemon: bool, use_vite: bool) -> list[Servi
         )
 
     backend_host = "0.0.0.0" if daemon else "127.0.0.1"
+    validate_bind_security(backend_host, surface="dev backend")
     server_spec = build_backend_spec(cfg, host=backend_host, root=root)
     return [client_spec, server_spec, *temporal_specs(root, cfg)]
 

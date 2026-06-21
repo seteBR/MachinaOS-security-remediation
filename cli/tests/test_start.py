@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from cli.commands import start
 from cli.config import Config, load_config
 
@@ -56,3 +58,45 @@ def test_build_specs_assigns_ready_ports(tmp_path: Path):
     assert by_name["client"].ready_port == cfg.client_port
     assert by_name["server"].ready_port == cfg.backend_port
     assert by_name["temporal"].ready_port == cfg.temporal_port
+
+
+def test_build_specs_defaults_backend_to_localhost(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("MACHINA_BIND_HOST", raising=False)
+    cfg = _cfg()
+    specs = start._build_specs(tmp_path, cfg, temporal_running=True)
+    server = {s.name: s for s in specs}["server"]
+    assert "127.0.0.1" in server.argv
+
+
+def test_build_specs_rejects_public_bind_when_auth_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MACHINA_BIND_HOST", "0.0.0.0")
+    monkeypatch.setenv("VITE_AUTH_ENABLED", "false")
+    monkeypatch.delenv("MACHINA_ALLOW_UNSAFE_PUBLIC_BIND", raising=False)
+    cfg = _cfg()
+
+    with pytest.raises(SystemExit):
+        start._build_specs(tmp_path, cfg, temporal_running=True)
+
+
+def test_build_specs_allows_explicit_unsafe_public_bind_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MACHINA_BIND_HOST", "0.0.0.0")
+    monkeypatch.setenv("VITE_AUTH_ENABLED", "false")
+    monkeypatch.setenv("MACHINA_ALLOW_UNSAFE_PUBLIC_BIND", "true")
+    cfg = _cfg()
+
+    specs = start._build_specs(tmp_path, cfg, temporal_running=True)
+    server = {s.name: s for s in specs}["server"]
+    assert "0.0.0.0" in server.argv
+
+
+def test_build_specs_rejects_public_bind_with_default_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MACHINA_BIND_HOST", "0.0.0.0")
+    monkeypatch.setenv("VITE_AUTH_ENABLED", "true")
+    monkeypatch.setenv("SECRET_KEY", "dev-secret-key-12345678901234567890123456789012")
+    monkeypatch.setenv("API_KEY_ENCRYPTION_KEY", "dev-encryption-key-12345678901234567890123456")
+    monkeypatch.setenv("JWT_SECRET_KEY", "dev-jwt-secret-key-12345678901234567890")
+    monkeypatch.delenv("MACHINA_ALLOW_UNSAFE_PUBLIC_BIND", raising=False)
+    cfg = _cfg()
+
+    with pytest.raises(SystemExit):
+        start._build_specs(tmp_path, cfg, temporal_running=True)

@@ -16,6 +16,22 @@ const PORT = parseInt(process.env.NODEJS_EXECUTOR_PORT ?? '', 10) || 3020;
 const HOST = process.env.NODEJS_EXECUTOR_HOST ?? 'localhost';
 const BODY_LIMIT = process.env.NODEJS_EXECUTOR_BODY_LIMIT ?? '10mb';
 const USER_PACKAGES_DIR = process.env.NODEJS_USER_PACKAGES_DIR ?? path.join(__dirname, '..', 'user-packages');
+const PUBLIC_HOSTS = new Set(['', '0.0.0.0', '::', '*']);
+
+function isTruthy(value: string | undefined): boolean {
+  return ['1', 'true', 'yes', 'on'].includes((value ?? '').trim().toLowerCase());
+}
+
+if (PUBLIC_HOSTS.has(HOST.trim().toLowerCase()) && !isTruthy(process.env.NODEJS_EXECUTOR_ALLOW_PUBLIC_BIND)) {
+  console.error(
+    [
+      `Refusing to bind Node.js executor to public host "${HOST}".`,
+      'The executor runs untrusted workflow code and has package-install endpoints.',
+      'Bind it to localhost or set NODEJS_EXECUTOR_ALLOW_PUBLIC_BIND=true only inside a trusted network boundary.',
+    ].join(' '),
+  );
+  process.exit(1);
+}
 
 const app = express();
 app.use(express.json({ limit: BODY_LIMIT }));

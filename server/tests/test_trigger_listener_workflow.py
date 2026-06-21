@@ -52,6 +52,7 @@ def _patch_workflow_logger(monkeypatch):
     from temporalio import workflow as temporal_workflow
 
     monkeypatch.setattr(temporal_workflow, "logger", MagicMock())
+    monkeypatch.setattr(temporal_workflow, "patched", MagicMock(return_value=True))
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +330,103 @@ class TestSpawnChildRun:
         assert wh["_pre_executed"] is True
         assert wh["_trigger_output"]["path"] == "/hook"
         assert wh["_trigger_output"]["_event_envelope"]["id"] == "evt-42"
+
+    @pytest.mark.asyncio
+    async def test_webhook_filter_rejection_does_not_spawn_child(self, monkeypatch):
+        from services.temporal import trigger_listener_workflow as tlw
+
+        start_child = MagicMock()
+
+        async def fake_start_child_workflow(*args, **kwargs):
+            start_child(*args, **kwargs)
+            return MagicMock()
+
+        from temporalio import workflow as temporal_workflow
+
+        monkeypatch.setattr(
+            temporal_workflow,
+            "start_child_workflow",
+            fake_start_child_workflow,
+        )
+
+        wf = tlw.TriggerListenerWorkflow()
+        event = {
+            "id": "evt-wrong-method",
+            "type": "com.machinaos.webhook.received",
+            "data": {
+                "path": "hook",
+                "method": "GET",
+                "headers": {"x-webhook-secret": "expected-secret"},
+            },
+        }
+        listener_data = {
+            "workflow_id": "wf-abc",
+            "trigger_node_id": "wh-1",
+            "node_type": "webhookTrigger",
+            "event_type": "com.machinaos.webhook.received",
+            "filter_params": {
+                "path": "hook",
+                "method": "POST",
+                "authentication": "header",
+                "header_name": "X-Webhook-Secret",
+                "header_value": "expected-secret",
+            },
+            "nodes": [_node("wh-1", "webhookTrigger"), _node("agent-1", "aiAgent")],
+            "edges": [_edge("wh-1", "agent-1")],
+            "session_id": "sess-1",
+        }
+
+        await wf._spawn_child_run(event, listener_data)
+
+        start_child.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unpatched_replay_path_preserves_existing_child_spawn(self, monkeypatch):
+        from services.temporal import trigger_listener_workflow as tlw
+
+        recorded: List[Dict[str, Any]] = []
+
+        async def fake_start_child_workflow(workflow_name, **kwargs):
+            recorded.append({"name": workflow_name, **kwargs})
+            return MagicMock()
+
+        async def fake_execute_activity(*args, **kwargs):
+            return None
+
+        from temporalio import workflow as temporal_workflow
+
+        monkeypatch.setattr(temporal_workflow, "patched", MagicMock(return_value=False))
+        monkeypatch.setattr(
+            temporal_workflow,
+            "start_child_workflow",
+            fake_start_child_workflow,
+        )
+        monkeypatch.setattr(
+            temporal_workflow,
+            "execute_activity",
+            fake_execute_activity,
+        )
+
+        wf = tlw.TriggerListenerWorkflow()
+        event = {
+            "id": "evt-replay",
+            "type": "com.machinaos.webhook.received",
+            "data": {"path": "hook", "method": "GET", "headers": {}},
+        }
+        listener_data = {
+            "workflow_id": "wf-abc",
+            "trigger_node_id": "wh-1",
+            "node_type": "webhookTrigger",
+            "event_type": "com.machinaos.webhook.received",
+            "filter_params": {"path": "hook", "method": "POST"},
+            "nodes": [_node("wh-1", "webhookTrigger"), _node("agent-1", "aiAgent")],
+            "edges": [_edge("wh-1", "agent-1")],
+            "session_id": "sess-1",
+        }
+
+        await wf._spawn_child_run(event, listener_data)
+
+        assert len(recorded) == 1
 
     @pytest.mark.asyncio
     async def test_spawn_failure_does_not_kill_listener(self, monkeypatch):

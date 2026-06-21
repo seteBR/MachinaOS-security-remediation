@@ -9,6 +9,7 @@ Architecture:
 """
 
 import asyncio
+import hmac
 import json
 import uuid
 import time
@@ -191,20 +192,39 @@ def get_trigger_config(node_type: str) -> Optional[TriggerConfig]:
 def build_webhook_filter(params: Dict) -> Callable[[Dict], bool]:
     """Build filter function for webhook requests.
 
-    Filters by webhook path to ensure the event is for the correct trigger node.
+    Filters by webhook path, method, and optional header authentication
+    to ensure the event is for the correct trigger node.
 
     Args:
-        params: Node parameters with 'path' field
+        params: Node parameters with 'path', 'method', and optional
+            header-auth fields.
 
     Returns:
         Filter function that checks if event path matches
     """
     webhook_path = params.get("path", "")
+    expected_method = str(params.get("method") or "POST").upper()
+    authentication = str(params.get("authentication") or "none").lower()
+    header_name = str(params.get("header_name") or "").lower()
+    header_value = str(params.get("header_value") or "")
 
     def matches(data: Dict) -> bool:
         event_path = data.get("path", "")
         if webhook_path and event_path != webhook_path:
             return False
+        event_method = str(data.get("method") or "").upper()
+        if expected_method != "ALL" and event_method != expected_method:
+            return False
+        if authentication == "header":
+            if not header_name or not header_value:
+                return False
+            event_headers = {
+                str(name).lower(): str(value)
+                for name, value in (data.get("headers") or {}).items()
+            }
+            supplied = event_headers.get(header_name, "")
+            if not hmac.compare_digest(supplied, header_value):
+                return False
         return True
 
     return matches

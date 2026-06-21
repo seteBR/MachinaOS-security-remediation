@@ -23,6 +23,7 @@ helper that actually needs the dep pulls it in.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,6 +40,57 @@ if TYPE_CHECKING:
 # top-level import list means ``machina clean`` (which calls only
 # ``preflight`` and ``free_all_ports``) loads even when ``rich`` /
 # ``psutil`` / ``platformdirs`` are unavailable.
+
+_PUBLIC_HOSTS = {"", "0.0.0.0", "::", "*"}
+_UNSAFE_PUBLIC_BIND_OVERRIDE = "MACHINA_ALLOW_UNSAFE_PUBLIC_BIND"
+_WEAK_SECRET_PREFIXES = {
+    "SECRET_KEY": "dev-secret-key",
+    "API_KEY_ENCRYPTION_KEY": "dev-encryption-key",
+    "JWT_SECRET_KEY": "dev-jwt-secret-key",
+}
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def bind_host_from_env(default: str = "127.0.0.1") -> str:
+    """Return the backend bind host, defaulting to localhost."""
+    return os.environ.get("MACHINA_BIND_HOST") or default
+
+
+def is_public_bind_host(host: str) -> bool:
+    return host.strip().lower() in _PUBLIC_HOSTS
+
+
+def validate_bind_security(host: str, *, surface: str = "backend") -> None:
+    """Reject public binding when auth is disabled unless explicitly allowed."""
+    if not is_public_bind_host(host):
+        return
+
+    if _truthy(os.environ.get(_UNSAFE_PUBLIC_BIND_OVERRIDE)):
+        return
+
+    auth_disabled = (os.environ.get("VITE_AUTH_ENABLED") or "").strip().lower() == "false"
+    weak_secrets = [
+        name
+        for name, prefix in _WEAK_SECRET_PREFIXES.items()
+        if (os.environ.get(name) or "").startswith(prefix)
+    ]
+    if auth_disabled or weak_secrets:
+        reasons = []
+        if auth_disabled:
+            reasons.append("authentication is disabled")
+        if weak_secrets:
+            reasons.append(f"weak default secrets are configured: {', '.join(weak_secrets)}")
+        error_block(
+            f"Refusing to bind {surface} to {host!r}: {'; '.join(reasons)}.",
+            [
+                "Set VITE_AUTH_ENABLED=true, rotate default secrets, bind to 127.0.0.1, or use a trusted reverse proxy.",
+                f"For local-only unsafe development, set {_UNSAFE_PUBLIC_BIND_OVERRIDE}=true explicitly.",
+            ],
+        )
+        raise SystemExit(1)
 
 
 def preflight(cfg: Config | None = None) -> tuple[Config, Path]:
@@ -79,8 +131,7 @@ def build_backend_spec(
 
     Routes through :func:`cli.run.uv_run` so the standardised
     ``uv run --no-sync`` flags stay in one place. ``host`` is the only
-    differentiator (``start`` picks ``127.0.0.1`` on Windows/WSL vs
-    ``0.0.0.0`` elsewhere; ``dev`` honours its ``--daemon`` flag).
+    differentiator.
 
     ``cli.run`` and ``cli.supervisor`` are lazy-imported so this module
     stays importable when their transitive ``rich`` dep is missing --

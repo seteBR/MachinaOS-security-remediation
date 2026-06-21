@@ -32,7 +32,7 @@ class WebhookTriggerParams(BaseModel):
         default="",
         description="URL path fragment — becomes /webhook/{path}",
     )
-    method: Literal["GET", "POST", "PUT", "DELETE", "ALL"] = Field(
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "ALL"] = Field(
         default="POST",
         description="HTTP method to accept. ALL accepts any method.",
     )
@@ -88,15 +88,10 @@ class WebhookTriggerNode(TriggerNode):
     Output = WebhookTriggerOutput
 
     def build_filter(self, params: WebhookTriggerParams) -> Callable[[Dict[str, Any]], bool]:
-        """Narrow dispatched events to this trigger's path."""
-        expected_path = params.path or ""
+        """Narrow dispatched events to this trigger's path/method/auth."""
+        from services.event_waiter import build_webhook_filter
 
-        def matches(event: Dict[str, Any]) -> bool:
-            if expected_path and event.get("path") != expected_path:
-                return False
-            return True
-
-        return matches
+        return build_webhook_filter(params.model_dump())
 
     # Event triggers don't run a body — the base class handles the
     # ``event_waiter.register()`` + ``await future`` flow. Declare the

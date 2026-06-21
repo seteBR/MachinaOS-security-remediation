@@ -139,6 +139,24 @@ class TestPythonExecutor:
         harness.assert_envelope(result, success=False)
         assert "boom" in result["error"]
 
+    async def test_timeout_terminates_busy_loop(self, harness):
+        result = await harness.execute(
+            "pythonExecutor",
+            {"code": "while True:\n    pass", "timeout": 1},
+        )
+
+        harness.assert_envelope(result, success=False)
+        assert "timed out after 1s" in result["error"]
+
+    async def test_large_output_does_not_deadlock_ipc(self, harness):
+        result = await harness.execute(
+            "pythonExecutor",
+            {"code": "output = 'x' * 1_000_000", "timeout": 5},
+        )
+
+        harness.assert_envelope(result, success=True)
+        assert len(result["result"]["output"]) == 1_000_000
+
 
 # ============================================================================
 # javascriptExecutor

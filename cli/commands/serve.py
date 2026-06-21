@@ -25,7 +25,7 @@ from pathlib import Path
 
 import typer
 
-from cli._common import preflight
+from cli._common import bind_host_from_env, preflight, validate_bind_security
 from cli.buildenv import validate_build
 from cli.colors import console
 from cli.platform_ import IS_WINDOWS, server_dir, server_venv
@@ -48,6 +48,8 @@ def serve_command(port: int | None = None) -> None:
     # Public port: --port flag > $PORT (Cloud Run / systemd convention) >
     # PYTHON_BACKEND_PORT from the env files.
     bind_port = port or int(os.environ.get("PORT") or cfg.backend_port)
+    bind_host = bind_host_from_env()
+    validate_bind_security(bind_host, surface="serve")
 
     # Free the ports we will bind (clears stale orphans; idempotent).
     from cli.ports import kill_port
@@ -57,7 +59,7 @@ def serve_command(port: int | None = None) -> None:
 
     console.print()
     console.print("  [bold]MachinaOS[/] serve (single-port)")
-    console.print(f"  App:     http://0.0.0.0:{bind_port}  (API + WebSocket + SPA)")
+    console.print(f"  App:     http://{bind_host}:{bind_port}  (API + WebSocket + SPA)")
     console.print(f"  Sidecar: 127.0.0.1:{cfg.nodejs_port}  (JS/TS executor)")
     console.print()
 
@@ -72,7 +74,7 @@ def serve_command(port: int | None = None) -> None:
                 "uvicorn",
                 "main:app",
                 "--host",
-                "0.0.0.0",
+                bind_host,
                 "--port",
                 str(bind_port),
                 "--log-level",

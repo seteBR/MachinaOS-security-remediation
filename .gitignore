@@ -21,10 +21,13 @@ package-lock.json
 # =============================================================================
 # SECURITY - Credentials and Secrets (NEVER COMMIT)
 # =============================================================================
-# Env files are committed — they hold only ports, paths, feature flags,
-# and other non-sensitive config. Credentials live in the encrypted
-# ``credentials.db`` (Fernet + PBKDF2 via ``server/core/encryption.py``),
-# never in env files.
+# Local env files are machine-specific and may contain credentials.
+# Commit templates/examples instead.
+.env
+.env.*
+!.env.template
+!.env.example
+!.env.*.example
 
 # API Keys and Credentials
 **/credentials.json

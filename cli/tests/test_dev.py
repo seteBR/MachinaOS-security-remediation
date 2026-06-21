@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cli.commands import dev
 from cli.config import Config, load_config
 
@@ -58,11 +60,28 @@ def test_build_specs_dev_falls_back_to_static_without_vite(tmp_path: Path):
     assert "serve-client.js" in by_name["client"].argv[1]
 
 
-def test_build_specs_daemon_binds_0_0_0_0(tmp_path: Path):
+def test_build_specs_daemon_binds_0_0_0_0_with_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("MACHINA_ALLOW_UNSAFE_PUBLIC_BIND", "true")
     cfg = _cfg()
     specs = dev._build_specs(tmp_path, cfg, daemon=True, use_vite=True)
     server_argv = next(s for s in specs if s.name == "server").argv
     assert "0.0.0.0" in server_argv
+
+
+def test_build_specs_daemon_rejects_public_bind_with_default_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("MACHINA_ALLOW_UNSAFE_PUBLIC_BIND", raising=False)
+    monkeypatch.setenv("VITE_AUTH_ENABLED", "true")
+    monkeypatch.setenv("SECRET_KEY", "dev-secret-key-12345678901234567890123456789012")
+    monkeypatch.setenv("API_KEY_ENCRYPTION_KEY", "dev-encryption-key-12345678901234567890123456")
+    monkeypatch.setenv("JWT_SECRET_KEY", "dev-jwt-secret-key-12345678901234567890")
+    cfg = _cfg()
+
+    with pytest.raises(SystemExit):
+        dev._build_specs(tmp_path, cfg, daemon=True, use_vite=True)
 
 
 def test_build_specs_non_daemon_binds_127_0_0_1(tmp_path: Path):

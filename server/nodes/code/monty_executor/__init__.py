@@ -1,11 +1,11 @@
 """Monty Executor — sandboxed Python via Pydantic's Monty interpreter.
 
 A deny-by-default alternative to ``pythonExecutor``. Where ``pythonExecutor``
-runs user code through CPython ``exec()`` with a restricted-builtins namespace
-(a known-weak sandbox whose ``timeout`` is never actually enforced), this node
-runs code inside `pydantic-monty <https://github.com/pydantic/monty>`_ — a
-minimal Python subset implemented in Rust with ENFORCED wall-clock + memory
-limits and zero host access unless explicitly granted.
+runs trusted user code through CPython ``exec()`` in a child process with a
+restricted-builtins namespace, this node runs code inside
+`pydantic-monty <https://github.com/pydantic/monty>`_ — a minimal Python
+subset implemented in Rust with ENFORCED wall-clock + memory limits and zero
+host access unless explicitly granted.
 
 Capabilities are dynamic: the caller (an LLM, when wired as the
 ``sandboxed_python`` tool) selects from a fixed, vetted menu via the

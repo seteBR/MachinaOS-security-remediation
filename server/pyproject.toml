@@ -5,10 +5,11 @@ description = "MachinaOS workflow automation backend"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     # Core
-    "fastapi>=0.115.0",
+    "fastapi>=0.136.1",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.10.0",
-    "pydantic-settings>=2.6.0",
+    "pydantic-settings>=2.14.2",
+    "starlette>=1.3.1",
 
     # Database
     "sqlmodel>=0.0.22",
@@ -48,16 +49,13 @@ dependencies = [
     "email-validator>=2.0.0",
 
     # Credential Encryption
-    "cryptography>=44.0.0",
+    "cryptography>=48.0.1",
 
     # AI - All providers (directly imported in ai.py)
-    # Originally pinned to lockstep with main to neutralise a tool_calls
-    # empty-payload regression. Lifted to 1.3.x in response to security
-    # advisories GHSA-jcc3-qxqm-r62h (unsafe deserialization in
-    # langchain-core <=1.3.2), the langchain-openai DNS-rebinding SSRF
-    # advisory (<1.1.14), and the langchain-text-splitters SSRF advisory
-    # (<1.1.2). Full backend suite (1018/1018) re-validated after the bump.
-    "langchain-core==1.3.3",
+    # Keep LangChain on patched lines. The langchain>=1.3.9 floor pulls
+    # langchain-core>=1.4.6, so the core floor is lifted together with it.
+    "langchain>=1.3.9",
+    "langchain-core>=1.4.7",
     "langchain-openai==1.1.14",
     "langchain-anthropic==1.4.0",
     "anthropic==0.94.0",
@@ -81,6 +79,7 @@ dependencies = [
 
     # Utils
     "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.31",
     "apscheduler>=3.10.0",
     "qrcode[pil]>=8.0",
     "pytz>=2024.1",

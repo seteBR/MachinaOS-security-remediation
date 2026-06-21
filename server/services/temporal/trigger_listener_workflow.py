@@ -45,6 +45,7 @@ from temporalio.workflow import ParentClosePolicy
 # so this caps at ~16K triggers between continueAsNew checkpoints.
 # Per-event histogram is empirical; tune later.
 _MAX_EVENTS_BEFORE_CONTINUE_AS_NEW = 16_000
+_WEBHOOK_FILTER_PATCH_ID = "trigger-listener-webhook-filter-v1"
 
 
 @workflow.defn(name="TriggerListenerWorkflow", sandboxed=False)
@@ -151,6 +152,13 @@ class TriggerListenerWorkflow:
         trigger_node_id = listener_data["trigger_node_id"]
         nodes = listener_data["nodes"]
         edges = listener_data["edges"]
+        if workflow.patched(_WEBHOOK_FILTER_PATCH_ID) and not _matches_listener_filter(event, listener_data):
+            workflow.logger.info(
+                f"TriggerListener skipped event.id={event.get('id')} "
+                f"for node={trigger_node_id}: filter rejected"
+            )
+            return
+
         session_id = listener_data.get("session_id", "default")
         workflow_id = listener_data.get("workflow_id")
         # Human-readable slug prefix for the Temporal Web UI listing.
@@ -224,6 +232,24 @@ class TriggerListenerWorkflow:
             event_type=listener_data.get("event_type", ""),
             processed_count=self._processed_count + 1,
         )
+
+
+def _matches_listener_filter(event: Dict[str, Any], listener_data: Dict[str, Any]) -> bool:
+    """Apply the same event_waiter filter used by the legacy trigger path."""
+    node_type = str(listener_data.get("node_type") or "")
+    filter_params = listener_data.get("filter_params") or {}
+    event_data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    try:
+        from services import event_waiter
+
+        filter_fn = event_waiter.build_filter(node_type, filter_params)
+        return bool(filter_fn(event_data))
+    except Exception as exc:  # noqa: BLE001
+        workflow.logger.warning(
+            f"TriggerListener filter failed for event.id={event.get('id')} "
+            f"node_type={node_type}: {exc}"
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
