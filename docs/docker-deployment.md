@@ -17,12 +17,13 @@ docker compose --env-file .env.production up -d --build
 docker compose --env-file .env.production logs -f machinaos
 ```
 
-For an internal-only LAN bind, set for example:
+For a network-restricted bind, set the host-side bind address to a private
+interface IP, for example:
 
 ```env
-MACHINAOS_BIND=172.24.102.180
+MACHINAOS_BIND=<private-interface-ip>
 MACHINAOS_PORT=3010
-CORS_ORIGINS=["http://172.24.102.180:3010"]
+CORS_ORIGINS=["http://<private-interface-ip>:3010"]
 ```
 
 Do not expose this directly to the public internet until runtime tool-risk
@@ -42,10 +43,10 @@ to this public repository. Keep production deployment automation in a private
 infra repository, or use a pull-based deploy service on the Docker host that
 only fetches trusted refs after review.
 
-Keep the private production env file on the VM:
+Keep the private production env file outside this public repository:
 
 ```bash
-install -m 600 .env.production /home/felipe/machinaos-production.env
+install -m 600 .env.production <private-env-path>
 ```
 
 That private deploy automation can then run:
@@ -53,7 +54,7 @@ That private deploy automation can then run:
 ```bash
 git pull --ff-only
 docker compose --env-file .env.production up -d --build
-curl -fsS http://127.0.0.1:3010/health
+curl -fsS http://<private-interface-ip>:3010/health
 ```
 
 ## Backup
