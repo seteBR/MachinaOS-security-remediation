@@ -13,8 +13,8 @@ This profile runs MachinaOS as one container:
 ```bash
 cp .env.production.example .env.production
 # edit .env.production and rotate secrets/passwords
-docker compose up -d --build
-docker compose logs -f machinaos
+docker compose --env-file .env.production up -d --build
+docker compose --env-file .env.production logs -f machinaos
 ```
 
 For an internal-only LAN bind, set for example:
@@ -32,7 +32,7 @@ allowlists are enforced.
 
 ```bash
 git pull --ff-only
-docker compose up -d --build
+docker compose --env-file .env.production up -d --build
 ```
 
 ## GitHub Actions Deploy

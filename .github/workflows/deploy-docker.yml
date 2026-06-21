@@ -35,7 +35,7 @@ jobs:
           chmod 600 .env.production
 
       - name: Build and restart
-        run: docker compose up -d --build --remove-orphans
+        run: docker compose --env-file .env.production up -d --build --remove-orphans
 
       - name: Verify service
         run: |
@@ -45,11 +45,11 @@ jobs:
           port="${port:-3010}"
           for i in $(seq 1 30); do
             if curl -fsS "http://${bind}:${port}/health" >/dev/null; then
-              docker compose ps
+              docker compose --env-file .env.production ps
               exit 0
             fi
             sleep 2
           done
-          docker compose ps
-          docker compose logs --tail=200 machinaos
+          docker compose --env-file .env.production ps
+          docker compose --env-file .env.production logs --tail=200 machinaos
           exit 1
