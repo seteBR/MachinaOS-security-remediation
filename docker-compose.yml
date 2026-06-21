@@ -1,0 +1,19 @@
+services:
+  machinaos:
+    build:
+      context: .
+    image: machinaos-security-remediation:latest
+    container_name: machinaos
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "${MACHINAOS_BIND:-127.0.0.1}:${MACHINAOS_PORT:-3010}:3010"
+    volumes:
+      - machinaos-data:/data
+    security_opt:
+      - no-new-privileges:true
+    init: true
+
+volumes:
+  machinaos-data:
