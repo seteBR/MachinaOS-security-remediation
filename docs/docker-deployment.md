@@ -35,6 +35,20 @@ git pull --ff-only
 docker compose up -d --build
 ```
 
+## GitHub Actions Deploy
+
+The production deploy workflow runs on the DockerDeployment self-hosted runner
+with labels `machinaos` and `docker-deployment`.
+
+Keep the private production env file on the VM:
+
+```bash
+install -m 600 .env.production /home/felipe/machinaos-production.env
+```
+
+Then run **Deploy Docker** from GitHub Actions, or let it run after the `CI`
+workflow succeeds on `main`.
+
 ## Backup
 
 ```bash

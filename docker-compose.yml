@@ -1,3 +1,5 @@
+name: machinaos
+
 services:
   machinaos:
     build:
@@ -17,3 +19,4 @@ services:
 
 volumes:
   machinaos-data:
+    name: machinaos-data

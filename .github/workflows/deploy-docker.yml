@@ -1,0 +1,55 @@
+name: Deploy Docker
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: machinaos-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to DockerDeployment
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, Linux, X64, machinaos, docker-deployment]
+    env:
+      DEPLOY_ENV_FILE: /home/felipe/machinaos-production.env
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Install production env
+        run: |
+          test -f "$DEPLOY_ENV_FILE"
+          cp "$DEPLOY_ENV_FILE" .env.production
+          chmod 600 .env.production
+
+      - name: Build and restart
+        run: docker compose up -d --build --remove-orphans
+
+      - name: Verify service
+        run: |
+          bind="$(awk -F= '/^MACHINAOS_BIND=/{print $2}' .env.production)"
+          port="$(awk -F= '/^MACHINAOS_PORT=/{print $2}' .env.production)"
+          bind="${bind:-127.0.0.1}"
+          port="${port:-3010}"
+          for i in $(seq 1 30); do
+            if curl -fsS "http://${bind}:${port}/health" >/dev/null; then
+              docker compose ps
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs --tail=200 machinaos
+          exit 1
