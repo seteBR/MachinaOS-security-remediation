@@ -1,8 +1,11 @@
 """Node.js API compatibility routes for seamless migration."""
 
+import os
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 
@@ -33,6 +36,11 @@ class WorkflowSaveRequest(BaseModel):
 @router.get("/")
 async def root():
     """Node.js compatible root endpoint."""
+    client_index = Path(__file__).resolve().parents[2] / "client" / "dist" / "index.html"
+    serve_static = os.environ.get("SERVE_STATIC_CLIENT", "true").lower() in ("1", "true", "yes")
+    if serve_static and client_index.is_file():
+        return FileResponse(str(client_index))
+
     return {
         "message": "React Flow Project API Server",
         "status": "running",
