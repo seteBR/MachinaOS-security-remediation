@@ -8,6 +8,17 @@
 <a href="https://discord.gg/c9pCJ7d8Ce" target="_blank"><img src="https://img.shields.io/discord/1455977012308086895?logo=discord&logoColor=white&label=Discord" alt="Discord"></a>
 <a href="https://deepwiki.com/zeenie-ai/MachinaOS" target="_blank"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 
+## Security-Hardened Snapshot
+
+This repository is a public security-hardening snapshot of
+[zeenie-ai/MachinaOS](https://github.com/zeenie-ai/MachinaOS). It keeps the
+upstream MIT license and project attribution while applying a focused
+remediation pass for safer local defaults, dependency advisories, webhook
+trigger filtering, and executor/sidecar exposure controls.
+
+The original upstream remote is kept locally as `upstream`; this repository is
+intended as the `seteBR` starting point for further hardening work.
+
 Your own AI assistant that does real work. Drag, drop, and connect AI agents to your email, calendar, messages, phone, and 50+ other services. Runs on your own machine — your data stays with you.
 
 No code required. No subscription. No usage limits. Bring your own API keys (or run models locally with Ollama / LM Studio for free).
@@ -28,7 +39,7 @@ Open http://localhost:3000 and click **Credentials** to connect your first AI pr
 
 ```bash
 npm install -g pnpm
-git clone https://github.com/zeenie-ai/MachinaOS.git
+git clone https://github.com/seteBR/MachinaOS-security-remediation.git
 cd MachinaOS
 pnpm run build
 pnpm run dev
