@@ -700,12 +700,13 @@ if _SERVE_STATIC and (_CLIENT_DIST / "index.html").is_file():
     # that would shadow the SPA at the root. In the container the SPA must own
     # "/", so drop that single route before installing the fallback. Its
     # ``/api/*`` routes are untouched.
-    from starlette.routing import Route as _Route
-
     app.router.routes = [
         _r
         for _r in app.router.routes
-        if not (isinstance(_r, _Route) and _r.path == "/" and "GET" in (_r.methods or set()))
+        if not (
+            getattr(_r, "path", None) == "/"
+            and "GET" in (getattr(_r, "methods", None) or set())
+        )
     ]
 
     _assets_dir = _CLIENT_DIST / "assets"
