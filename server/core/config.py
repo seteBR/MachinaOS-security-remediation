@@ -307,6 +307,10 @@ class Settings(BaseSettings):
     # at runtime; per-agent-node ``parameters.max_iterations`` is the
     # innermost override.
     agent_recursion_limit: int = Field(default=200, env="AGENT_RECURSION_LIMIT", ge=1)
+    agent_tool_policy: Literal["off", "balanced", "strict"] = Field(
+        default="balanced",
+        env="AGENT_TOOL_POLICY",
+    )
 
     # Gunicorn Configuration (for production deployment)
     gunicorn_timeout: int = Field(default=120, env="GUNICORN_TIMEOUT", ge=30)

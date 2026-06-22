@@ -8,7 +8,7 @@ and returns results.
 import asyncio
 import uuid
 import hashlib
-from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING, Set
 
 from core.logging import get_logger
 from constants import AI_AGENT_TYPES, ANDROID_SERVICE_NODE_TYPES
@@ -17,6 +17,146 @@ if TYPE_CHECKING:
     pass
 
 logger = get_logger(__name__)
+
+
+class ToolPolicyDenied(RuntimeError):
+    """Raised when the runtime tool policy blocks an agent tool call."""
+
+
+_WORKFLOW_MUTATION_NODE_TYPES = {
+    "agentBuilder",
+    "masterSkill",
+}
+
+_CODE_EXECUTION_NODE_TYPES = {
+    "pythonExecutor",
+    "javascriptExecutor",
+    "typescriptExecutor",
+    "montyExecutor",
+}
+
+_FILESYSTEM_WRITE_NODE_TYPES = {
+    "fileModify",
+    "shell",
+}
+
+_BROWSER_CONTROL_NODE_TYPES = {
+    "browser",
+}
+
+_PROXY_MUTATION_NODE_TYPES = {
+    "proxyConfig",
+}
+
+
+def _normalise_allowed_tools(values: Any) -> Set[str]:
+    if values is None:
+        return set()
+    if isinstance(values, str):
+        return {item.strip() for item in values.split(",") if item.strip()}
+    if isinstance(values, (list, tuple, set)):
+        return {str(item).strip() for item in values if str(item).strip()}
+    return set()
+
+
+def _tool_risk_categories(config: Dict[str, Any]) -> Set[str]:
+    """Return coarse risk categories for a tool call.
+
+    The registry combines explicit plugin annotations with conservative
+    fallbacks for node families that mutate workflows, execute code, write
+    files, drive browsers, or change proxy configuration.
+    """
+    node_type = config.get("node_type", "")
+    categories: Set[str] = set()
+
+    from services.node_registry import get_node_class
+
+    node_cls = get_node_class(node_type)
+    annotations = dict(getattr(node_cls, "annotations", {}) or {}) if node_cls is not None else {}
+    groups = set(getattr(node_cls, "group", ()) or ()) if node_cls is not None else set()
+    credentials = tuple(getattr(node_cls, "credentials", ()) or ()) if node_cls is not None else ()
+
+    if annotations.get("readonly"):
+        categories.add("readonly")
+    if annotations.get("destructive"):
+        categories.add("destructive")
+    if annotations.get("open_world"):
+        categories.add("open_world")
+    if credentials:
+        categories.add("credential")
+    if "code" in groups or node_type in _CODE_EXECUTION_NODE_TYPES:
+        categories.add("code_execution")
+    if "filesystem" in groups:
+        categories.add("filesystem")
+    if node_type in _FILESYSTEM_WRITE_NODE_TYPES:
+        categories.add("filesystem_write")
+    if node_type in _BROWSER_CONTROL_NODE_TYPES:
+        categories.add("browser_control")
+    if node_type in _WORKFLOW_MUTATION_NODE_TYPES:
+        categories.add("workflow_mutation")
+    if node_type in _PROXY_MUTATION_NODE_TYPES:
+        categories.add("proxy_mutation")
+    if node_type in ANDROID_SERVICE_NODE_TYPES or node_type == "androidTool":
+        categories.add("device_control")
+
+    return categories
+
+
+def _tool_policy_denial_reason(tool_name: str, config: Dict[str, Any]) -> Optional[str]:
+    """Return a denial reason, or ``None`` when the tool call is allowed."""
+    policy = dict(config.get("tool_policy") or {})
+
+    mode = policy.get("mode")
+    if mode is None:
+        from core.config import Settings
+
+        mode = Settings().agent_tool_policy
+
+    if mode == "off":
+        return None
+
+    if policy.get("allow_high_risk_tools"):
+        return None
+
+    allowed = _normalise_allowed_tools(policy.get("allowed_high_risk_tools"))
+    node_type = config.get("node_type", "")
+    node_id = config.get("node_id", "")
+    if tool_name in allowed or node_type in allowed or node_id in allowed:
+        return None
+
+    # Agent inputs are treated as untrusted by default. A future UI can set
+    # this false for trusted internal-only graphs.
+    if policy.get("untrusted_input", True) is False:
+        return None
+
+    categories = _tool_risk_categories(config)
+    if not categories:
+        return None
+
+    balanced_blocked = {
+        "destructive",
+        "code_execution",
+        "filesystem_write",
+        "browser_control",
+        "workflow_mutation",
+        "proxy_mutation",
+        "device_control",
+    }
+    strict_blocked = balanced_blocked | {
+        "credential",
+        "filesystem",
+        "open_world",
+    }
+
+    blocked = strict_blocked if mode == "strict" else balanced_blocked
+    matched = sorted(categories & blocked)
+    if not matched:
+        return None
+
+    return (
+        "Tool policy denied high-risk tool call "
+        f"tool={tool_name!r} node_type={node_type!r} categories={','.join(matched)}"
+    )
 
 
 def _plugin_connection_factory(plugin_cls, context):
@@ -97,6 +237,25 @@ async def execute_tool(tool_name: str, tool_args: Dict[str, Any], config: Dict[s
     broadcaster = get_status_broadcaster()
     node_id = config.get("node_id")
     workflow_id = config.get("workflow_id")
+
+    denial_reason = _tool_policy_denial_reason(tool_name, config)
+    if denial_reason:
+        logger.warning(
+            "[ToolPolicy] Denied tool call",
+            tool_name=tool_name,
+            node_type=config.get("node_type"),
+            node_id=node_id,
+            workflow_id=workflow_id,
+            reason=denial_reason,
+        )
+        if node_id and broadcaster:
+            await broadcaster.update_node_status(
+                node_id,
+                "error",
+                {"message": "Tool policy denied this tool call", "error": denial_reason},
+                workflow_id=workflow_id,
+            )
+        raise ToolPolicyDenied(denial_reason)
 
     if node_id and broadcaster:
         await broadcaster.update_node_status(

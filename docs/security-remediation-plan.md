@@ -164,6 +164,21 @@ curl -i -X POST http://127.0.0.1:3010/webhook/example \
 
 Goal: reduce the blast radius when untrusted content reaches an agent.
 
+Progress:
+
+- Standard LangChain agent paths append a prompt/tool-injection guardrail that
+  labels user prompts, memory, retrieved context, upstream node output,
+  webhook/chat/email/task payloads, tool results, web pages, and file contents
+  as untrusted data.
+- Retrieved long-term memory is wrapped as JSON-string data before being added
+  to the agent conversation.
+- Agent tool calls now pass through a central runtime policy gate in
+  `server/services/handlers/tools.py`. The default balanced policy blocks
+  destructive, code-executing, filesystem-writing, browser-control,
+  workflow-mutating, proxy-mutating, and device-control tools when the agent is
+  operating on untrusted input. Strict mode also blocks open-world,
+  filesystem, and credential-backed tools.
+
 Changes:
 
 - Treat inbound webhook payloads, scraped pages, files, emails, and chat/user memory as untrusted content in prompts.

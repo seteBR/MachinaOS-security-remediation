@@ -57,19 +57,27 @@ names the code path to inspect before changing policy.
 - Node.js executor refuses public binding unless explicitly allowed.
 - Standard LangChain agents now append a system-message prompt/tool security
   guardrail before invoking the model.
+- Agent tool calls pass through a central runtime policy gate in
+  `server/services/handlers/tools.py`. The default `AGENT_TOOL_POLICY=balanced`
+  blocks destructive, code-executing, filesystem-writing, browser-control,
+  workflow-mutating, proxy-mutating, and device-control tools when the agent is
+  operating on untrusted input. `AGENT_TOOL_POLICY=strict` also blocks
+  open-world, filesystem, and credential-backed tools; `off` is reserved for
+  trusted local development.
 
 ## Remaining Recommended Guardrails
 
-1. Add a central tool-risk registry covering read, write, network, credential,
-   code-execution, browser, and destructive categories.
-2. Enforce per-agent tool allowlists from graph edges plus risk policy before
-   `execute_tool` and MCP workflow-tool dispatch.
-3. Redact secrets from tool outputs, status broadcasts, logs, memory writes,
+1. Extend the central tool-risk registry with richer per-operation annotations
+   for multi-operation tools such as `agentBuilder` and proxy configuration.
+2. Enforce matching policy for MCP workflow-tool dispatch, not only LangChain
+   agent tool calls.
+3. Add UI controls for per-workflow high-risk tool allowlists and approvals.
+4. Redact secrets from tool outputs, status broadcasts, logs, memory writes,
    and MCP responses by default.
-4. Block or require explicit opt-in for agent reads of `.env*`, credential DBs,
+5. Block or require explicit opt-in for agent reads of `.env*`, credential DBs,
    CLI auth directories, SSH keys, cloud credentials, and home-directory secret
    files.
-5. Add malicious prompt fixtures that try to exfiltrate secrets, override
+6. Add malicious prompt fixtures that try to exfiltrate secrets, override
    system instructions, broaden tools, or smuggle unsafe tool arguments.
-6. Document deployment mode expectations: public instances should require auth,
+7. Document deployment mode expectations: public instances should require auth,
    localhost MCP, no unsafe public binds, and least-privilege credentials.

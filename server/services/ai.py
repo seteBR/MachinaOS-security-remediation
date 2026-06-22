@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import re
 import time
-import httpx
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Awaitable, Dict, Any, List, Optional, Callable, Type, TYPE_CHECKING
@@ -96,6 +95,16 @@ def _is_cerebras_available() -> bool:
     return _get_chat_cerebras() is not None
 
 
+def _cerebras_import_error() -> Optional[str]:
+    if _get_chat_cerebras() is not None:
+        return None
+    try:
+        __import__("langchain_cerebras")
+        return None
+    except ImportError as e:
+        return str(e)
+
+
 # Backwards-compat shims (PEP 562 module-level __getattr__) for code that
 # historically read these as module-level constants. The "import" cost is paid
 # only on first access. ``PROVIDER_CONFIGS`` resolves through ``get_provider_configs()``
@@ -111,14 +120,7 @@ def __getattr__(name: str):
     if name == "CEREBRAS_AVAILABLE":
         return _is_cerebras_available()
     if name == "CEREBRAS_IMPORT_ERROR":
-        # Reproduce the error string without re-raising; helpful for log messages.
-        if _get_chat_cerebras() is not None:
-            return None
-        try:
-            __import__("langchain_cerebras")
-            return None
-        except ImportError as e:
-            return str(e)
+        return _cerebras_import_error()
     if name == "PROVIDER_CONFIGS":
         return get_provider_configs()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -978,6 +980,24 @@ def _format_untrusted_retrieved_context(context: str) -> str:
     )
 
 
+def _agent_tool_policy_from_parameters(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract optional runtime tool-policy overrides from agent params."""
+    policy: Dict[str, Any] = {"untrusted_input": True}
+
+    mode = parameters.get("agent_tool_policy") or parameters.get("tool_policy_mode")
+    if mode:
+        policy["mode"] = mode
+
+    if parameters.get("allow_high_risk_tools"):
+        policy["allow_high_risk_tools"] = True
+
+    allowed = parameters.get("allowed_high_risk_tools")
+    if allowed:
+        policy["allowed_high_risk_tools"] = allowed
+
+    return policy
+
+
 class AIService:
     """AI model service for LangChain operations."""
 
@@ -1256,8 +1276,8 @@ class AIService:
         config = get_provider_configs().get(provider)
         if not config:
             # Provide helpful error for Cerebras if import failed
-            if provider == "cerebras" and not CEREBRAS_AVAILABLE:
-                error_msg = f"Cerebras provider not available: {CEREBRAS_IMPORT_ERROR or 'langchain-cerebras package not installed'}"
+            if provider == "cerebras" and not _is_cerebras_available():
+                error_msg = f"Cerebras provider not available: {_cerebras_import_error() or 'langchain-cerebras package not installed'}"
                 logger.error(error_msg)
                 raise ValueError(error_msg)
             raise ValueError(f"Unsupported provider: {provider}")
@@ -1824,6 +1844,7 @@ class AIService:
                 config["ai_service"] = self
                 config["database"] = self.database
                 config["parent_node_id"] = node_id
+                config["tool_policy"] = _agent_tool_policy_from_parameters(parameters)
                 # Surface the auto-rebind toggle so agentBuilder's summary
                 # text reflects the user's current preference.
                 config["auto_rebind_tools"] = auto_rebind_enabled
@@ -2375,6 +2396,7 @@ class AIService:
                     config["ai_service"] = self
                     config["database"] = self.database
                     config["parent_node_id"] = node_id
+                    config["tool_policy"] = _agent_tool_policy_from_parameters(parameters)
                     config["auto_rebind_tools"] = auto_rebind_enabled
                     if context:
                         config["nodes"] = context.get("nodes", [])

@@ -9,6 +9,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from services import ai as ai_module
+from services.handlers import tools as tool_module
 from services.ai import AIService
 
 
@@ -144,6 +145,116 @@ class TestPromptToolSecurityGuardrail:
         ]
         assert len(retrieved_context_messages) == 1
         assert "Untrusted retrieved memory context follows" in str(retrieved_context_messages[0].content)
+
+
+class TestRuntimeToolPolicy:
+    def test_balanced_policy_blocks_workflow_mutation_tools(self):
+        reason = tool_module._tool_policy_denial_reason(
+            "agent_builder",
+            {
+                "node_type": "agentBuilder",
+                "node_id": "agent-builder-1",
+                "tool_policy": {"mode": "balanced"},
+            },
+        )
+
+        assert reason is not None
+        assert "workflow_mutation" in reason
+
+    def test_explicit_allow_bypasses_high_risk_denial(self):
+        reason = tool_module._tool_policy_denial_reason(
+            "agent_builder",
+            {
+                "node_type": "agentBuilder",
+                "node_id": "agent-builder-1",
+                "tool_policy": {"mode": "balanced", "allow_high_risk_tools": True},
+            },
+        )
+
+        assert reason is None
+
+    def test_balanced_policy_allows_readonly_open_world_tools(self, monkeypatch):
+        import services.node_registry as node_registry
+
+        monkeypatch.setattr(
+            node_registry,
+            "get_node_class",
+            lambda node_type: SimpleNamespace(
+                annotations={"readonly": True, "open_world": True, "destructive": False},
+                group=("search", "tool"),
+                credentials=(),
+            ),
+        )
+
+        reason = tool_module._tool_policy_denial_reason(
+            "web_search",
+            {
+                "node_type": "searchTool",
+                "node_id": "search-1",
+                "tool_policy": {"mode": "balanced"},
+            },
+        )
+
+        assert reason is None
+
+    def test_strict_policy_blocks_open_world_tools(self, monkeypatch):
+        import services.node_registry as node_registry
+
+        monkeypatch.setattr(
+            node_registry,
+            "get_node_class",
+            lambda node_type: SimpleNamespace(
+                annotations={"readonly": True, "open_world": True, "destructive": False},
+                group=("search", "tool"),
+                credentials=(),
+            ),
+        )
+
+        reason = tool_module._tool_policy_denial_reason(
+            "web_search",
+            {
+                "node_type": "searchTool",
+                "node_id": "search-1",
+                "tool_policy": {"mode": "strict"},
+            },
+        )
+
+        assert reason is not None
+        assert "open_world" in reason
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_denial_does_not_dispatch(self, monkeypatch):
+        import services.status_broadcaster as status_broadcaster
+
+        class FakeBroadcaster:
+            def __init__(self):
+                self.updates = []
+
+            async def update_node_status(self, *args, **kwargs):
+                self.updates.append((args, kwargs))
+
+        fake_broadcaster = FakeBroadcaster()
+
+        async def fail_dispatch(*args, **kwargs):
+            raise AssertionError("denied tools must not reach _dispatch_tool")
+
+        monkeypatch.setattr(status_broadcaster, "get_status_broadcaster", lambda: fake_broadcaster)
+        monkeypatch.setattr(tool_module, "_dispatch_tool", fail_dispatch)
+
+        with pytest.raises(tool_module.ToolPolicyDenied):
+            await tool_module.execute_tool(
+                "agent_builder",
+                {"operation": "add_tool", "node_type": "shell"},
+                {
+                    "node_type": "agentBuilder",
+                    "node_id": "agent-builder-1",
+                    "workflow_id": "workflow-1",
+                    "tool_policy": {"mode": "balanced"},
+                },
+            )
+
+        assert fake_broadcaster.updates
+        assert fake_broadcaster.updates[0][0][1] == "error"
 
     @pytest.mark.asyncio
     async def test_execute_chat_agent_adds_retrieved_memory_as_untrusted_human_message(self, monkeypatch):
