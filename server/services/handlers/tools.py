@@ -104,6 +104,9 @@ def _tool_risk_categories(config: Dict[str, Any]) -> Set[str]:
 
 def _tool_policy_denial_reason(tool_name: str, config: Dict[str, Any]) -> Optional[str]:
     """Return a denial reason, or ``None`` when the tool call is allowed."""
+    if "tool_policy" not in config:
+        return None
+
     policy = dict(config.get("tool_policy") or {})
 
     mode = policy.get("mode")

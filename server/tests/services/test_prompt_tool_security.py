@@ -148,6 +148,17 @@ class TestPromptToolSecurityGuardrail:
 
 
 class TestRuntimeToolPolicy:
+    def test_no_policy_config_keeps_non_agent_tool_bridges_unchanged(self):
+        reason = tool_module._tool_policy_denial_reason(
+            "pythonExecutor",
+            {
+                "node_type": "pythonExecutor",
+                "node_id": "python-1",
+            },
+        )
+
+        assert reason is None
+
     def test_balanced_policy_blocks_workflow_mutation_tools(self):
         reason = tool_module._tool_policy_denial_reason(
             "agent_builder",
