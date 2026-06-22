@@ -726,7 +726,7 @@ class BaseNode:
                 from temporalio.exceptions import ApplicationError
 
                 denial_reason = _tool_policy_denial_reason(
-                    cls.type,
+                    context.get("tool_name") or cls.type,
                     {
                         "node_type": cls.type,
                         "node_id": node_id,

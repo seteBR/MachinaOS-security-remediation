@@ -334,6 +334,10 @@ class TestAutoRebindTools:
             "AgentWorkflow tool_payload must include tool_policy so "
             "Temporal tool activities enforce the same policy as legacy agents."
         )
+        assert '"tool_name"' in src, (
+            "AgentWorkflow tool_payload must include the LLM-visible tool "
+            "name so allowed_high_risk_tools works like the legacy path."
+        )
 
     def test_as_activity_enforces_tool_policy_before_execute_node(self):
         """BaseNode.as_activity is the common per-plugin Temporal dispatch
@@ -346,7 +350,27 @@ class TestAutoRebindTools:
         src = inspect.getsource(BaseNode.as_activity)
         assert "_tool_policy_denial_reason" in src
         assert "ToolPolicyDenied" in src
+        assert 'context.get("tool_name") or cls.type' in src
         assert src.index("_tool_policy_denial_reason") < src.index("result = await workflow_service.execute_node")
+
+    def test_temporal_policy_allows_by_llm_visible_tool_name(self):
+        """Temporal tool activities must preserve the same allowlist
+        semantics as execute_tool(): tool name, node type, or node id."""
+        from services.handlers.tools import _tool_policy_denial_reason
+
+        reason = _tool_policy_denial_reason(
+            "run_python_sandbox",
+            {
+                "node_type": "pythonExecutor",
+                "node_id": "python-1",
+                "tool_policy": {
+                    "mode": "balanced",
+                    "allowed_high_risk_tools": ["run_python_sandbox"],
+                },
+            },
+        )
+
+        assert reason is None
 
 
 class TestExecutionIdPropagation:

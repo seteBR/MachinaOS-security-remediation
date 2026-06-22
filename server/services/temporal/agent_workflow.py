@@ -443,6 +443,7 @@ class AgentWorkflow:
                     # summary text to match the user's current preference.
                     "auto_rebind_tools": bool(payload.get("auto_rebind_tools", True)),
                     "tool_policy": payload.get("tool_policy") or {"untrusted_input": True},
+                    "tool_name": call.get("name", ""),
                 }
 
                 tool_activity_name = f"node.{tool_info['node_type']}.v{tool_info['version']}"
