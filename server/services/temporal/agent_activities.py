@@ -482,7 +482,7 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
     # worker can register this activity without dragging the whole
     # AI service in for every plugin.
     from core.container import container
-    from services.ai import _resolve_max_tokens, _resolve_temperature
+    from services.ai import _agent_tool_policy_from_parameters, _resolve_max_tokens, _resolve_temperature
     from services.ai import ThinkingConfig, get_default_model_async, is_model_valid_for_provider
     from services.plugin.edge_walker import collect_agent_connections
 
@@ -744,6 +744,7 @@ async def prepare_agent_payload(context: Dict[str, Any]) -> Dict[str, Any]:
         "thinking_config": thinking_config_dict,
         "compaction_threshold": compaction_threshold,
         "auto_rebind_tools": auto_rebind_tools,
+        "tool_policy": _agent_tool_policy_from_parameters(parameters),
     }
 
 

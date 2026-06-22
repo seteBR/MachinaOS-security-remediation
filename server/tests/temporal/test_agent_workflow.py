@@ -305,6 +305,49 @@ class TestAutoRebindTools:
             "so the per-tool activity surfaces it into ctx.raw."
         )
 
+    def test_prepare_payload_surfaces_tool_policy(self):
+        """prepare_agent_payload must compute the same runtime tool policy
+        used by the legacy in-process agent path."""
+        import inspect
+
+        from services.temporal.agent_activities import prepare_agent_payload
+
+        src = inspect.getsource(prepare_agent_payload)
+        assert "_agent_tool_policy_from_parameters" in src, (
+            "prepare_agent_payload must build the runtime tool policy "
+            "from resolved agent parameters."
+        )
+        assert '"tool_policy"' in src, (
+            "prepare_agent_payload return must include tool_policy so "
+            "Temporal tool activities can enforce high-risk denials."
+        )
+
+    def test_tool_payload_forwards_tool_policy(self):
+        """The per-tool activity payload must carry tool_policy to the
+        F4.A wrapper; otherwise Temporal-backed agents bypass the guard."""
+        import inspect
+
+        from services.temporal.agent_workflow import AgentWorkflow
+
+        src = inspect.getsource(AgentWorkflow.run)
+        assert '"tool_policy"' in src, (
+            "AgentWorkflow tool_payload must include tool_policy so "
+            "Temporal tool activities enforce the same policy as legacy agents."
+        )
+
+    def test_as_activity_enforces_tool_policy_before_execute_node(self):
+        """BaseNode.as_activity is the common per-plugin Temporal dispatch
+        boundary, so it must deny opted-in high-risk agent tool calls before
+        workflow_service.execute_node runs."""
+        import inspect
+
+        from services.plugin.base import BaseNode
+
+        src = inspect.getsource(BaseNode.as_activity)
+        assert "_tool_policy_denial_reason" in src
+        assert "ToolPolicyDenied" in src
+        assert src.index("_tool_policy_denial_reason") < src.index("result = await workflow_service.execute_node")
+
 
 class TestExecutionIdPropagation:
     """A stable per-run ``execution_id`` must flow into every tool-call

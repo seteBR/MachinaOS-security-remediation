@@ -721,6 +721,39 @@ class BaseNode:
                 )
                 return result
 
+            if "tool_policy" in context:
+                from services.handlers.tools import _tool_policy_denial_reason
+                from temporalio.exceptions import ApplicationError
+
+                denial_reason = _tool_policy_denial_reason(
+                    cls.type,
+                    {
+                        "node_type": cls.type,
+                        "node_id": node_id,
+                        "workflow_id": workflow_id,
+                        "tool_policy": context.get("tool_policy"),
+                    },
+                )
+                if denial_reason:
+                    activity.logger.warning(
+                        "[ToolPolicy] Denied Temporal tool activity %s node=%s workflow=%s: %s",
+                        cls.type,
+                        node_id,
+                        workflow_id,
+                        denial_reason,
+                    )
+                    await broadcaster.update_node_status(
+                        node_id,
+                        "error",
+                        {"message": "Tool policy denied this tool call", "error": denial_reason},
+                        workflow_id=workflow_id,
+                    )
+                    raise ApplicationError(
+                        denial_reason,
+                        type="ToolPolicyDenied",
+                        non_retryable=True,
+                    )
+
             # Broadcast executing — UI cyan-glow.
             await broadcaster.update_node_status(
                 node_id,

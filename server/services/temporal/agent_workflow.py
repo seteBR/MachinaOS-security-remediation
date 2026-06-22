@@ -174,6 +174,7 @@ class AgentWorkflow:
                 "max_iterations": int,
                 "thinking_config": Optional[dict],
                 "compaction_threshold": Optional[int],
+                "tool_policy": dict,
             }
 
         Returns the final agent response, mirroring the shape
@@ -441,6 +442,7 @@ class AgentWorkflow:
                     # so canvas-mutating tools (agentBuilder) render their
                     # summary text to match the user's current preference.
                     "auto_rebind_tools": bool(payload.get("auto_rebind_tools", True)),
+                    "tool_policy": payload.get("tool_policy") or {"untrusted_input": True},
                 }
 
                 tool_activity_name = f"node.{tool_info['node_type']}.v{tool_info['version']}"
