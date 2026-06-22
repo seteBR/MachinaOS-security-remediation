@@ -3,12 +3,10 @@
 Per RFC plugin_authoring_rfc.md §6.4: plugin-specific factories live in
 the plugin folder.
 
-Delivery: single ``dispatch.emit`` call routes events to running
-:class:`TriggerListenerWorkflow` consumers via Temporal Visibility AND
-broadcasts the envelope to FE on the ``chat_message_received`` wire key.
-chatTrigger is canary-registered (see ``nodes/trigger/chat_trigger/__init__.py``)
-so the deployment manager skips ``setup_event_trigger`` and the legacy
-``event_waiter.dispatch`` path has zero consumers — removed.
+Delivery uses the durable CloudEvents path when the event framework is
+enabled. In the single-process legacy deployment mode, feed
+``event_waiter`` directly so chatTrigger's in-process listener can spawn
+workflow runs without Temporal.
 """
 
 from __future__ import annotations
@@ -37,14 +35,25 @@ def chat_message_received(event_data: Mapping[str, Any]) -> WorkflowEvent:
     )
 
 
+def _event_framework_enabled() -> bool:
+    from core.config import Settings
+
+    return bool(Settings().event_framework_enabled)
+
+
 async def dispatch_chat_message_received(event_data: Mapping[str, Any]) -> None:
     """Dispatch an incoming chat message via the canary CloudEvents path."""
+    from services import event_waiter
     from services.events.dispatch import emit
 
+    payload = dict(event_data)
     await emit(
-        chat_message_received(dict(event_data)),
+        chat_message_received(payload),
         wire_routing_key=_WIRE_ROUTING_KEY,
     )
+
+    if not _event_framework_enabled():
+        await event_waiter.dispatch_async(_WIRE_ROUTING_KEY, payload)
 
 
 __all__ = [

@@ -1,11 +1,11 @@
-"""chatTrigger producer canary-emit invariant.
+"""chatTrigger producer dispatch invariant.
 
 Locks the contract: ``nodes.trigger.chat_trigger._events.dispatch_chat_message_received``
 routes through the canary CloudEvents path
-(:func:`services.events.dispatch.emit`) ONLY. The legacy
-``event_waiter.dispatch`` path was removed in Wave 13 — chatTrigger is
-canary-registered, the deployment manager skips ``setup_event_trigger``,
-and the legacy collector has zero consumers in production.
+(:func:`services.events.dispatch.emit`). In single-process deployments
+where the event framework is disabled, it also dispatches to
+``event_waiter`` so the legacy in-process listener can spawn workflow
+runs.
 
 Same regex-introspection invariant style as
 ``tests/test_credential_broadcasts.py`` — source-level assertions catch
@@ -39,7 +39,7 @@ _EVENTS_EMIT_PATTERN = re.compile(r"\bemit\s*\(")
 
 
 class TestChatTriggerProducerCanaryEmit:
-    """Producer wrapper emits via the canary CloudEvents path only."""
+    """Producer wrapper emits via the canary path with a legacy fallback."""
 
     def test_dispatcher_is_async(self):
         from nodes.trigger.chat_trigger._events import dispatch_chat_message_received
@@ -48,7 +48,7 @@ class TestChatTriggerProducerCanaryEmit:
             "dispatch_chat_message_received must be async — it awaits " "services.events.dispatch.emit."
         )
 
-    def test_dispatcher_uses_canary_path_only(self):
+    def test_dispatcher_uses_canary_path_and_legacy_fallback(self):
         from nodes.trigger.chat_trigger import _events
 
         src = inspect.getsource(_events.dispatch_chat_message_received)
@@ -60,28 +60,35 @@ class TestChatTriggerProducerCanaryEmit:
             "consumers AND broadcasts to FE on the chat_message_received "
             "wire key."
         )
+        assert "event_waiter.dispatch_async" in src
         assert not _EVENT_WAITER_DISPATCH_PATTERN.search(src), (
-            "dispatch_chat_message_received must NOT call "
-            "event_waiter.dispatch — chatTrigger is canary-registered, "
-            "the legacy collector path has zero consumers, and that "
-            "call was removed in Wave 13. Reintroducing it would "
-            "double-dispatch through dead infrastructure."
+            "dispatch_chat_message_received should use async fallback "
+            "dispatch, not sync event_waiter.dispatch inside the request "
+            "handler."
         )
 
     @pytest.mark.asyncio
     async def test_runtime_emits_canary_envelope(self, monkeypatch):
         """Invoking the dispatcher calls dispatch.emit with the right
-        envelope. The legacy event_waiter is not touched."""
+        envelope."""
         from nodes.trigger.chat_trigger import _events
+        from services import event_waiter
         from services.events import dispatch as dispatch_mod
 
         emit_calls: List[Any] = []
+        legacy_calls: List[Any] = []
 
         async def fake_emit(event, **kwargs):
             emit_calls.append({"event": event, **kwargs})
             return event
 
+        async def fake_dispatch_async(event_type, payload):
+            legacy_calls.append((event_type, payload))
+            return 1
+
         monkeypatch.setattr(dispatch_mod, "emit", fake_emit)
+        monkeypatch.setattr(event_waiter, "dispatch_async", fake_dispatch_async)
+        monkeypatch.setattr(_events, "_event_framework_enabled", lambda: False)
 
         result = await _events.dispatch_chat_message_received(
             {
@@ -99,3 +106,45 @@ class TestChatTriggerProducerCanaryEmit:
         assert event.type == "com.machinaos.chat.message.received"
         assert event.subject == "sess-1"
         assert emit_calls[0]["wire_routing_key"] == "chat_message_received"
+        assert legacy_calls == [
+            (
+                "chat_message_received",
+                {
+                    "message": "hello",
+                    "session_id": "sess-1",
+                    "timestamp": "2026-05-14T00:00:00",
+                },
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_runtime_skips_legacy_fallback_when_event_framework_enabled(self, monkeypatch):
+        from nodes.trigger.chat_trigger import _events
+        from services import event_waiter
+        from services.events import dispatch as dispatch_mod
+
+        emit_calls: List[Any] = []
+        legacy_calls: List[Any] = []
+
+        async def fake_emit(event, **kwargs):
+            emit_calls.append({"event": event, **kwargs})
+            return event
+
+        async def fake_dispatch_async(event_type, payload):
+            legacy_calls.append((event_type, payload))
+            return 1
+
+        monkeypatch.setattr(dispatch_mod, "emit", fake_emit)
+        monkeypatch.setattr(event_waiter, "dispatch_async", fake_dispatch_async)
+        monkeypatch.setattr(_events, "_event_framework_enabled", lambda: True)
+
+        await _events.dispatch_chat_message_received(
+            {
+                "message": "hello",
+                "session_id": "sess-1",
+                "timestamp": "2026-05-14T00:00:00",
+            }
+        )
+
+        assert len(emit_calls) == 1
+        assert legacy_calls == []
