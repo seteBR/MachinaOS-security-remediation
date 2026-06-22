@@ -291,6 +291,7 @@ class ClaudeSessionPool:
                             connected_tools=new_ctx.connected_tools,
                             connected_skill_names=new_ctx.connected_skill_names,
                             allowed_credentials=new_ctx.allowed_credentials,
+                            tool_policy=new_ctx.tool_policy,
                             workspace_dir=new_ctx.workspace_dir,
                         )
                         unregister_batch(mcp_bearer_token)

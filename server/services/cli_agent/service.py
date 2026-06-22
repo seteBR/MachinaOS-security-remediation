@@ -79,6 +79,7 @@ class AICliService:
         connected_tools: Optional[List[Dict[str, Any]]] = None,
         connected_memory: Optional[Dict[str, Any]] = None,
         allowed_credentials: Optional[List[str]] = None,
+        tool_policy: Optional[Dict[str, Any]] = None,
         max_parallel: int = DEFAULT_MAX_PARALLEL,
         mcp_port: Optional[int] = None,
     ) -> BatchResult:
@@ -170,6 +171,7 @@ class AICliService:
             connected_skill_names=set(connected_skill_names or []),
             allowed_credentials=set(allowed_credentials or []),
             connected_tools=list(connected_tools or []),
+            tool_policy=dict(tool_policy or {"untrusted_input": True}),
             broadcaster=broadcaster,
         )
         register_batch(token, ctx)

@@ -212,6 +212,7 @@ def _build_handler(node_type: str, params_cls: type):
             "workflow_id": ctx.workflow_id,
             "label": entry.get("label") or node_type,
             "parameters": dict(entry.get("parameters") or {}),
+            "tool_policy": dict(ctx.tool_policy),
         }
         result = await execute_tool(node_type, args, config)
         if not isinstance(result, dict):

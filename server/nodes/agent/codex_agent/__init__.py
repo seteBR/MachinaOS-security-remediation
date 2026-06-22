@@ -12,9 +12,9 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.logging import get_logger
 from services.plugin import ActionNode, NodeContext, Operation, TaskQueue
@@ -57,8 +57,28 @@ class CodexAgentParams(BaseModel):
     working_directory: Optional[str] = None
     max_parallel: int = Field(default=5, ge=1, le=20)
     allowed_credentials: List[str] = Field(default_factory=list)
+    agent_tool_policy: Optional[Literal["off", "balanced", "strict"]] = Field(
+        default=None,
+        description="Optional runtime policy for connected workflow tools.",
+        json_schema_extra={"hidden": True},
+    )
+    allow_high_risk_tools: bool = Field(
+        default=False,
+        description="Allow connected high-risk workflow tools for this CLI agent.",
+        json_schema_extra={"hidden": True},
+    )
+    allowed_high_risk_tools: List[str] = Field(
+        default_factory=list,
+        description="Connected high-risk workflow tool node types or node ids allowed for this CLI agent.",
+        json_schema_extra={"hidden": True},
+    )
 
     model_config = ConfigDict(extra="ignore")
+
+    @field_validator("tasks", "allowed_credentials", "allowed_high_risk_tools", mode="before")
+    @classmethod
+    def _none_list_to_empty(cls, value):
+        return [] if value is None else value
 
 
 class CodexAgentOutput(BaseModel):
@@ -100,6 +120,7 @@ class CodexAgentNode(ActionNode):
         params: CodexAgentParams,
     ) -> Any:
         from services.cli_agent.service import get_ai_cli_service
+        from services.ai import _agent_tool_policy_from_parameters
         from services.cli_agent.types import session_result_to_model
         from services.plugin.deps import get_database
         from services.status_broadcaster import get_status_broadcaster
@@ -168,6 +189,7 @@ class CodexAgentNode(ActionNode):
             repo_root=repo_root,
             connected_skill_names=connected_skills,
             allowed_credentials=params.allowed_credentials,
+            tool_policy=_agent_tool_policy_from_parameters(params.model_dump()),
             max_parallel=params.max_parallel,
         )
 

@@ -65,6 +65,10 @@ class BatchContext:
     # ``listMachinaOsTools`` / ``callMachinaOsTool`` MCP tools so the
     # CLI agent sees the same tool surface the AI Agent does.
     connected_tools: List[Dict[str, Any]] = field(default_factory=list)
+    # Runtime policy for connected workflow tools exposed to CLI agents.
+    # Presence of this field opts MCP workflow-tool dispatch into the
+    # central high-risk gate in ``services.handlers.tools``.
+    tool_policy: Dict[str, Any] = field(default_factory=lambda: {"untrusted_input": True})
     # Optional broadcaster for `broadcastLog`. Lazily resolved from the
     # global container if None.
     broadcaster: Optional[Any] = None
@@ -128,6 +132,7 @@ def rebind_batch(
     connected_tools: Optional[List[Dict[str, Any]]] = None,
     connected_skill_names: Optional[Set[str]] = None,
     allowed_credentials: Optional[Set[str]] = None,
+    tool_policy: Optional[Dict[str, Any]] = None,
     workspace_dir: Optional[Path] = None,
 ) -> Optional[BatchContext]:
     """In-place rebind of an existing batch's surface.
@@ -183,6 +188,8 @@ def rebind_batch(
         ctx.connected_skill_names = set(connected_skill_names)
     if allowed_credentials is not None:
         ctx.allowed_credentials = set(allowed_credentials)
+    if tool_policy is not None:
+        ctx.tool_policy = dict(tool_policy)
     if workspace_dir is not None:
         ctx.workspace_dir = Path(workspace_dir).resolve()
     return ctx

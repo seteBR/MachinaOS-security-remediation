@@ -348,6 +348,55 @@ class TestMachinaOsToolBridge:
         assert "42" in text, text
 
     @pytest.mark.asyncio
+    async def test_high_risk_workflow_tool_denied_by_default_policy(self):
+        """CLI/MCP workflow-tool calls must use the central high-risk
+        policy gate, not bypass it by calling execute_tool without config."""
+        from mcp.server.fastmcp.exceptions import ToolError
+        from services.cli_agent.mcp_server import _current_batch, get_mcp_app
+
+        get_mcp_app()
+        from services.cli_agent.mcp_server import _mcp_singleton as mcp
+
+        ctx = self._ctx("pythonExecutor", "Python")
+        token = issue_token()
+        register_batch(token, ctx)
+        reset = _current_batch.set(ctx)
+        try:
+            with pytest.raises(ToolError, match="Tool policy denied"):
+                await mcp.call_tool("pythonExecutor", {"code": "output = 42"})
+        finally:
+            _current_batch.reset(reset)
+            unregister_batch(token)
+
+    @pytest.mark.asyncio
+    async def test_high_risk_workflow_tool_can_be_allowed_by_node_type(self):
+        """Explicit per-batch allowlists keep controlled CLI-agent
+        workflows usable while default policy blocks high-risk tools."""
+        from services.cli_agent.mcp_server import _current_batch, get_mcp_app
+
+        get_mcp_app()
+        from services.cli_agent.mcp_server import _mcp_singleton as mcp
+
+        ctx = self._ctx("pythonExecutor", "Python")
+        ctx.tool_policy = {
+            "mode": "balanced",
+            "allowed_high_risk_tools": ["pythonExecutor"],
+            "untrusted_input": True,
+        }
+        token = issue_token()
+        register_batch(token, ctx)
+        reset = _current_batch.set(ctx)
+        try:
+            out = await mcp.call_tool("pythonExecutor", {"code": "output = 42"})
+        finally:
+            _current_batch.reset(reset)
+            unregister_batch(token)
+
+        text = repr(out)
+        assert "42" in text, text
+        assert "Tool policy denied" not in text
+
+    @pytest.mark.asyncio
     async def test_unconnected_tool_call_is_blocked_by_batch_scope(self):
         """If a tool is registered globally (because some other batch
         wired it) but the calling batch didn't, the per-handler

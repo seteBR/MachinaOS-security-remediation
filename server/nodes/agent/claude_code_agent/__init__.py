@@ -159,6 +159,21 @@ class ClaudeCodeAgentParams(BaseModel):
         description="Credential names the CLI is permitted to fetch via MCP.",
         json_schema_extra={"hidden": True},
     )
+    agent_tool_policy: Optional[Literal["off", "balanced", "strict"]] = Field(
+        default=None,
+        description="Optional runtime policy for connected workflow tools.",
+        json_schema_extra={"hidden": True},
+    )
+    allow_high_risk_tools: bool = Field(
+        default=False,
+        description="Allow connected high-risk workflow tools for this CLI agent.",
+        json_schema_extra={"hidden": True},
+    )
+    allowed_high_risk_tools: List[str] = Field(
+        default_factory=list,
+        description="Connected high-risk workflow tool node types or node ids allowed for this CLI agent.",
+        json_schema_extra={"hidden": True},
+    )
 
     # --- Hidden: model knobs (effort, fallback) ---
     effort: Optional[ClaudeCodeEffort] = Field(
@@ -177,7 +192,7 @@ class ClaudeCodeAgentParams(BaseModel):
     # Saved workflow JSON may persist these list fields as `null` rather
     # than `[]` when the user has never edited them. Coerce so Pydantic's
     # strict list validation doesn't reject the params on load.
-    @field_validator("tasks", "allowed_credentials", mode="before")
+    @field_validator("tasks", "allowed_credentials", "allowed_high_risk_tools", mode="before")
     @classmethod
     def _none_is_empty_list(cls, v: Any) -> Any:
         return [] if v is None else v
@@ -254,6 +269,7 @@ class ClaudeCodeAgentNode(ActionNode):
         params: ClaudeCodeAgentParams,
     ) -> Any:
         from services.cli_agent.service import get_ai_cli_service
+        from services.ai import _agent_tool_policy_from_parameters
         from services.cli_agent.types import session_result_to_model
         from services.plugin.deps import get_database
         from services.status_broadcaster import get_status_broadcaster
@@ -390,6 +406,7 @@ class ClaudeCodeAgentNode(ActionNode):
             connected_tools=tool_data,
             connected_memory=memory_data,
             allowed_credentials=params.allowed_credentials,
+            tool_policy=_agent_tool_policy_from_parameters(params.model_dump()),
             max_parallel=params.max_parallel,
         )
 

@@ -64,20 +64,20 @@ names the code path to inspect before changing policy.
   operating on untrusted input. `AGENT_TOOL_POLICY=strict` also blocks
   open-world, filesystem, and credential-backed tools; `off` is reserved for
   trusted local development.
+- Temporal-backed agents and CLI/MCP workflow-tool dispatch now opt into the
+  same runtime policy gate, including per-agent high-risk allowlists.
 
 ## Remaining Recommended Guardrails
 
 1. Extend the central tool-risk registry with richer per-operation annotations
    for multi-operation tools such as `agentBuilder` and proxy configuration.
-2. Enforce matching policy for MCP workflow-tool dispatch, not only LangChain
-   agent tool calls.
-3. Add UI controls for per-workflow high-risk tool allowlists and approvals.
-4. Redact secrets from tool outputs, status broadcasts, logs, memory writes,
+2. Add UI controls for per-workflow high-risk tool allowlists and approvals.
+3. Redact secrets from tool outputs, status broadcasts, logs, memory writes,
    and MCP responses by default.
-5. Block or require explicit opt-in for agent reads of `.env*`, credential DBs,
+4. Block or require explicit opt-in for agent reads of `.env*`, credential DBs,
    CLI auth directories, SSH keys, cloud credentials, and home-directory secret
    files.
-6. Add malicious prompt fixtures that try to exfiltrate secrets, override
+5. Add malicious prompt fixtures that try to exfiltrate secrets, override
    system instructions, broaden tools, or smuggle unsafe tool arguments.
-7. Document deployment mode expectations: public instances should require auth,
+6. Document deployment mode expectations: public instances should require auth,
    localhost MCP, no unsafe public binds, and least-privilege credentials.
