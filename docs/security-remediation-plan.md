@@ -20,6 +20,76 @@ The main risks are exposure and abuse paths created by unsafe defaults and power
 - Code execution nodes need clearer sandbox boundaries, timeouts, and bind-address assumptions.
 - Dependency audits currently report vulnerable frontend and backend package versions.
 
+## Session Handoff: 2026-06-25
+
+Public repo: `seteBR/MachinaOS-security-remediation`.
+Private deployment repo: `seteBR/machinaos-infra`.
+DockerDeployment host verified at `201.48.114.101` on SSH port `33656`.
+Production container binds MachinaOS to ZeroTier address `172.27.22.105:3010`.
+
+Latest deployed application commit:
+
+- `e24b758 security: enforce tool policy for cli mcp tools`
+
+Relevant hardening commits now on `main`:
+
+- `a3983b5 security: gate high-risk agent tools`
+- `a77be46 fix: scope agent tool policy to opted-in callers`
+- `c5562e5 fix: enforce agent tool policy in temporal path`
+- `ea4b922 fix: preserve temporal tool allowlist names`
+- `e24b758 security: enforce tool policy for cli mcp tools`
+
+Deployed state:
+
+- Private deploy workflow succeeded: `27972819620`.
+- Production health check passed on commit `e24b758`.
+- `event_waiter_mode` is `memory`; container restarts clear active waiters.
+- After the last deploy, saved workflow `TestAgent`
+  (`workflow-1782077735288-0hreij5o1`) was redeployed through the live
+  WebSocket API and has an active `chat_message_received` waiter for
+  `chatTrigger-1782078827222`.
+
+Implemented in this hardening slice:
+
+- Standard LangChain agents add the prompt/tool-injection guardrail.
+- Retrieved memory is wrapped as untrusted JSON-string data.
+- `execute_tool()` has an opt-in high-risk policy gate.
+- Non-agent bridge callers without `tool_policy` remain unchanged.
+- Temporal-backed agents propagate and enforce the same policy.
+- Temporal tool allowlists preserve the LLM-visible tool name.
+- CLI/MCP workflow-tool dispatch now opts into the same policy gate.
+- Claude/Codex CLI agents carry hidden high-risk tool-policy fields.
+- Warm Claude session rebinding preserves `tool_policy`.
+
+Most recent validation:
+
+```bash
+uv run --project server pytest server/tests/services/cli_agent/test_mcp_server.py -q -m 'not slow'
+uv run --project server pytest server/tests/services/test_prompt_tool_security.py server/tests/test_plugin_contract.py server/tests/test_node_spec.py -q
+uv run --project server pytest server/tests/services/cli_agent/test_service.py -q -k 'not resolver_walks_upward_to_find_git'
+uv run --project server ruff check server/services/cli_agent/mcp_server.py server/services/cli_agent/service.py server/services/cli_agent/workflow_tools.py server/nodes/agent/claude_code_agent/__init__.py server/nodes/agent/claude_code_agent/_pool.py server/nodes/agent/codex_agent/__init__.py server/tests/services/cli_agent/test_mcp_server.py
+git diff --check
+```
+
+Known validation caveat:
+
+- `server/tests/services/cli_agent/test_service.py::test_resolver_walks_upward_to_find_git`
+  failed in this workspace because the fixture path was not under a git repo.
+  The rest of that file passed with the test deselected.
+
+Recommended next work:
+
+1. Secret redaction for tool outputs, status broadcasts, logs, memory writes,
+   and MCP responses.
+2. Filesystem secret-read guard for `.env*`, credential DBs, CLI auth dirs,
+   SSH keys, cloud credentials, and home-directory secret files.
+3. UI controls for per-workflow/per-agent high-risk tool allowlists and
+   approvals.
+4. Richer per-operation risk annotations for multi-operation tools such as
+   `agentBuilder` and proxy configuration.
+5. Malicious prompt regression fixtures for exfiltration, permission broadening,
+   and unsafe tool-argument smuggling.
+
 ## Recommended PR Flow
 
 ### PR 1: Dependency Security Updates
@@ -178,13 +248,17 @@ Progress:
   workflow-mutating, proxy-mutating, and device-control tools when the agent is
   operating on untrusted input. Strict mode also blocks open-world,
   filesystem, and credential-backed tools.
+- Temporal-backed agents and CLI/MCP workflow-tool dispatch now opt into the
+  same policy gate. CLI agent batch context carries `tool_policy`, and
+  high-risk MCP workflow tools are denied by default unless an explicit
+  per-agent allowlist permits them.
 
 Changes:
 
 - Treat inbound webhook payloads, scraped pages, files, emails, and chat/user memory as untrusted content in prompts.
 - Keep tool instructions, system policy, and untrusted content in separate prompt sections.
 - Add a runtime policy gate for tools marked destructive, credential-accessing, code-executing, network-capable, filesystem-capable, or open-world.
-- Require explicit workflow/user approval before high-risk tool calls when the agent is operating on untrusted content.
+- Require explicit workflow/user approval or allowlist before high-risk tool calls when the agent is operating on untrusted content.
 - Log denied and approved high-risk tool calls with workflow ID, node ID, tool name, and policy reason.
 - Add a per-workflow allowlist for high-risk tools.
 
